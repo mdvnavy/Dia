@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DIA - Discovery Intake Agent</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main class="shell">
+    <section class="workspace">
+      <header class="topbar">
+        <div>
+          <p class="kicker">Discovery Intake Agent / Gemini ADK</p>
+          <h1>DIA</h1>
+        </div>
+        <button id="loadSample" type="button">Load Sample</button>
+      </header>
+
+      <div class="grid">
+        <section class="pane">
+          <label for="questionnaire">Questionnaire Markdown</label>
+          <textarea id="questionnaire" spellcheck="false" placeholder="Paste a completed discovery intake questionnaire..."></textarea>
+          <div class="actions">
+            <button id="runAgent" type="button">Run Intake</button>
+            <span id="status">Ready</span>
+          </div>
+        </section>
+
+        <section class="pane results">
+          <div class="score-card">
+            <span>Recommended Tier</span>
+            <strong id="tier">-</strong>
+            <small id="score">Score pending</small>
+          </div>
+          <div class="issues">
+            <h2>Validation Issues</h2>
+            <ul id="issues"></ul>
+          </div>
+          <div class="tabs">
+            <button class="tab active" data-doc="client-profile.md" type="button">Profile</button>
+            <button class="tab" data-doc="opportunity-analysis.md" type="button">Analysis</button>
+            <button class="tab" data-doc="proposal-draft.md" type="button">Proposal</button>
+          </div>
+          <pre id="documentOutput"></pre>
+        </section>
+      </div>
+    </section>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>
