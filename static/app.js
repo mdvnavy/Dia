@@ -7,9 +7,19 @@ const score = document.querySelector("#score");
 const issues = document.querySelector("#issues");
 const output = document.querySelector("#documentOutput");
 const tabs = [...document.querySelectorAll(".tab")];
+const copyAll = document.querySelector("#copyAll");
+const downloadMarkdown = document.querySelector("#downloadMarkdown");
+const downloadJson = document.querySelector("#downloadJson");
+const copySection = document.querySelector("#copySection");
 
 let documents = {};
+let latestPayload = null;
 let activeDoc = "client-profile.md";
+const documentOrder = [
+  "client-profile.md",
+  "opportunity-analysis.md",
+  "proposal-draft.md",
+];
 
 loadSample.addEventListener("click", async () => {
   statusText.textContent = "Loading sample...";
@@ -32,11 +42,13 @@ runAgent.addEventListener("click", async () => {
     if (!response.ok) {
       throw new Error(payload.error || "Processing failed");
     }
+    latestPayload = payload;
     documents = payload.documents;
     tier.textContent = payload.score.tier;
     score.textContent = `${payload.score.total_score}/${payload.score.max_score} · ${payload.score.timeline}`;
     renderIssues(payload.issues);
     renderDocument(activeDoc);
+    setExportAvailability(true);
     statusText.textContent = "Complete";
   } catch (error) {
     statusText.textContent = error.message;
@@ -51,6 +63,28 @@ tabs.forEach((tab) => {
     tabs.forEach((item) => item.classList.toggle("active", item === tab));
     renderDocument(activeDoc);
   });
+});
+
+copyAll.addEventListener("click", async () => {
+  await copyText(buildMarkdownExport(), "All outputs copied");
+});
+
+downloadMarkdown.addEventListener("click", () => {
+  downloadFile("dia-outputs.md", buildMarkdownExport(), "text/markdown");
+  statusText.textContent = "Markdown downloaded";
+});
+
+downloadJson.addEventListener("click", () => {
+  downloadFile(
+    "dia-export.json",
+    JSON.stringify(latestPayload, null, 2),
+    "application/json"
+  );
+  statusText.textContent = "JSON downloaded";
+});
+
+copySection.addEventListener("click", async () => {
+  await copyText(documents[activeDoc] || "", `${activeLabel()} copied`);
 });
 
 function renderIssues(items) {
@@ -70,4 +104,65 @@ function renderIssues(items) {
 
 function renderDocument(name) {
   output.textContent = documents[name] || "Run an intake to generate this document.";
+}
+
+function setExportAvailability(isAvailable) {
+  copyAll.disabled = !isAvailable;
+  downloadMarkdown.disabled = !isAvailable;
+  downloadJson.disabled = !isAvailable;
+  copySection.disabled = !isAvailable;
+}
+
+function buildMarkdownExport() {
+  return documentOrder
+    .map((name) => documents[name])
+    .filter(Boolean)
+    .join("\n\n---\n\n");
+}
+
+async function copyText(text, successMessage) {
+  if (!text) {
+    statusText.textContent = "No output to copy";
+    return;
+  }
+
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      copyTextFallback(text);
+    }
+    statusText.textContent = successMessage;
+  } catch (error) {
+    statusText.textContent = "Copy failed";
+  }
+}
+
+function copyTextFallback(text) {
+  const scratch = document.createElement("textarea");
+  scratch.value = text;
+  scratch.setAttribute("readonly", "");
+  scratch.style.position = "fixed";
+  scratch.style.top = "-9999px";
+  document.body.appendChild(scratch);
+  scratch.select();
+  document.execCommand("copy");
+  scratch.remove();
+}
+
+function downloadFile(filename, content, type) {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function activeLabel() {
+  const tab = tabs.find((item) => item.dataset.doc === activeDoc);
+  return tab ? tab.textContent : activeDoc;
 }
