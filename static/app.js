@@ -15,11 +15,6 @@ const copySection = document.querySelector("#copySection");
 let documents = {};
 let latestPayload = null;
 let activeDoc = "client-profile.md";
-const documentOrder = [
-  "client-profile.md",
-  "opportunity-analysis.md",
-  "proposal-draft.md",
-];
 
 loadSample.addEventListener("click", async () => {
   statusText.textContent = "Loading sample...";
@@ -32,6 +27,7 @@ loadSample.addEventListener("click", async () => {
 runAgent.addEventListener("click", async () => {
   statusText.textContent = "Processing...";
   runAgent.disabled = true;
+  setExportAvailability(false);
   try {
     const response = await fetch("/api/process", {
       method: "POST",
@@ -52,6 +48,7 @@ runAgent.addEventListener("click", async () => {
     statusText.textContent = "Complete";
   } catch (error) {
     statusText.textContent = error.message;
+    setExportAvailability(latestPayload !== null);
   } finally {
     runAgent.disabled = false;
   }
@@ -114,7 +111,8 @@ function setExportAvailability(isAvailable) {
 }
 
 function buildMarkdownExport() {
-  return documentOrder
+  return tabs
+    .map((tab) => tab.dataset.doc)
     .map((name) => documents[name])
     .filter(Boolean)
     .join("\n\n---\n\n");
@@ -144,10 +142,15 @@ function copyTextFallback(text) {
   scratch.setAttribute("readonly", "");
   scratch.style.position = "fixed";
   scratch.style.top = "-9999px";
-  document.body.appendChild(scratch);
-  scratch.select();
-  document.execCommand("copy");
-  scratch.remove();
+  try {
+    document.body.appendChild(scratch);
+    scratch.select();
+    if (!document.execCommand("copy")) {
+      throw new Error("copy command rejected");
+    }
+  } finally {
+    scratch.remove();
+  }
 }
 
 function downloadFile(filename, content, type) {
@@ -159,7 +162,7 @@ function downloadFile(filename, content, type) {
   document.body.appendChild(link);
   link.click();
   link.remove();
-  URL.revokeObjectURL(url);
+  setTimeout(() => URL.revokeObjectURL(url), 100);
 }
 
 function activeLabel() {
