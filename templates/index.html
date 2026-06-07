@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>DIA - Discovery Intake Agent</title>
+  <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -41,6 +42,12 @@
             <button class="tab active" data-doc="client-profile.md" type="button">Profile</button>
             <button class="tab" data-doc="opportunity-analysis.md" type="button">Analysis</button>
             <button class="tab" data-doc="proposal-draft.md" type="button">Proposal</button>
+          </div>
+          <div class="export-bar" role="group" aria-label="Output export actions">
+            <button id="copyAll" type="button" disabled>Copy all</button>
+            <button id="downloadMarkdown" type="button" disabled>Download MD</button>
+            <button id="downloadJson" type="button" disabled>Download JSON</button>
+            <button id="copySection" type="button" disabled>Copy section</button>
           </div>
           <pre id="documentOutput"></pre>
         </section>
