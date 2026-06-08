@@ -48,3 +48,27 @@ def test_process_endpoint_returns_invalid_json_for_malformed_body():
 
     assert response.status == 400
     assert payload == {"error": "invalid json"}
+
+def test_post_invalid_endpoint_returns_not_found():
+    server = ThreadingHTTPServer(("127.0.0.1", 0), ClientDiscoveryHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+
+    try:
+        connection = http.client.HTTPConnection("127.0.0.1", server.server_port)
+        connection.request(
+            "POST",
+            "/api/invalid",
+            body="{}",
+            headers={"Content-Type": "application/json"},
+        )
+        response = connection.getresponse()
+        payload = json.loads(response.read().decode("utf-8"))
+    finally:
+        connection.close()
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+    assert response.status == 404
+    assert payload == {"error": "not found"}
