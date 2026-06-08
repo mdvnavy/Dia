@@ -65,3 +65,19 @@ def test_generate_documents_returns_public_safe_markdown_outputs():
     assert "Northstar Studio" in combined
     assert "Custom AI Agent" in combined
     assert "billin" not in combined.lower()
+
+def test_validate_intake_flags_missing_pain_points_and_goals():
+    from client_discovery.models import ClientIntake
+    intake = ClientIntake(
+        company_name="Acme Corp",
+        budget="$10k",
+        decision_maker="CEO",
+        start_date="ASAP",
+        pain_points=[],
+        goals=[]
+    )
+    issues = validate_intake(intake)
+    issue_codes = {issue.code for issue in issues}
+
+    assert "missing_pain_points" in issue_codes
+    assert "missing_goals" in issue_codes
