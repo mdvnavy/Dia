@@ -21,6 +21,10 @@ QUESTION_ALIASES = {
     "notes": ("anything else we should know", "notes"),
 }
 
+QUICK_WIN_BUDGET_TOKENS = ("500", "2,500", "2500")
+CUSTOM_AI_AGENT_BUDGET_TOKENS = ("2,500", "2500", "10,000", "10000")
+FULL_INTEGRATION_BUDGET_TOKENS = ("10,000", "10000", "25,000", "25000")
+
 
 def parse_questionnaire_markdown(content: str) -> ClientIntake:
     rows = _extract_table_rows(content)
@@ -227,11 +231,11 @@ def _score_budget_fit(budget: str, tier: str) -> int:
     normalized = budget.replace("–", "-").lower()
     if not normalized.strip():
         return 2
-    if tier == "Quick Win" and any(token in normalized for token in ["500", "2,500", "2500"]):
+    if tier == "Quick Win" and any(token in normalized for token in QUICK_WIN_BUDGET_TOKENS):
         return 4
-    if tier == "Custom AI Agent" and any(token in normalized for token in ["2,500", "2500", "10,000", "10000"]):
+    if tier == "Custom AI Agent" and any(token in normalized for token in CUSTOM_AI_AGENT_BUDGET_TOKENS):
         return 3
-    if tier == "Full Integration" and any(token in normalized for token in ["10,000", "10000", "25,000", "25000"]):
+    if tier == "Full Integration" and any(token in normalized for token in FULL_INTEGRATION_BUDGET_TOKENS):
         return 3
     return 2
 
