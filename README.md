@@ -96,4 +96,5 @@ python app.py   # forwarded port 8080
 
 Do not commit `.env`, real client data, support tickets, private prompts, or
 unrelated internal product material. Use only fictional fixtures in public
-demos and repositories.
+demos and repositories. See [SECURITY.md](SECURITY.md) for secret handling,
+CI secret scanning, and Cloud Run Secret Manager usage.
