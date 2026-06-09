@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+import logging
+import os
 import re
+import requests
 
+from .config import load_config
 from .models import ClientIntake, OpportunityScore, ValidationIssue
+
+logger = logging.getLogger(__name__)
 
 
 QUESTION_ALIASES = {
@@ -129,9 +135,30 @@ def score_opportunity(intake: ClientIntake) -> OpportunityScore:
     )
 
 
-def generate_documents(intake: ClientIntake, score: OpportunityScore) -> dict[str, str]:
+def generate_documents(intake: ClientIntake, score: OpportunityScore, strategic_analysis: str | None = None) -> dict[str, str]:
     pain_lines = _numbered_lines(intake.pain_points)
     goal_lines = _numbered_lines(intake.goals)
+
+    opportunity_analysis = f"""# Opportunity Analysis: {intake.company_name or 'Unknown'}
+
+## Pain Points
+{pain_lines}
+
+## Goals
+{goal_lines}
+
+## Recommendation
+- **Tier:** {score.tier}
+- **Scope:** {score.scope}
+- **Price Range:** {score.price_range}
+- **Timeline:** {score.timeline}
+- **Total Score:** {score.total_score}/{score.max_score}
+
+## Score Reasons
+{_bullet_lines(score.reasons)}
+"""
+    if strategic_analysis:
+        opportunity_analysis += f"\n\n{strategic_analysis}"
 
     return {
         "client-profile.md": f"""# Client Profile: {intake.company_name or 'Unknown'}
@@ -154,24 +181,7 @@ def generate_documents(intake: ClientIntake, score: OpportunityScore) -> dict[st
 ## Notes
 {intake.notes or 'None provided.'}
 """,
-        "opportunity-analysis.md": f"""# Opportunity Analysis: {intake.company_name or 'Unknown'}
-
-## Pain Points
-{pain_lines}
-
-## Goals
-{goal_lines}
-
-## Recommendation
-- **Tier:** {score.tier}
-- **Scope:** {score.scope}
-- **Price Range:** {score.price_range}
-- **Timeline:** {score.timeline}
-- **Total Score:** {score.total_score}/{score.max_score}
-
-## Score Reasons
-{_bullet_lines(score.reasons)}
-""",
+        "opportunity-analysis.md": opportunity_analysis,
         "proposal-draft.md": f"""# Proposal Draft: {intake.company_name or 'Your Company'}
 
 ## Executive Summary
@@ -199,21 +209,32 @@ def _extract_table_rows(content: str) -> list[tuple[str, str]]:
     rows: list[tuple[str, str]] = []
     for line in content.splitlines():
         stripped = line.strip()
-        if not stripped.startswith("|") or "---" in stripped:
+        if not (stripped.startswith("|") and stripped.endswith("|")) or "---" in stripped:
             continue
         cells = [cell.strip() for cell in stripped.strip("|").split("|")]
         if len(cells) < 2 or cells[0].lower() == "question":
             continue
-        rows.append((cells[0], cells[1]))
+        question = cells[0]
+        answer = " | ".join(cells[1:])
+        rows.append((question, answer))
     return rows
 
 
 def _extract_section_answers(content: str, start_heading: str, end_heading_prefix: str) -> list[str]:
-    start = re.search(rf"##\s*{re.escape(start_heading)}.*", content, re.IGNORECASE)
+    def get_pattern(heading: str) -> str:
+        m = re.match(r"^(\d+)\.(.*)$", heading)
+        if m:
+            return rf"{m.group(1)}\.?{re.escape(m.group(2))}"
+        return re.escape(heading)
+
+    start_pat = get_pattern(start_heading)
+    end_pat = get_pattern(end_heading_prefix)
+
+    start = re.search(rf"##\s*{start_pat}.*", content, re.IGNORECASE)
     if not start:
         return []
     section = content[start.start() :]
-    end = re.search(rf"\n##\s*{re.escape(end_heading_prefix)}", section, re.IGNORECASE)
+    end = re.search(rf"\n##\s*{end_pat}", section, re.IGNORECASE)
     if end:
         section = section[: end.start()]
     answers = []
@@ -227,17 +248,35 @@ def _score_budget_fit(budget: str, tier: str) -> int:
     normalized = budget.replace("–", "-").lower()
     if not normalized.strip():
         return 2
-    if tier == "Quick Win" and any(token in normalized for token in ["500", "2,500", "2500"]):
-        return 4
-    if tier == "Custom AI Agent" and any(token in normalized for token in ["2,500", "2500", "10,000", "10000"]):
-        return 3
-    if tier == "Full Integration" and any(token in normalized for token in ["10,000", "10000", "25,000", "25000"]):
-        return 3
+
+    # Remove commas to avoid splitting them or misparsing
+    normalized_no_commas = normalized.replace(",", "")
+    numbers = [int(x) for x in re.findall(r"\d+", normalized_no_commas)]
+
+    if not numbers:
+        return 2
+
+    if tier == "Quick Win":
+        if any(500 <= n <= 2500 for n in numbers):
+            return 4
+    elif tier == "Custom AI Agent":
+        if any(2500 <= n <= 10000 for n in numbers):
+            return 3
+    elif tier == "Full Integration":
+        if any(10000 <= n <= 25000 for n in numbers):
+            return 3
+
     return 2
 
 
 def _score_tech_readiness(tech_person: str, tools: str) -> int:
-    has_tech_owner = tech_person.strip().lower() not in {"", "no", "none", "n/a"}
+    tp_lower = tech_person.strip().lower()
+    negative_answers = {"no", "none", "n/a", "not yet", "maybe", "tbd", "to be determined"}
+    if tp_lower in negative_answers:
+        return 2
+
+    unready_keywords = {"", "no", "none", "n/a", "not yet", "maybe", "tbd", "to be determined"}
+    has_tech_owner = tp_lower not in unready_keywords
     has_tools = bool(tools.strip())
     if has_tech_owner and has_tools:
         return 4
@@ -247,6 +286,10 @@ def _score_tech_readiness(tech_person: str, tools: str) -> int:
 
 
 def _numbered_lines(items: list[str]) -> str:
+    if not isinstance(items, (list, tuple, set)):
+        if items is None:
+            return "None listed."
+        items = [str(items)]
     if not items:
         return "None listed."
     return "\n".join(f"{index}. {item}" for index, item in enumerate(items, 1))
@@ -260,3 +303,183 @@ def _bullet_lines(items: list[str]) -> str:
 
 def _normalize(value: str) -> str:
     return re.sub(r"\s+", " ", value.strip().lower())
+
+
+def refine_with_jules(draft_content: str, target_persona: str) -> str:
+    """
+    Submits draft content to the Jules REST API for enterprise-tone refinement.
+    If JULES_API_KEY is not set, logs a warning and returns the original draft content.
+    Handles network errors, timeouts, invalid status codes, malformed JSON, and missing keys.
+    """
+    config = load_config()
+    jules_api_key = config.get("JULES_API_KEY")
+    if not jules_api_key or not str(jules_api_key).strip():
+        logger.warning("JULES_API_KEY is not set or empty. Skipping Jules refinement.")
+        return draft_content
+
+    url = "https://jules.google/api/v1/refine"
+    headers = {
+        "Authorization": f"Bearer {jules_api_key}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "task": "evaluate_and_refine",
+        "context": f"Target Audience: {target_persona}. Ensure strict enterprise tone.",
+        "content": draft_content,
+    }
+
+    try:
+        response = requests.post(url, json=payload, headers=headers, timeout=10)
+        if response.status_code != 200:
+            logger.warning(f"Jules API returned status code {response.status_code}. Falling back to original content.")
+            return draft_content
+        
+        try:
+            data = response.json()
+        except ValueError:
+            logger.warning("Jules API response was not valid JSON. Falling back to original content.")
+            return draft_content
+
+        if not isinstance(data, dict) or "refined_content" not in data:
+            logger.warning("Jules API response does not contain 'refined_content' key. Falling back to original content.")
+            return draft_content
+
+        return data["refined_content"]
+
+    except requests.exceptions.Timeout as e:
+        logger.warning(f"Jules API request timed out: {e}. Falling back to original content.")
+        return draft_content
+    except requests.exceptions.RequestException as e:
+        logger.warning(f"Jules API request failed: {e}. Falling back to original content.")
+        return draft_content
+
+
+def _resolve_obs_credentials() -> tuple[str, int, str | None] | None:
+    config = load_config()
+    
+    host = os.environ.get("OBS_HOST")
+    if host is None:
+        host = config.get("SERVER_IP", "127.0.0.1")
+        
+    port_str = os.environ.get("OBS_PORT")
+    if port_str is None:
+        port = config.get("SERVER_PORT", 4455)
+    else:
+        try:
+            port = int(port_str)
+        except ValueError:
+            port = config.get("SERVER_PORT", 4455)
+            if not isinstance(port, int):
+                try:
+                    port = int(port)
+                except ValueError:
+                    port = 4455
+
+    password = os.environ.get("OBS_PASSWORD")
+    if password is None:
+        password = config.get("SERVER_PASSWORD")
+
+    # Specifically check if host is an empty string ""
+    if host == "" or os.environ.get("OBS_HOST") == "":
+        return None
+
+    # Validate that the port is within the valid TCP range (1 to 65535, inclusive)
+    if not (1 <= port <= 65535):
+        return None
+        
+    return host, port, password
+
+
+def trigger_obs_screenshot(file_path: str = "C:\\AI\\error_capture.png") -> str:
+    """
+    Triggers a screenshot in OBS using either obsws_python or obswebsocket.
+    """
+    creds = _resolve_obs_credentials()
+    if not creds:
+        logger.info("OBS credentials explicitly missing or empty. Skipping screenshot.")
+        return "OBS Screenshot skipped: Missing credentials."
+    
+    host, port, password = creds
+
+    # Try obsws_python first
+    try:
+        import obsws_python
+        logger.info(f"Connecting to OBS via obsws_python on {host}:{port}")
+        client = obsws_python.ReqClient(host=host, port=port, password=password)
+        try:
+            client.save_source_screenshot(source_name="Display Capture", image_format="png", file_path=file_path)
+            logger.info(f"OBS screenshot saved to {file_path}")
+            return f"OBS Screenshot saved to {file_path}"
+        finally:
+            pass
+    except ImportError:
+        # Try obswebsocket next
+        try:
+            import obswebsocket
+            from obswebsocket import obsws, requests
+            logger.info(f"Connecting to OBS via obswebsocket on {host}:{port}")
+            client = obsws(host, port, password)
+            client.connect()
+            try:
+                client.call(requests.SaveSourceScreenshot(sourceName="Display Capture", imageFormat="png", imageFilePath=file_path))
+                logger.info(f"OBS screenshot saved to {file_path} via obswebsocket")
+                return f"OBS Screenshot saved to {file_path}"
+            finally:
+                client.disconnect()
+        except ImportError:
+            logger.error("No compatible OBS WebSocket library found (neither obsws_python nor obswebsocket).")
+            return "OBS Screenshot failed: No compatible OBS WebSocket library found."
+        except Exception as e:
+            logger.error(f"OBS Screenshot failed under obswebsocket: {e}")
+            return f"OBS Screenshot failed: {e}"
+    except Exception as e:
+        logger.error(f"OBS Screenshot failed under obsws_python: {e}")
+        return f"OBS Screenshot failed: {e}"
+
+
+def save_obs_replay_buffer() -> str:
+    """
+    Saves the OBS Replay Buffer using either obsws_python or obswebsocket.
+    """
+    creds = _resolve_obs_credentials()
+    if not creds:
+        logger.info("OBS credentials explicitly missing or empty. Skipping replay buffer.")
+        return "OBS Replay Buffer skipped: Missing credentials."
+    
+    host, port, password = creds
+
+    # Try obsws_python first
+    try:
+        import obsws_python
+        logger.info(f"Connecting to OBS via obsws_python on {host}:{port}")
+        client = obsws_python.ReqClient(host=host, port=port, password=password)
+        try:
+            client.save_replay_buffer()
+            logger.info("OBS replay buffer saved.")
+            return "OBS Replay Buffer saved."
+        finally:
+            pass
+    except ImportError:
+        # Try obswebsocket next
+        try:
+            import obswebsocket
+            from obswebsocket import obsws, requests
+            logger.info(f"Connecting to OBS via obswebsocket on {host}:{port}")
+            client = obsws(host, port, password)
+            client.connect()
+            try:
+                client.call(requests.SaveReplayBuffer())
+                logger.info("OBS replay buffer saved via obswebsocket.")
+                return "OBS Replay Buffer saved."
+            finally:
+                client.disconnect()
+        except ImportError:
+            logger.error("No compatible OBS WebSocket library found (neither obsws_python nor obswebsocket).")
+            return "OBS Replay Buffer failed: No compatible OBS WebSocket library found."
+        except Exception as e:
+            logger.error(f"OBS Replay Buffer failed under obswebsocket: {e}")
+            return f"OBS Replay Buffer failed: {e}"
+    except Exception as e:
+        logger.error(f"OBS Replay Buffer failed under obsws_python: {e}")
+        return f"OBS Replay Buffer failed: {e}"
+
