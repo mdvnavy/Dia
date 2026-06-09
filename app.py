@@ -4,6 +4,7 @@ from dataclasses import asdict
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import logging
 import mimetypes
 import os
 from pathlib import Path
@@ -15,6 +16,8 @@ from client_discovery.core import (
     score_opportunity,
     validate_intake,
 )
+
+logger = logging.getLogger(__name__)
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -101,6 +104,23 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
             return
 
         self.send_json(response)
+
+        # OBS capture is a best-effort side effect: trigger it only when the
+        # intake surfaced issues, and never let it affect the HTTP response.
+        if response.get("issues"):
+            self._trigger_obs_capture()
+
+    def _trigger_obs_capture(self) -> None:
+        try:
+            from client_discovery.core import (
+                save_obs_replay_buffer,
+                trigger_obs_screenshot,
+            )
+
+            trigger_obs_screenshot()
+            save_obs_replay_buffer()
+        except Exception as error:  # noqa: BLE001 - capture must never break intake
+            logger.warning("OBS capture skipped: %s", error)
 
     def handle_agent(self) -> None:
         from agent_runtime import AgentNotConfigured, is_configured, run_agent
