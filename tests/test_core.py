@@ -178,8 +178,10 @@ def test_trigger_obs_screenshot_success():
         mock_client = mock_req.return_value
         res = trigger_obs_screenshot(file_path="test_shot.png")
         assert "saved" in res.lower() or "success" in res.lower()
+        # Matches the real obsws-python ReqClient.save_source_screenshot
+        # signature: (name, img_format, file_path, width, height, quality).
         mock_client.save_source_screenshot.assert_called_once_with(
-            source_name="Display Capture", image_format="png", file_path="test_shot.png"
+            "Display Capture", "png", "test_shot.png", 1920, 1080, -1
         )
 
 

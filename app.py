@@ -20,6 +20,11 @@ from client_discovery.core import (
 logger = logging.getLogger(__name__)
 
 
+def _obs_capture_enabled() -> bool:
+    """OBS capture is a local recording aid; enable it only via OBS_CAPTURE."""
+    return os.environ.get("OBS_CAPTURE", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 BASE_DIR = Path(__file__).resolve().parent
 PUBLIC_FILES = {
     "/": BASE_DIR / "templates" / "index.html",
@@ -105,9 +110,11 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
 
         self.send_json(response)
 
-        # OBS capture is a best-effort side effect: trigger it only when the
-        # intake surfaced issues, and never let it affect the HTTP response.
-        if response.get("issues"):
+        # OBS capture is a LOCAL-ONLY convenience for recording demo videos.
+        # It is off by default (so the deployed Cloud Run service never pokes a
+        # non-existent OBS) and only runs when OBS_CAPTURE is explicitly enabled
+        # locally and the intake surfaced issues. It never affects the response.
+        if response.get("issues") and _obs_capture_enabled():
             self._trigger_obs_capture()
 
     def _trigger_obs_capture(self) -> None:

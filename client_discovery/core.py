@@ -407,7 +407,14 @@ def trigger_obs_screenshot(file_path: str = "C:\\AI\\error_capture.png") -> str:
         logger.info(f"Connecting to OBS via obsws_python on {host}:{port}")
         client = obsws_python.ReqClient(host=host, port=port, password=password)
         try:
-            client.save_source_screenshot(source_name="Display Capture", image_format="png", file_path=file_path)
+            client.save_source_screenshot(
+                os.environ.get("OBS_SOURCE_NAME", "Display Capture"),
+                "png",
+                file_path,
+                int(os.environ.get("OBS_SCREENSHOT_WIDTH", "1920")),
+                int(os.environ.get("OBS_SCREENSHOT_HEIGHT", "1080")),
+                -1,
+            )
             logger.info(f"OBS screenshot saved to {file_path}")
             return f"OBS Screenshot saved to {file_path}"
         finally:
