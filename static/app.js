@@ -7,6 +7,10 @@ const score = document.querySelector("#score");
 const issues = document.querySelector("#issues");
 const output = document.querySelector("#documentOutput");
 const tabs = [...document.querySelectorAll(".tab")];
+const agentMessage = document.querySelector("#agentMessage");
+const runChat = document.querySelector("#runChat");
+const agentOutput = document.querySelector("#agentOutput");
+const agentStatus = document.querySelector("#agentStatus");
 
 let documents = {};
 let activeDoc = "client-profile.md";
@@ -52,6 +56,51 @@ tabs.forEach((tab) => {
     renderDocument(activeDoc);
   });
 });
+
+async function refreshAgentStatus() {
+  try {
+    const response = await fetch("/api/agent/status");
+    const payload = await response.json();
+    if (payload.configured) {
+      agentStatus.textContent = "Gemini connected";
+      agentStatus.classList.add("ok");
+    } else {
+      agentStatus.textContent = "API key not set";
+      agentStatus.classList.remove("ok");
+    }
+  } catch (error) {
+    agentStatus.textContent = "status unavailable";
+  }
+}
+
+runChat.addEventListener("click", async () => {
+  const message = agentMessage.value.trim();
+  if (!message) {
+    agentOutput.textContent = "Type a question for the agent first.";
+    return;
+  }
+  const context = documents[activeDoc] ? `\n\nContext:\n${documents[activeDoc]}` : "";
+  agentOutput.textContent = "Thinking...";
+  runChat.disabled = true;
+  try {
+    const response = await fetch("/api/agent", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: message + context }),
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.error || "Agent run failed");
+    }
+    agentOutput.textContent = payload.reply || "(empty response)";
+  } catch (error) {
+    agentOutput.textContent = error.message;
+  } finally {
+    runChat.disabled = false;
+  }
+});
+
+refreshAgentStatus();
 
 function renderIssues(items) {
   issues.innerHTML = "";

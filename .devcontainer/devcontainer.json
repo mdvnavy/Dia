@@ -5,9 +5,9 @@
     "ghcr.io/devcontainers/features/google-cloud-cli:1": {}
   },
   "postCreateCommand": "python -m pip install --upgrade pip && python -m pip install -r requirements.txt",
-  "forwardPorts": [5000],
+  "forwardPorts": [8080],
   "portsAttributes": {
-    "5000": {
+    "8080": {
       "label": "DIA local demo",
       "onAutoForward": "notify"
     }

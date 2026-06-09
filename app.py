@@ -23,12 +23,19 @@ PUBLIC_FILES = {
     "/static/app.js": BASE_DIR / "static" / "app.js",
     "/static/style.css": BASE_DIR / "static" / "style.css",
 }
+# Runtime sample lives outside tests/ so it ships in the Cloud Run image even
+# when test files are excluded by .dockerignore.
+SAMPLE_PATHS = (
+    BASE_DIR / "samples" / "sample_questionnaire.md",
+    BASE_DIR / "tests" / "fixtures" / "complete_questionnaire.md",
+)
 
 
 def read_sample_questionnaire() -> str:
-    return (BASE_DIR / "tests" / "fixtures" / "complete_questionnaire.md").read_text(
-        encoding="utf-8"
-    )
+    for candidate in SAMPLE_PATHS:
+        if candidate.exists():
+            return candidate.read_text(encoding="utf-8")
+    raise FileNotFoundError("no sample questionnaire is bundled with the app")
 
 
 def build_intake_response(questionnaire: str) -> dict[str, object]:
@@ -53,8 +60,16 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         path = urlparse(self.path).path
+        if path in ("/healthz", "/health"):
+            self.send_json({"status": "ok"})
+            return
         if path == "/api/sample":
             self.send_json({"questionnaire": read_sample_questionnaire()})
+            return
+        if path == "/api/agent/status":
+            from agent_runtime import is_configured
+
+            self.send_json({"configured": is_configured()})
             return
 
         file_path = PUBLIC_FILES.get(path)
@@ -66,10 +81,15 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path
-        if path != "/api/process":
-            self.send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
+        if path == "/api/process":
+            self.handle_process()
             return
+        if path == "/api/agent":
+            self.handle_agent()
+            return
+        self.send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
 
+    def handle_process(self) -> None:
         try:
             payload = self.read_json()
             response = build_intake_response(str(payload.get("questionnaire", "")))
@@ -81,6 +101,47 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
             return
 
         self.send_json(response)
+
+    def handle_agent(self) -> None:
+        from agent_runtime import AgentNotConfigured, is_configured, run_agent
+
+        try:
+            payload = self.read_json()
+        except json.JSONDecodeError:
+            self.send_json({"error": "invalid json"}, HTTPStatus.BAD_REQUEST)
+            return
+
+        message = str(payload.get("message", "")).strip()
+        if not message:
+            self.send_json({"error": "message is required"}, HTTPStatus.BAD_REQUEST)
+            return
+
+        if not is_configured():
+            self.send_json(
+                {
+                    "configured": False,
+                    "reply": (
+                        "Live Gemini agent is not configured. Set GEMINI_API_KEY "
+                        "(or GOOGLE_API_KEY) to enable it. The deterministic intake "
+                        "pipeline above still works without an API key."
+                    ),
+                }
+            )
+            return
+
+        try:
+            reply = run_agent(message)
+        except AgentNotConfigured as error:
+            self.send_json({"configured": False, "reply": str(error)})
+            return
+        except Exception as error:  # noqa: BLE001 - surface agent errors to the demo UI
+            self.send_json(
+                {"error": f"agent run failed: {error}"},
+                HTTPStatus.BAD_GATEWAY,
+            )
+            return
+
+        self.send_json({"configured": True, "reply": reply})
 
     def read_json(self) -> dict[str, object]:
         content_length = int(self.headers.get("Content-Length", "0"))
@@ -116,8 +177,10 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
 
 
 def run_server() -> None:
-    host = os.environ.get("HOST", "127.0.0.1")
-    port = int(os.environ.get("PORT", "5000"))
+    # Cloud Run injects PORT and requires binding to 0.0.0.0; both defaults are
+    # container-friendly and work for local development too.
+    host = os.environ.get("HOST", "0.0.0.0")
+    port = int(os.environ.get("PORT", "8080"))
     httpd = ThreadingHTTPServer((host, port), ClientDiscoveryHandler)
     print(f"DIA demo running at http://{host}:{port}")
     httpd.serve_forever()

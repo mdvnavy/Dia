@@ -193,6 +193,39 @@ pre {
   line-height: 1.45;
 }
 
+.agent {
+  margin-top: 18px;
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+}
+
+.agent textarea {
+  min-height: 90px;
+}
+
+.agent-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: .04em;
+  text-transform: none;
+  vertical-align: middle;
+}
+
+.agent-badge.ok {
+  color: var(--good);
+  border-color: var(--good);
+}
+
+#agentOutput {
+  min-height: 18vh;
+  margin-top: 12px;
+}
+
 @media (max-width: 860px) {
   .shell { width: min(100vw - 20px, 1200px); padding: 10px 0; }
   .topbar { align-items: start; flex-direction: column; }
