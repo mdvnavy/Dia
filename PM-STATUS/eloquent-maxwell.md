@@ -18,6 +18,8 @@
 
 - **Loop iteration 4 (integrity check):** 21/21 files present, none truncated, all 20 index links resolve, all 10 SVGs parse valid. No regeneration needed — the deliverable set is complete and stable. Recommended the user cancel loop job `268b2382` since scope is exhausted.
 
+- **Loop iteration 5 (upstream sync):** docs/architecture.svg moved ahead on main (899d373 → 7f1a2ca: viewport bg, centered card content, corner status LEDs, lane-routed wires with universal dash flow). Propagated the full delta into all 5 variants via in-system agent updates (each kept its own motion/color language), regenerated the 5 static SVGs and 5 PDF dossiers, bumped the index source ref to 7f1a2ca, re-rendered and verified all five. Set remains 21 files; repo untouched by this session since cf6b4dc.
+
 ## Pending
 
 - Recurring loop job `268b2382` (`0 */2 * * *`, session-only) re-runs the 5-variant generation every 2 hours; next iterations refine in place unless redirected.

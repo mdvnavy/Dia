@@ -24,6 +24,12 @@
     needs one human click in a real browser to confirm end-to-end.
   - Bonus from overnight: light mode, TTS, auto-speak, conversation mode, dictation,
     Share on X, accessibility pass (`eff1576..f4412cc`).
+- **Directive #2 QUEUED 2026-06-10 (Navy's live review):** (1) replace `cursor: wait`
+  hourglass busy state (`static/style.css:102`) with an inline spinner — hourglass reads
+  as non-functional; (2) hide the `kicker` header line (`templates/index.html:28`) and
+  surface "Discovery Intake Agent / Gemini ADK" via hover tooltip on "DIA" or a ⓘ
+  affordance (accessible + touch-friendly). Land on the branch so PR #11 carries them.
+  Navy holds the merge until these land.
 
 ### 2. Diagram session — `claude/eloquent-maxwell-77ceed`
 - Session: "Architecture diagram polish" (`local_12c24ba5-6372-4bd3-b3da-05cffe123efe`)
@@ -42,6 +48,9 @@
     Loop iter 4 (integrity check): 21/21 files verified, all links resolve, all SVGs
     parse. Set complete and stable. **Session recommends Navy cancel loop job `268b2382`
     — scope exhausted.**
+    Loop iter 5 (upstream sync): `docs/architecture.svg` advanced on main
+    (899d373 → 7f1a2ca); delta propagated into all 5 variants + statics + PDFs,
+    index ref bumped, all re-verified. Still 21 files; repo untouched since `cf6b4dc`.
   - Open item: awaiting user feedback ahead of **Devpost deadline June 11, 5 PM PT**.
 
 ## Notes
