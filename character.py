@@ -14,11 +14,12 @@ from client_discovery.core import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parent
-WORKSPACE_ROOT = REPO_ROOT.parent.parent
-DIA_ENV_PATH = WORKSPACE_ROOT / "cdx-ws" / "DIA" / ".env"
 
-load_dotenv(DIA_ENV_PATH, override=False)
+# Load a repo-local .env if present, then fall back to any .env discovered up
+# the tree. Existing environment variables (e.g. Cloud Run / Codespaces
+# secrets) always win because override stays False.
 load_dotenv(REPO_ROOT / ".env", override=False)
+load_dotenv(override=False)
 
 logger = logging.getLogger(__name__)
 
@@ -81,5 +82,7 @@ root_agent = LlmAgent(
     ],
 )
 
-if not os.environ.get("GEMINI_API_KEY"):
-    logger.warning("GEMINI_API_KEY is not set; ADK chat runs will fail until configured.")
+if not (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")):
+    logger.warning(
+        "GEMINI_API_KEY/GOOGLE_API_KEY is not set; ADK chat runs will fail until configured."
+    )

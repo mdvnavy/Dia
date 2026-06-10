@@ -50,6 +50,15 @@
             <button id="copySection" type="button" disabled>Copy section</button>
           </div>
           <pre id="documentOutput"></pre>
+
+          <div class="agent">
+            <h2>Ask DIA <small id="agentStatus" class="agent-badge">checking...</small></h2>
+            <textarea id="agentMessage" spellcheck="false" placeholder="Ask the live Gemini agent, e.g. 'Score this intake and list missing fields.'"></textarea>
+            <div class="actions">
+              <button id="runChat" type="button">Send to Gemini</button>
+            </div>
+            <pre id="agentOutput">The live agent uses the Gemini API via Google ADK. Run an intake first, then ask a question.</pre>
+          </div>
         </section>
       </div>
     </section>

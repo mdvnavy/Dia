@@ -1,0 +1,70 @@
+"""Synchronous bridge between the stdlib HTTP demo and the ADK Gemini agent.
+
+The web demo runs on Python's threaded ``http.server``, while ADK exposes an
+async ``Runner``. This module wraps a single agent turn in ``asyncio.run`` so a
+request handler can call :func:`run_agent` synchronously, and degrades
+gracefully when ``GEMINI_API_KEY`` / ``GOOGLE_API_KEY`` is not configured.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import os
+import uuid
+
+APP_NAME = "dia_discovery_intake_agent"
+USER_ID = "demo-user"
+
+
+class AgentNotConfigured(RuntimeError):
+    """Raised when no Google API key is available for live agent runs."""
+
+
+def is_configured() -> bool:
+    """Return True when a Gemini/Google API key is present in the environment."""
+    return bool(os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"))
+
+
+async def _run_turn(message: str) -> str:
+    # Imported lazily so the deterministic endpoints and tests do not require
+    # the heavy ADK/genai stack to be importable.
+    from google.adk.runners import Runner
+    from google.adk.sessions import InMemorySessionService
+    from google.genai import types
+
+    from character import root_agent
+
+    session_service = InMemorySessionService()
+    session_id = uuid.uuid4().hex
+    await session_service.create_session(
+        app_name=APP_NAME, user_id=USER_ID, session_id=session_id
+    )
+
+    runner = Runner(
+        app_name=APP_NAME, agent=root_agent, session_service=session_service
+    )
+    new_message = types.Content(role="user", parts=[types.Part(text=message)])
+
+    final_text = ""
+    async for event in runner.run_async(
+        user_id=USER_ID, session_id=session_id, new_message=new_message
+    ):
+        if event.is_final_response() and event.content and event.content.parts:
+            final_text = "".join(part.text or "" for part in event.content.parts)
+    return final_text.strip()
+
+
+def run_agent(message: str) -> str:
+    """Run a single DIA agent turn and return its final text response.
+
+    Raises:
+        ValueError: when ``message`` is empty.
+        AgentNotConfigured: when no Google API key is configured.
+    """
+    if not message.strip():
+        raise ValueError("message is required")
+    if not is_configured():
+        raise AgentNotConfigured(
+            "Set GEMINI_API_KEY (or GOOGLE_API_KEY) to enable live Gemini agent runs."
+        )
+    return asyncio.run(_run_turn(message))

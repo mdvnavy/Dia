@@ -1,0 +1,14 @@
+.git
+.gitignore
+.venv
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
+*.log
+server.*.log
+generated/
+tests/
+.devcontainer/
+set-gemini-env.ps1
+README.md
