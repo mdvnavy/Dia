@@ -45,6 +45,29 @@ themeToggle.addEventListener("click", () => {
 
 applyTheme(document.documentElement.dataset.theme || "dark");
 
+// Header tooltip: hover/focus shows the full app name via CSS; click/tap
+// toggles it for touch devices, where hover does not exist.
+const appTip = document.querySelector(".app-tip");
+const appInfo = document.querySelector("#appInfo");
+
+appInfo.addEventListener("click", (event) => {
+  event.stopPropagation();
+  const open = appTip.classList.toggle("open");
+  appInfo.setAttribute("aria-expanded", String(open));
+});
+
+document.addEventListener("click", (event) => {
+  if (appTip.classList.contains("open") && !appTip.contains(event.target)) {
+    appTip.classList.remove("open");
+    appInfo.setAttribute("aria-expanded", "false");
+  }
+});
+
+function setBusy(button, busy) {
+  button.disabled = busy;
+  button.classList.toggle("busy", busy);
+}
+
 loadSample.addEventListener("click", async () => {
   statusText.textContent = "Loading sample...";
   const response = await fetch("/api/sample");
@@ -55,7 +78,7 @@ loadSample.addEventListener("click", async () => {
 
 runAgent.addEventListener("click", async () => {
   statusText.textContent = "Processing...";
-  runAgent.disabled = true;
+  setBusy(runAgent, true);
   setExportAvailability(false);
   try {
     const response = await fetch("/api/process", {
@@ -79,7 +102,7 @@ runAgent.addEventListener("click", async () => {
     statusText.textContent = error.message;
     setExportAvailability(latestPayload !== null);
   } finally {
-    runAgent.disabled = false;
+    setBusy(runAgent, false);
   }
 });
 
@@ -147,7 +170,7 @@ async function sendAgentMessage() {
   }
   const context = documents[activeDoc] ? `\n\nContext:\n${documents[activeDoc]}` : "";
   agentOutput.textContent = "Thinking...";
-  runChat.disabled = true;
+  setBusy(runChat, true);
   try {
     const response = await fetch("/api/agent", {
       method: "POST",
@@ -164,7 +187,7 @@ async function sendAgentMessage() {
     agentOutput.textContent = error.message;
     return null;
   } finally {
-    runChat.disabled = false;
+    setBusy(runChat, false);
   }
 }
 
@@ -283,23 +306,31 @@ async function pasteIntoDraft() {
 }
 
 // One multifunctional button: click = copy, double-click = paste. Copy must
-// NOT fire on the first click of a double-click: it would overwrite the
-// clipboard with the draft, so the paste would re-insert the draft instead of
-// what the user meant to paste. Copy therefore waits out the double-click
-// window before running.
+// NOT fire while a double-click can still be recognized: it would overwrite
+// the clipboard with the draft, so the paste would re-insert the draft
+// instead of what the user meant to paste. Paste rides the browser's native
+// dblclick recognition; copy waits out a grace period above common OS
+// double-click intervals (Windows defaults to 500ms) and is cancelled the
+// moment a second click arrives (event.detail > 1).
+const DOUBLE_CLICK_GRACE_MS = 600;
 let copyPasteTimer = null;
 
-draftCopyPaste.addEventListener("click", () => {
-  if (copyPasteTimer) {
-    clearTimeout(copyPasteTimer);
-    copyPasteTimer = null;
-    pasteIntoDraft();
-    return;
+draftCopyPaste.addEventListener("click", (event) => {
+  clearTimeout(copyPasteTimer);
+  copyPasteTimer = null;
+  if (event.detail > 1) {
+    return; // part of a multi-click gesture; dblclick handles it
   }
   copyPasteTimer = setTimeout(() => {
     copyPasteTimer = null;
     copyDraft();
-  }, 350);
+  }, DOUBLE_CLICK_GRACE_MS);
+});
+
+draftCopyPaste.addEventListener("dblclick", () => {
+  clearTimeout(copyPasteTimer);
+  copyPasteTimer = null;
+  pasteIntoDraft();
 });
 
 draftUndo.addEventListener("click", () => {
@@ -742,7 +773,7 @@ shareX.addEventListener("click", () => {
     `DIA scored this discovery intake ${scoreInfo.total_score}/${scoreInfo.max_score} ` +
     `and recommends the "${scoreInfo.tier}" tier. Profile, analysis, and proposal ` +
     `drafted in seconds by a Gemini ADK agent.`;
-  const url = `https://x.com/intent/post?text=${encodeURIComponent(text)}`;
+  const url = `https://x.com/intent/tweet?text=${encodeURIComponent(text)}`;
   window.open(url, "_blank", "noopener");
   statusText.textContent = "Opening X share window";
 });
