@@ -83,12 +83,43 @@ runAgent.addEventListener("click", async () => {
   }
 });
 
-tabs.forEach((tab) => {
-  tab.addEventListener("click", () => {
-    activeDoc = tab.dataset.doc;
-    tabs.forEach((item) => item.classList.toggle("active", item === tab));
-    renderDocument(activeDoc);
+function selectTab(tab, { focus = false } = {}) {
+  activeDoc = tab.dataset.doc;
+  tabs.forEach((item) => {
+    const isActive = item === tab;
+    item.classList.toggle("active", isActive);
+    item.setAttribute("aria-selected", String(isActive));
+    item.tabIndex = isActive ? 0 : -1;
   });
+  if (focus) {
+    tab.focus();
+  }
+  renderDocument(activeDoc);
+}
+
+tabs.forEach((tab) => {
+  tab.addEventListener("click", () => selectTab(tab));
+});
+
+document.querySelector(".tabs").addEventListener("keydown", (event) => {
+  const current = tabs.indexOf(document.activeElement);
+  if (current === -1) {
+    return;
+  }
+  let next = null;
+  if (event.key === "ArrowRight") {
+    next = (current + 1) % tabs.length;
+  } else if (event.key === "ArrowLeft") {
+    next = (current - 1 + tabs.length) % tabs.length;
+  } else if (event.key === "Home") {
+    next = 0;
+  } else if (event.key === "End") {
+    next = tabs.length - 1;
+  }
+  if (next !== null) {
+    event.preventDefault();
+    selectTab(tabs[next], { focus: true });
+  }
 });
 
 async function refreshAgentStatus() {

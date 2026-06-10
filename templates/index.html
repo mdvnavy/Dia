@@ -20,6 +20,7 @@
   </script>
 </head>
 <body>
+  <a class="skip-link" href="#questionnaire">Skip to questionnaire</a>
   <main class="shell">
     <section class="workspace">
       <header class="topbar">
@@ -43,7 +44,7 @@
           <textarea id="questionnaire" spellcheck="false" placeholder="Paste a completed discovery intake questionnaire..."></textarea>
           <div class="actions">
             <button id="runAgent" type="button">Run Intake</button>
-            <span id="status">Ready</span>
+            <span id="status" role="status" aria-live="polite">Ready</span>
           </div>
         </section>
 
@@ -54,13 +55,13 @@
             <small id="score">Score pending</small>
           </div>
           <div class="issues">
-            <h2>Validation Issues</h2>
-            <ul id="issues"></ul>
+            <h2 id="issuesHeading">Validation Issues</h2>
+            <ul id="issues" aria-live="polite" aria-labelledby="issuesHeading"></ul>
           </div>
-          <div class="tabs">
-            <button class="tab active" data-doc="client-profile.md" type="button">Profile</button>
-            <button class="tab" data-doc="opportunity-analysis.md" type="button">Analysis</button>
-            <button class="tab" data-doc="proposal-draft.md" type="button">Proposal</button>
+          <div class="tabs" role="tablist" aria-label="Generated documents">
+            <button class="tab active" data-doc="client-profile.md" type="button" role="tab" aria-selected="true" aria-controls="documentOutput">Profile</button>
+            <button class="tab" data-doc="opportunity-analysis.md" type="button" role="tab" aria-selected="false" aria-controls="documentOutput" tabindex="-1">Analysis</button>
+            <button class="tab" data-doc="proposal-draft.md" type="button" role="tab" aria-selected="false" aria-controls="documentOutput" tabindex="-1">Proposal</button>
           </div>
           <div class="export-bar" role="group" aria-label="Output export actions">
             <button id="copyAll" type="button" disabled>Copy all</button>
@@ -68,15 +69,15 @@
             <button id="downloadJson" type="button" disabled>Download JSON</button>
             <button id="copySection" type="button" disabled>Copy section</button>
           </div>
-          <pre id="documentOutput"></pre>
+          <pre id="documentOutput" role="tabpanel" tabindex="0" aria-label="Document output"></pre>
 
           <div class="agent">
             <h2>Ask DIA <small id="agentStatus" class="agent-badge">checking...</small></h2>
-            <textarea id="agentMessage" spellcheck="false" placeholder="Ask the live Gemini agent, e.g. 'Score this intake and list missing fields.'"></textarea>
+            <textarea id="agentMessage" spellcheck="false" aria-label="Message for the Gemini agent" placeholder="Ask the live Gemini agent, e.g. 'Score this intake and list missing fields.'"></textarea>
             <div class="actions">
               <button id="runChat" type="button">Send to Gemini</button>
             </div>
-            <pre id="agentOutput">The live agent uses the Gemini API via Google ADK. Run an intake first, then ask a question.</pre>
+            <pre id="agentOutput" aria-live="polite" aria-label="Agent reply">The live agent uses the Gemini API via Google ADK. Run an intake first, then ask a question.</pre>
           </div>
         </section>
       </div>
