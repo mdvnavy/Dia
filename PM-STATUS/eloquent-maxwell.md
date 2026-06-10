@@ -10,7 +10,7 @@
   - Toolbox chip rhythm evened (19px gaps = 16px rail padding); label baselines recentered in cards/chips/hub; grid framed to content; stat cards aligned to the y=615 grid line.
   - **Bug fix beyond the brief:** the gold MCP bus line was invisible in Chrome/GitHub — objectBoundingBox glow filter collapses on a zero-height horizontal line. Now uses a dedicated `filterUnits="userSpaceOnUse"` filter. Also fixed web-ui subtext overflowing its card (textLength, text content unchanged).
   - Verified with headless-Chrome renders (full staged reveal via virtual-time budget) before push.
-- **Sovereign Instruments variants (user-initiated /loop, every 2h):** iteration 1 complete. 10 files in `G:\My Drive\The Sovereign Instruments Vol.1\dia-agent\` — 5 diagram variants + 5 HTML dossiers (dionysian-monolith, alabaster-core, constitutional-brief, dystopian-techwear, mycelium-atelier), all rendered and verified. Nothing committed to the repo.
+- **Sovereign Instruments variants (user-initiated /loop, every 2h):** iteration 1 complete. 10 files stored externally on Navy's Drive (location known to Navy) — 5 diagram variants + 5 HTML dossiers (dionysian-monolith, alabaster-core, constitutional-brief, dystopian-techwear, mycelium-atelier), all rendered and verified. Nothing committed to the repo.
 
 - **Loop iteration 2 (verification pass):** all 5 dossiers rendered and inspected at desktop width — layouts sound, no fixes needed; Mycelium/Alabaster diagram contrast confirmed OK at 1:1 (earlier worry was a thumbnail artifact); added `index.html` gallery as the set's entry point (11 files total now).
 

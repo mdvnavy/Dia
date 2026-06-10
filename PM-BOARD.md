@@ -48,4 +48,7 @@
 - Active poll (monitor task `bf2sfl5sm`, started 2026-06-10): watches `PM-STATUS/` for
   new/updated notes every 10s, and fires when either session deletes its `PM-DIRECTIVE.md`
   (= directive absorbed). Persistent until session end or TaskStop.
-- Directives and this board are coordination artifacts — keep out of commits/PRs.
+- Directives and this board are coordination artifacts — never mix them into app-code
+  commits or PRs. They are tracked only on this dedicated PM branch (PR #10), which serves
+  as a live dashboard and is expected to be closed without merging; delete these files
+  once both workstreams land.
