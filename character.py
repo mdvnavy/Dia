@@ -81,10 +81,19 @@ def _make_mcp_toolset() -> list:
     ]
 
 
-root_agent = LlmAgent(
-    model="gemini-2.5-flash",
-    name="dia_discovery_intake_agent",
-    instruction="""
+def build_agent() -> LlmAgent:
+    """Construct a fresh DIA agent.
+
+    MCP toolsets bind to the event loop they first connect on, so callers that
+    run each turn in its own asyncio.run() loop (like agent_runtime) must build
+    a fresh agent per turn rather than sharing the module-level root_agent.
+    """
+    return LlmAgent(
+        # Overridable so deploys can pin a model and local testing can dodge
+        # per-model free-tier quotas without a code change.
+        model=os.environ.get("DIA_MODEL", "gemini-2.5-flash"),
+        name="dia_discovery_intake_agent",
+        instruction="""
         You are DIA, the discovery intake agent for a startup services team.
 
         Mission:
@@ -102,22 +111,26 @@ root_agent = LlmAgent(
           user asks for follow-up actions), use them to execute the handoff, e.g.
           lead automation. Report exactly which tool ran and what it returned.
     """,
-    generate_content_config=types.GenerateContentConfig(
-        http_options=types.HttpOptions(
-            retry_options=types.HttpRetryOptions(
-                attempts=3,
-                initial_delay=1.0,
+        generate_content_config=types.GenerateContentConfig(
+            http_options=types.HttpOptions(
+                retry_options=types.HttpRetryOptions(
+                    attempts=3,
+                    initial_delay=1.0,
+                )
             )
-        )
-    ),
-    tools=[
-        parse_intake,
-        validate_intake_fields,
-        score_client_opportunity,
-        generate_intake_documents,
-        *_make_mcp_toolset(),
-    ],
-)
+        ),
+        tools=[
+            parse_intake,
+            validate_intake_fields,
+            score_client_opportunity,
+            generate_intake_documents,
+            *_make_mcp_toolset(),
+        ],
+    )
+
+
+# Module-level agent for ADK CLI / single-loop consumers (e.g. `adk run`).
+root_agent = build_agent()
 
 if not (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")):
     logger.warning(

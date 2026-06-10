@@ -41,7 +41,12 @@ async def _run_turn(message: str) -> str:
     from google.adk.sessions import InMemorySessionService
     from google.genai import types
 
-    from character import root_agent
+    from character import build_agent
+
+    # Each turn runs in its own asyncio.run() loop, and MCP toolsets bind to
+    # the loop they first connect on - so the agent (and its toolsets) must be
+    # built fresh here rather than shared at module level.
+    agent = build_agent()
 
     session_service = InMemorySessionService()
     session_id = uuid.uuid4().hex
@@ -50,16 +55,30 @@ async def _run_turn(message: str) -> str:
     )
 
     runner = Runner(
-        app_name=APP_NAME, agent=root_agent, session_service=session_service
+        app_name=APP_NAME, agent=agent, session_service=session_service
     )
     new_message = types.Content(role="user", parts=[types.Part(text=message)])
 
     final_text = ""
-    async for event in runner.run_async(
-        user_id=USER_ID, session_id=session_id, new_message=new_message
-    ):
-        if event.is_final_response() and event.content and event.content.parts:
-            final_text = "".join(part.text or "" for part in event.content.parts)
+    try:
+        async for event in runner.run_async(
+            user_id=USER_ID, session_id=session_id, new_message=new_message
+        ):
+            if event.is_final_response() and event.content and event.content.parts:
+                final_text = "".join(part.text or "" for part in event.content.parts)
+    finally:
+        # Close MCP sessions inside this loop; the MCP client's cancel-scope
+        # teardown can still grumble on close, but the turn result is already
+        # captured, so never let cleanup noise break the response.
+        try:
+            from google.adk.tools.mcp_tool import McpToolset
+
+            for tool in agent.tools:
+                if isinstance(tool, McpToolset):
+                    await tool.close()
+        except Exception:  # noqa: BLE001 - cleanup must never mask the reply
+            logger.debug("MCP toolset cleanup raised; ignoring", exc_info=True)
+
     return final_text.strip()
 
 
