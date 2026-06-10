@@ -13,9 +13,9 @@ flowchart LR
     SM["Secret Manager<br/>GEMINI_API_KEY · MAKE_MCP_TOKEN"]
     subgraph MAKE["Make — DIA Agent Toolbox (MCP server)"]
         T1["email_proposal → Gmail"]
-        T2["crm_record_lead → Notion"]
+        T2["record_lead_in_sheet → Google Sheets"]
         T3["enrich_prospect_website → HTTP"]
-        T4["create_followup_task → Taskade"]
+        T4["save_proposal_to_drive → Google Drive"]
         T5["escalate_to_human → Gmail"]
     end
     OBS["OBS Studio capture<br/>(local demo aid, opt-in)"]
