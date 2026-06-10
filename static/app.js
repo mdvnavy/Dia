@@ -138,11 +138,11 @@ async function refreshAgentStatus() {
   }
 }
 
-runChat.addEventListener("click", async () => {
+async function sendAgentMessage() {
   const message = agentMessage.value.trim();
   if (!message) {
     agentOutput.textContent = "Type a question for the agent first.";
-    return;
+    return null;
   }
   const context = documents[activeDoc] ? `\n\nContext:\n${documents[activeDoc]}` : "";
   agentOutput.textContent = "Thinking...";
@@ -158,10 +158,19 @@ runChat.addEventListener("click", async () => {
       throw new Error(payload.error || "Agent run failed");
     }
     agentOutput.textContent = payload.reply || "(empty response)";
+    return payload.reply || "";
   } catch (error) {
     agentOutput.textContent = error.message;
+    return null;
   } finally {
     runChat.disabled = false;
+  }
+}
+
+runChat.addEventListener("click", async () => {
+  const reply = await sendAgentMessage();
+  if (autoSpeakEnabled && reply) {
+    speakText(reply, listenAgent);
   }
 });
 
@@ -276,6 +285,8 @@ function setExportAvailability(isAvailable) {
   downloadMarkdown.disabled = !isAvailable;
   downloadJson.disabled = !isAvailable;
   copySection.disabled = !isAvailable;
+  listenDocument.disabled = !isAvailable;
+  shareX.disabled = !isAvailable;
 }
 
 function buildMarkdownExport() {
@@ -344,3 +355,281 @@ function activeLabel() {
   const tab = tabs.find((item) => item.dataset.doc === activeDoc);
   return tab ? tab.textContent : activeDoc;
 }
+
+// --- Speech: text-to-speech, voice responses, conversation mode ---
+
+const listenDocument = document.querySelector("#listenDocument");
+const listenAgent = document.querySelector("#listenAgent");
+const autoSpeak = document.querySelector("#autoSpeak");
+const micButton = document.querySelector("#micButton");
+const conversationMode = document.querySelector("#conversationMode");
+
+const ttsSupported = "speechSynthesis" in window;
+const SpeechRecognitionImpl =
+  window.SpeechRecognition || window.webkitSpeechRecognition || null;
+
+if (!ttsSupported) {
+  document
+    .querySelectorAll(".speech-only")
+    .forEach((el) => (el.hidden = true));
+}
+if (!SpeechRecognitionImpl) {
+  document.querySelectorAll(".speech-input-only").forEach((el) => {
+    el.disabled = true;
+    el.title = "Speech recognition is not supported in this browser";
+  });
+}
+
+let currentSpeakButton = null;
+
+function setSpeakingState(button, speaking) {
+  if (!button) {
+    return;
+  }
+  button.setAttribute("aria-pressed", String(speaking));
+  const label = button.querySelector(".speech-label");
+  if (label) {
+    label.textContent = speaking ? "Stop" : "Listen";
+  }
+}
+
+function stopSpeaking() {
+  if (ttsSupported) {
+    window.speechSynthesis.cancel();
+  }
+  setSpeakingState(currentSpeakButton, false);
+  currentSpeakButton = null;
+}
+
+function speakText(text, button, { onDone } = {}) {
+  if (!ttsSupported) {
+    return;
+  }
+  // Strip markdown decoration so headings and emphasis read naturally.
+  const clean = (text || "").replace(/[#*`_]/g, "").trim();
+  if (!clean) {
+    statusText.textContent = "Nothing to read aloud";
+    if (onDone) onDone();
+    return;
+  }
+  stopSpeaking();
+  const utterance = new SpeechSynthesisUtterance(clean);
+  currentSpeakButton = button || null;
+  setSpeakingState(currentSpeakButton, true);
+  const finish = () => {
+    setSpeakingState(button, false);
+    if (currentSpeakButton === button) {
+      currentSpeakButton = null;
+    }
+    if (onDone) onDone();
+  };
+  utterance.onend = finish;
+  utterance.onerror = finish;
+  window.speechSynthesis.speak(utterance);
+}
+
+function toggleSpeak(text, button) {
+  if (currentSpeakButton === button && window.speechSynthesis.speaking) {
+    stopSpeaking();
+    return;
+  }
+  speakText(text, button);
+}
+
+if (ttsSupported) {
+  listenDocument.addEventListener("click", () => {
+    toggleSpeak(documents[activeDoc] || "", listenDocument);
+  });
+  listenAgent.addEventListener("click", () => {
+    toggleSpeak(agentOutput.textContent, listenAgent);
+  });
+}
+
+let autoSpeakEnabled = false;
+
+function applyAutoSpeak(enabled) {
+  autoSpeakEnabled = enabled && ttsSupported;
+  autoSpeak.setAttribute("aria-pressed", String(autoSpeakEnabled));
+  autoSpeak.textContent = `Auto-speak: ${autoSpeakEnabled ? "on" : "off"}`;
+}
+
+autoSpeak.addEventListener("click", () => {
+  applyAutoSpeak(!autoSpeakEnabled);
+  if (!autoSpeakEnabled) {
+    stopSpeaking();
+  }
+  try {
+    localStorage.setItem("dia-autospeak", autoSpeakEnabled ? "on" : "off");
+  } catch (error) {
+    // Storage can be blocked; the toggle still works for this session.
+  }
+});
+
+try {
+  applyAutoSpeak(localStorage.getItem("dia-autospeak") === "on");
+} catch (error) {
+  applyAutoSpeak(false);
+}
+
+// --- Voice input: one-shot dictation and hands-free conversation mode ---
+
+let recognition = null;
+let recognizing = false;
+let conversationActive = false;
+
+function listenOnce({ onTranscript, onError }) {
+  const rec = new SpeechRecognitionImpl();
+  rec.lang = navigator.language || "en-US";
+  rec.interimResults = false;
+  rec.maxAlternatives = 1;
+  let gotResult = false;
+  rec.onstart = () => {
+    recognizing = true;
+    micButton.setAttribute("aria-pressed", "true");
+  };
+  rec.onresult = (event) => {
+    gotResult = true;
+    onTranscript(event.results[0][0].transcript.trim());
+  };
+  rec.onerror = (event) => {
+    gotResult = true;
+    onError(event.error);
+  };
+  rec.onend = () => {
+    recognizing = false;
+    micButton.setAttribute("aria-pressed", "false");
+    if (!gotResult) {
+      onError("no-speech");
+    }
+  };
+  rec.start();
+  return rec;
+}
+
+function stopConversation(message) {
+  conversationActive = false;
+  conversationMode.setAttribute("aria-pressed", "false");
+  conversationMode.classList.remove("recording");
+  if (recognition && recognizing) {
+    recognition.abort();
+  }
+  stopSpeaking();
+  if (message) {
+    statusText.textContent = message;
+  }
+}
+
+function conversationTurn() {
+  if (!conversationActive) {
+    return;
+  }
+  statusText.textContent = "Listening...";
+  recognition = listenOnce({
+    onTranscript: async (text) => {
+      if (!conversationActive) {
+        return;
+      }
+      if (!text) {
+        conversationTurn();
+        return;
+      }
+      agentMessage.value = text;
+      statusText.textContent = "Sending to agent...";
+      const reply = await sendAgentMessage();
+      if (!conversationActive) {
+        return;
+      }
+      if (reply) {
+        statusText.textContent = "Speaking reply...";
+        speakText(reply, listenAgent, {
+          onDone: () => {
+            if (conversationActive) {
+              conversationTurn();
+            }
+          },
+        });
+      } else {
+        stopConversation("Conversation paused: agent error");
+      }
+    },
+    onError: (error) => {
+      if (error === "no-speech" || error === "aborted") {
+        if (conversationActive && error === "no-speech") {
+          conversationTurn();
+        }
+        return;
+      }
+      stopConversation(
+        error === "not-allowed"
+          ? "Microphone permission denied"
+          : `Conversation stopped (${error})`
+      );
+    },
+  });
+}
+
+if (SpeechRecognitionImpl) {
+  micButton.addEventListener("click", () => {
+    if (conversationActive) {
+      stopConversation("Conversation ended");
+      return;
+    }
+    if (recognizing) {
+      recognition.abort();
+      statusText.textContent = "Dictation cancelled";
+      return;
+    }
+    statusText.textContent = "Listening...";
+    recognition = listenOnce({
+      onTranscript: (text) => {
+        if (text) {
+          const existing = agentMessage.value.trim();
+          agentMessage.value = existing ? `${existing} ${text}` : text;
+          statusText.textContent = "Dictation added";
+          agentMessage.focus();
+        }
+      },
+      onError: (error) => {
+        statusText.textContent =
+          error === "not-allowed"
+            ? "Microphone permission denied"
+            : error === "no-speech"
+              ? "No speech detected"
+              : `Dictation failed (${error})`;
+      },
+    });
+  });
+
+  conversationMode.addEventListener("click", () => {
+    if (conversationActive) {
+      stopConversation("Conversation ended");
+      return;
+    }
+    if (recognizing) {
+      recognition.abort();
+    }
+    conversationActive = true;
+    conversationMode.setAttribute("aria-pressed", "true");
+    conversationMode.classList.add("recording");
+    conversationTurn();
+  });
+}
+
+// --- Share on X ---
+
+const shareX = document.querySelector("#shareX");
+
+shareX.addEventListener("click", () => {
+  if (!latestPayload) {
+    statusText.textContent = "Run an intake first";
+    return;
+  }
+  const scoreInfo = latestPayload.score;
+  const text =
+    `DIA scored this discovery intake ${scoreInfo.total_score}/${scoreInfo.max_score} ` +
+    `and recommends the "${scoreInfo.tier}" tier. Profile, analysis, and proposal ` +
+    `drafted in seconds by a Gemini ADK agent.`;
+  const url = `https://x.com/intent/post?text=${encodeURIComponent(text)}`;
+  window.open(url, "_blank", "noopener");
+  statusText.textContent = "Opening X share window";
+});

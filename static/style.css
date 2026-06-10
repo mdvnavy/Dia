@@ -288,9 +288,25 @@ pre {
   stroke-linejoin: round;
 }
 
+.icon-button svg.fill-icon {
+  fill: currentColor;
+  stroke: none;
+}
+
 html[data-theme="light"] .theme-icon-moon,
 html:not([data-theme="light"]) .theme-icon-sun {
   display: none;
+}
+
+.actions button[aria-pressed="true"],
+.export-bar button[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent-strong);
+}
+
+button.recording {
+  border-color: var(--good);
+  color: var(--good);
 }
 
 .draft-editor {
