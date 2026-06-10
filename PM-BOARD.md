@@ -30,25 +30,22 @@
   "?" affordance (hover/focus/tap), screen-reader text preserved in the h1.
   Bonus `a510664`: Codex review fixes (native dblclick + 600ms copy grace; Share on X
   via documented /intent/tweet). All PR #11 review threads resolved. Browser-verified.
-- **Directive #3 ✅ DELIVERED — PR #12 MERGED to main 2026-06-10 17:27Z.** PM live
-  browser walkthrough passed everything: tooltip, collapse flow, spinner, Gemini Q&A,
-  bold/lettered-list dropdown, undo/redo (DOM-verified), and the REAL clipboard test —
-  single-click copy landed 889 chars in the OS clipboard, double-click paste round-trip
-  verified and undone. Last feature-pack caveat closed.
-- **Directive #4 SENT 2026-06-10 (~17:30Z) — final pre-video polish:** (1) PRIORITY:
-  tier card 12/20 vs live agent saying 8/20 on the same intake — agent must ground in
-  actual run results; (2) cosmetic: editor action status prints next to Run Intake,
-  should live near the draft editor. Video records when these land (or Navy skips
-  asking for scores on camera if the fix is deep).
-  **PR #11 MERGED to main 2026-06-10 16:44Z (merged by PM on Navy's behalf — auto-merge button never appears without branch protection).**
-- **Directive #3 SENT 2026-06-10 (~17:05Z) — Navy's post-merge live test pass** (verdict
-  on the pack: "absolute fire"). New branch/PR required since #11 merged. Items:
-  (1) bump font contrast in light/dark themes; (2) "?" affordance smaller, superscript
-  top-right by the "A" in DIA; (3) consolidate bullet/numbered/lettered list buttons
-  into one dropdown; (4) STRUCTURAL: compress the intake section, move Ask DIA right
-  under the upload, hierarchy should spotlight the post-intake workflow (Ask DIA →
-  draft editor). Items 1-3 quick wins; item 4 moves demo quality most. Awaiting
-  status-note update + new PR.
+- **PR #11 MERGED to main 2026-06-10 16:44Z** (merged by PM on Navy's behalf —
+  auto-merge button never appears without branch protection).
+- **Directive #3 ✅ DELIVERED — PR #12 MERGED to main 2026-06-10 17:27Z.** From Navy's
+  post-merge live test pass (verdict on the pack: "absolute fire"): (1) font contrast
+  bumped in both themes; (2) "?" affordance smaller, superscript by the "A" in DIA;
+  (3) list buttons consolidated into one dropdown; (4) structural: intake compresses/
+  collapses after run, Ask DIA directly under the upload, post-intake workflow is the
+  star. PM live browser walkthrough passed everything: tooltip, collapse flow, spinner,
+  Gemini Q&A, bold/lettered-list dropdown, undo/redo (DOM-verified), and the REAL
+  clipboard test — single-click copy landed 889 chars in the OS clipboard, double-click
+  paste round-trip verified and undone. Last feature-pack caveat closed.
+- **Directive #4 SENT 2026-06-10 (~17:30Z) — final pre-video polish (ACTIVE):**
+  (1) PRIORITY: tier card 12/20 vs live agent saying 8/20 on the same intake — agent
+  must ground in actual run results; (2) cosmetic: editor action status prints next to
+  Run Intake, should live near the draft editor. Video records when these land (or Navy
+  skips asking for scores on camera if the fix is deep). Awaiting status note + PR.
 
 ### 2. Diagram session — `claude/eloquent-maxwell-77ceed`
 - Session: "Architecture diagram polish" (`local_12c24ba5-6372-4bd3-b3da-05cffe123efe`)
