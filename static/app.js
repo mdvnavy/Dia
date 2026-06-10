@@ -281,25 +281,23 @@ async function pasteIntoDraft() {
   }
 }
 
-// One multifunctional button: click = copy, double-click = paste. Copy fires
-// optimistically on the first click (it is idempotent and harmless before a
-// paste), so single-click copy has zero lag; a second click inside the window
-// upgrades the gesture to paste.
+// One multifunctional button: click = copy, double-click = paste. Copy must
+// NOT fire on the first click of a double-click: it would overwrite the
+// clipboard with the draft, so the paste would re-insert the draft instead of
+// what the user meant to paste. Copy therefore waits out the double-click
+// window before running.
 let copyPasteTimer = null;
-let pendingCopy = Promise.resolve();
 
 draftCopyPaste.addEventListener("click", () => {
   if (copyPasteTimer) {
     clearTimeout(copyPasteTimer);
     copyPasteTimer = null;
-    // Wait for the optimistic copy to finish so the paste outcome (not the
-    // earlier copy status) is what the user ends up seeing.
-    pendingCopy.then(() => pasteIntoDraft());
+    pasteIntoDraft();
     return;
   }
-  pendingCopy = copyDraft();
   copyPasteTimer = setTimeout(() => {
     copyPasteTimer = null;
+    copyDraft();
   }, 350);
 });
 
