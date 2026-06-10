@@ -11,6 +11,15 @@ from __future__ import annotations
 import asyncio
 import os
 import uuid
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+# Match character.py: pick up a repo-local .env so local demos see the key,
+# while real environment variables (Cloud Run / Codespaces secrets) always
+# win because override stays False.
+load_dotenv(Path(__file__).resolve().parent / ".env", override=False)
+load_dotenv(override=False)
 
 APP_NAME = "dia_discovery_intake_agent"
 USER_ID = "demo-user"
