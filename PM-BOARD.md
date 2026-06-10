@@ -30,7 +30,15 @@
   "?" affordance (hover/focus/tap), screen-reader text preserved in the h1.
   Bonus `a510664`: Codex review fixes (native dblclick + 600ms copy grace; Share on X
   via documented /intent/tweet). All PR #11 review threads resolved. Browser-verified.
-  **PR #11 MERGED to main 2026-06-10 16:44Z (merged by PM on Navy's behalf — auto-merge button never appears without branch protection). Workstream CLOSED.**
+  **PR #11 MERGED to main 2026-06-10 16:44Z (merged by PM on Navy's behalf — auto-merge button never appears without branch protection).**
+- **Directive #3 SENT 2026-06-10 (~17:05Z) — Navy's post-merge live test pass** (verdict
+  on the pack: "absolute fire"). New branch/PR required since #11 merged. Items:
+  (1) bump font contrast in light/dark themes; (2) "?" affordance smaller, superscript
+  top-right by the "A" in DIA; (3) consolidate bullet/numbered/lettered list buttons
+  into one dropdown; (4) STRUCTURAL: compress the intake section, move Ask DIA right
+  under the upload, hierarchy should spotlight the post-intake workflow (Ask DIA →
+  draft editor). Items 1-3 quick wins; item 4 moves demo quality most. Awaiting
+  status-note update + new PR.
 
 ### 2. Diagram session — `claude/eloquent-maxwell-77ceed`
 - Session: "Architecture diagram polish" (`local_12c24ba5-6372-4bd3-b3da-05cffe123efe`)
@@ -47,8 +55,8 @@
     variant (animated SVGs screenshot blank at t=0); Mycelium PDF 22 MB → 6.5 MB; gallery
     updated. Set now 21 files.
     Loop iter 4 (integrity check): 21/21 files verified, all links resolve, all SVGs
-    parse. Set complete and stable. **Session recommends Navy cancel loop job `268b2382`
-    — scope exhausted.**
+    parse. Set complete and stable. Session recommended cancelling
+    loop job `268b2382` — **Navy cancelled it 2026-06-10.**
     Loop iter 5 (upstream sync): `docs/architecture.svg` advanced on main
     (899d373 → 7f1a2ca); delta propagated into all 5 variants + statics + PDFs,
     index ref bumped, all re-verified. Still 21 files; repo untouched since `cf6b4dc`.
