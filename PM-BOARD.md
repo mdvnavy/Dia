@@ -24,12 +24,14 @@
     needs one human click in a real browser to confirm end-to-end.
   - Bonus from overnight: light mode, TTS, auto-speak, conversation mode, dictation,
     Share on X, accessibility pass (`eff1576..f4412cc`).
-- **Directive #2 QUEUED 2026-06-10 (Navy's live review):** (1) replace `cursor: wait`
-  hourglass busy state (`static/style.css:102`) with an inline spinner — hourglass reads
-  as non-functional; (2) hide the `kicker` header line (`templates/index.html:28`) and
-  surface "Discovery Intake Agent / Gemini ADK" via hover tooltip on "DIA" or a ⓘ
-  affordance (accessible + touch-friendly). Land on the branch so PR #11 carries them.
-  Navy holds the merge until these land.
+- **Directive #2 ✅ DELIVERED 2026-06-10 (~16:35Z), commit `032e52b` on PR #11:**
+  (1) hourglass replaced with inline spinner ring + `cursor: progress`, honors
+  prefers-reduced-motion; (2) kicker removed, full name via tooltip on the DIA title +
+  "?" affordance (hover/focus/tap), screen-reader text preserved in the h1.
+  Bonus `a510664`: Codex review fixes (native dblclick + 600ms copy grace; Share on X
+  via documented /intent/tweet). All PR #11 review threads resolved. Browser-verified.
+  **PR #11 ready for Navy's merge — CI re-running on the new push; auto-merge now
+  available repo-wide.**
 
 ### 2. Diagram session — `claude/eloquent-maxwell-77ceed`
 - Session: "Architecture diagram polish" (`local_12c24ba5-6372-4bd3-b3da-05cffe123efe`)

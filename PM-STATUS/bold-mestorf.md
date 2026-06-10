@@ -41,3 +41,22 @@ headless (preview window never holds OS focus — browser denies clipboard
 access). Code paths and fallbacks verified; needs one human click in a real
 browser to confirm end-to-end. PM-DIRECTIVE.md absorbed and deleted, not
 committed.
+
+## Update — PM directive #2 (2026-06-10 ~12:35 PM EST)
+
+Both tweaks landed on the branch and pushed to PR #11:
+
+1. **Hourglass killed** (032e52b): busy buttons (Run Intake, Send to Gemini)
+   now show an inline animated spinner ring with cursor: progress —
+   busy-but-alive, never dead. Plain disabled buttons use not-allowed.
+   Spinner respects prefers-reduced-motion (static ring, no spin).
+2. **Subtitle -> tooltip** (032e52b): kicker line removed from the header.
+   Full name shows on hovering the DIA title (native title attr) or via the
+   "?" affordance (hover/focus/tap-toggle for touch). Screen readers get the
+   full name from a visually-hidden span inside the h1.
+
+Also in this push (a510664): two Codex review fixes — paste now uses native
+dblclick with a 600ms copy grace so slow double-clicks can't clobber the
+clipboard, and Share on X uses the documented /intent/tweet endpoint. All
+review threads on PR #11 are replied to and resolved. Browser-verified;
+console clean. Ready for Navy's merge.
