@@ -189,6 +189,68 @@ copySection.addEventListener("click", async () => {
   await copyText(documents[activeDoc] || "", `${activeLabel()} copied`);
 });
 
+const draftEditor = document.querySelector("#draftEditor");
+const draftLoad = document.querySelector("#draftLoad");
+const draftCopy = document.querySelector("#draftCopy");
+const draftPaste = document.querySelector("#draftPaste");
+const draftClear = document.querySelector("#draftClear");
+
+function refreshDraftControls() {
+  const hasText = draftEditor.value.trim().length > 0;
+  draftCopy.disabled = !hasText;
+  draftClear.disabled = !hasText;
+  draftLoad.disabled = !documents[activeDoc];
+}
+
+draftEditor.addEventListener("input", refreshDraftControls);
+
+draftLoad.addEventListener("click", () => {
+  const content = documents[activeDoc];
+  if (!content) {
+    statusText.textContent = "Run an intake first";
+    return;
+  }
+  draftEditor.value = content;
+  refreshDraftControls();
+  draftEditor.focus();
+  statusText.textContent = `${activeLabel()} loaded into draft editor`;
+});
+
+draftCopy.addEventListener("click", async () => {
+  await copyText(draftEditor.value, "Draft copied");
+});
+
+draftPaste.addEventListener("click", async () => {
+  if (!navigator.clipboard?.readText || !window.isSecureContext) {
+    statusText.textContent = "Paste blocked by browser - use Ctrl+V in the editor";
+    draftEditor.focus();
+    return;
+  }
+  try {
+    const clip = await navigator.clipboard.readText();
+    if (!clip) {
+      statusText.textContent = "Clipboard is empty";
+      return;
+    }
+    const start = draftEditor.selectionStart ?? draftEditor.value.length;
+    const end = draftEditor.selectionEnd ?? draftEditor.value.length;
+    draftEditor.setRangeText(clip, start, end, "end");
+    refreshDraftControls();
+    draftEditor.focus();
+    statusText.textContent = "Pasted from clipboard";
+  } catch (error) {
+    statusText.textContent = "Paste blocked by browser - use Ctrl+V in the editor";
+    draftEditor.focus();
+  }
+});
+
+draftClear.addEventListener("click", () => {
+  draftEditor.value = "";
+  refreshDraftControls();
+  draftEditor.focus();
+  statusText.textContent = "Draft cleared";
+});
+
 function renderIssues(items) {
   issues.innerHTML = "";
   if (!items.length) {
@@ -206,6 +268,7 @@ function renderIssues(items) {
 
 function renderDocument(name) {
   output.textContent = documents[name] || "Run an intake to generate this document.";
+  refreshDraftControls();
 }
 
 function setExportAvailability(isAvailable) {
@@ -237,7 +300,14 @@ async function copyText(text, successMessage) {
     }
     statusText.textContent = successMessage;
   } catch (error) {
-    statusText.textContent = "Copy failed";
+    // Embedded contexts (iframes, previews) can deny the async clipboard API
+    // even on localhost; the execCommand fallback usually still works there.
+    try {
+      copyTextFallback(text);
+      statusText.textContent = successMessage;
+    } catch (fallbackError) {
+      statusText.textContent = "Copy failed";
+    }
   }
 }
 

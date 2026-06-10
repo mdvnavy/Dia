@@ -293,6 +293,28 @@ html:not([data-theme="light"]) .theme-icon-sun {
   display: none;
 }
 
+.draft-editor {
+  margin-top: 18px;
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+}
+
+.editor-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.editor-toolbar button {
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
+.draft-editor textarea {
+  min-height: 180px;
+}
+
 .agent {
   margin-top: 18px;
   border-top: 1px solid var(--border);
