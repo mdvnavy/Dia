@@ -48,6 +48,39 @@ def generate_intake_documents(questionnaire_markdown: str) -> dict:
     return generate_documents(intake, score)
 
 
+def _make_mcp_toolset() -> list:
+    """Connect the agent to a Make MCP Toolbox when one is configured.
+
+    The toolbox is a curated MCP server on the Make side: only the scenarios
+    published into it are exposed as tools, so the agent never sees the rest
+    of the Make account. Disabled (returns []) when MAKE_MCP_URL is unset so
+    tests and keyless local runs need no network or Make account.
+    """
+    url = os.environ.get("MAKE_MCP_URL")
+    if not url:
+        logger.info("MAKE_MCP_URL not set; running without the Make MCP toolbox.")
+        return []
+    try:
+        from google.adk.tools.mcp_tool import McpToolset
+        from google.adk.tools.mcp_tool.mcp_session_manager import (
+            StreamableHTTPConnectionParams,
+        )
+    except ImportError as error:
+        logger.warning("Make MCP toolbox disabled, ADK MCP support missing: %s", error)
+        return []
+
+    headers = {"Accept": "application/json, text/event-stream"}
+    token = os.environ.get("MAKE_MCP_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    logger.info("Make MCP toolbox enabled at %s", url.split("?")[0])
+    return [
+        McpToolset(
+            connection_params=StreamableHTTPConnectionParams(url=url, headers=headers)
+        )
+    ]
+
+
 root_agent = LlmAgent(
     model="gemini-2.5-flash",
     name="dia_discovery_intake_agent",
@@ -65,6 +98,9 @@ root_agent = LlmAgent(
         - Do not expose secrets, private client data, or unrelated internal product material.
         - Ask targeted follow-up questions when budget, decision maker, start date, goals, or pain points are missing.
         - Keep recommendations grounded in the scoring tool output.
+        - When Make toolbox tools are available and an intake is qualified (or the
+          user asks for follow-up actions), use them to execute the handoff, e.g.
+          lead automation. Report exactly which tool ran and what it returned.
     """,
     generate_content_config=types.GenerateContentConfig(
         http_options=types.HttpOptions(
@@ -79,6 +115,7 @@ root_agent = LlmAgent(
         validate_intake_fields,
         score_client_opportunity,
         generate_intake_documents,
+        *_make_mcp_toolset(),
     ],
 )
 
