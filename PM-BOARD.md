@@ -8,18 +8,22 @@
 ### 1. Superpowers session — `claude/bold-mestorf-7b7438`
 - Session: "Superpowers unified last-minute features" (`local_2e2b7bb2-2e19-4f0a-aaa2-8735338fd405`)
 - Worktree: `.claude/worktrees/bold-mestorf-7b7438`
-- **Status: DIRECTIVE QUEUED, NOT YET SEEN** (checked ~12:15Z 2026-06-10) — session shows
-  `isRunning: true` but is deep in a long turn; queued message delivers when the turn ends.
-  `PM-DIRECTIVE.md` still untouched in their worktree.
-- Worktree audit: editor commit `0ea9b34` ("Add draft email editor with copy/paste
-  toolbar") predates the directive — **old spec** (textarea + separate Copy/Paste/Clear
-  buttons). Latest commit `e37cd29` adds TTS, voice dictation, conversation mode, Share
-  on X. Confirmed via `git grep` on HEAD: no double-click handling, no undo/redo, no
-  rich-text formatting anywhere — scope change still entirely unimplemented.
-- Scope change: merge copy/paste into one button (single-click copy, double-click paste),
-  visible undo/redo buttons, all in the draft-email output section, which becomes a light
-  rich-text editor (bold/italic/underline, bulleted/numbered/lettered lists).
-- Awaiting status note at `PM-STATUS/bold-mestorf.md`
+- **Status: ✅ SCOPE CHANGE DELIVERED 2026-06-10 (~14:35Z) — committed as `dfbb1cb`.**
+  Directive absorbed (PM-DIRECTIVE.md deleted, not committed); status note at
+  `PM-STATUS/bold-mestorf.md`.
+  - Multifunctional clipboard button: single click = copy (optimistic, zero lag),
+    double click within 350ms = paste; paste outcome wins the status line. Rich
+    text/html + plain-text copy with execCommand fallback.
+  - Visible Undo/Redo buttons backed by the native undo stack; load/clear are undoable.
+  - Draft surface is contenteditable with bold/italic/underline + bulleted, numbered,
+    and lettered (a, b, c) lists. Nothing read-only.
+  - Verified in browser preview (undo round-trip, list conversions, click dispatch) +
+    backend suite 68 passed (2 pre-existing flaky deploy-validation failures, fix chip
+    already spawned).
+  - **Open caveat for Navy:** real clipboard read/write can't be exercised headless —
+    needs one human click in a real browser to confirm end-to-end.
+  - Bonus from overnight: light mode, TTS, auto-speak, conversation mode, dictation,
+    Share on X, accessibility pass (`eff1576..f4412cc`).
 
 ### 2. Diagram session — `claude/eloquent-maxwell-77ceed`
 - Session: "Architecture diagram polish" (`local_12c24ba5-6372-4bd3-b3da-05cffe123efe`)
