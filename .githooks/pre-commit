@@ -1,0 +1,4 @@
+#!/bin/sh
+# Git only executes a hook named exactly "pre-commit"; delegate to the
+# maintained script so the gitleaks scan actually runs.
+exec "$(dirname "$0")/pre-commit.sh" "$@"

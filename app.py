@@ -26,6 +26,9 @@ def _obs_capture_enabled() -> bool:
 
 
 BASE_DIR = Path(__file__).resolve().parent
+# Reject request bodies above this size before reading them, so a huge (or
+# bogus) Content-Length cannot hang the worker thread or exhaust memory.
+MAX_REQUEST_BYTES = 10 * 1024 * 1024
 PUBLIC_FILES = {
     "/": BASE_DIR / "templates" / "index.html",
     "/static/app.js": BASE_DIR / "static" / "app.js",
@@ -65,6 +68,9 @@ def build_intake_response(questionnaire: str) -> dict[str, object]:
 
 class ClientDiscoveryHandler(BaseHTTPRequestHandler):
     server_version = "DIADiscoveryIntakeAgent/0.1"
+    # Socket timeout so a client that claims a body but never sends it cannot
+    # pin a worker thread forever.
+    timeout = 10
 
     def do_GET(self) -> None:
         path = urlparse(self.path).path
@@ -137,6 +143,9 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
         except json.JSONDecodeError:
             self.send_json({"error": "invalid json"}, HTTPStatus.BAD_REQUEST)
             return
+        except ValueError as error:
+            self.send_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
+            return
 
         message = str(payload.get("message", "")).strip()
         if not message:
@@ -171,7 +180,14 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
         self.send_json({"configured": True, "reply": reply})
 
     def read_json(self) -> dict[str, object]:
-        content_length = int(self.headers.get("Content-Length", "0"))
+        try:
+            content_length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            content_length = 0
+        if content_length < 0:
+            raise ValueError("invalid content length")
+        if content_length > MAX_REQUEST_BYTES:
+            raise ValueError("request body too large")
         raw_body = self.rfile.read(content_length).decode("utf-8")
         if not raw_body:
             return {}
@@ -191,7 +207,11 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def send_file(self, file_path: Path) -> None:
-        body = file_path.read_bytes()
+        try:
+            body = file_path.read_bytes()
+        except OSError:
+            self.send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
+            return
         content_type = mimetypes.guess_type(file_path.name)[0] or "text/plain"
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", f"{content_type}; charset=utf-8")
@@ -210,7 +230,13 @@ def run_server() -> None:
     port = int(os.environ.get("PORT", "8080"))
     httpd = ThreadingHTTPServer((host, port), ClientDiscoveryHandler)
     print(f"DIA demo running at http://{host}:{port}")
-    httpd.serve_forever()
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        print("KeyboardInterrupt received, shutting down...")
+    finally:
+        httpd.server_close()
+        print("Server socket closed")
 
 
 if __name__ == "__main__":
