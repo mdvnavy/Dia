@@ -20,7 +20,7 @@
   </script>
 </head>
 <body>
-  <a class="skip-link" href="#questionnaire">Skip to questionnaire</a>
+  <a id="skipLink" class="skip-link" href="#questionnaire">Skip to questionnaire</a>
   <main class="shell">
     <section class="workspace">
       <header class="topbar">
@@ -133,11 +133,11 @@
               <button class="fmt" data-cmd="italic" type="button" aria-label="Italic"><em>I</em></button>
               <button class="fmt" data-cmd="underline" type="button" aria-label="Underline"><u>U</u></button>
               <span class="list-menu">
-                <button id="listMenuButton" class="fmt" type="button" aria-haspopup="menu" aria-expanded="false">&bull; List <span aria-hidden="true">&#9662;</span></button>
+                <button id="listMenuButton" class="fmt" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="listMenu">&bull; List <span aria-hidden="true">&#9662;</span></button>
                 <div id="listMenu" class="menu" role="menu" aria-label="List type">
-                  <button class="menu-item" role="menuitem" data-cmd="insertUnorderedList" type="button">&bull; Bulleted</button>
-                  <button class="menu-item" role="menuitem" data-cmd="insertOrderedList" type="button">1. Numbered</button>
-                  <button class="menu-item" role="menuitem" data-cmd="letteredList" type="button">a. Lettered</button>
+                  <button class="menu-item" role="menuitem" data-cmd="insertUnorderedList" type="button" tabindex="-1">&bull; Bulleted</button>
+                  <button class="menu-item" role="menuitem" data-cmd="insertOrderedList" type="button" tabindex="-1">1. Numbered</button>
+                  <button class="menu-item" role="menuitem" data-cmd="letteredList" type="button" tabindex="-1">a. Lettered</button>
                 </div>
               </span>
             </div>

@@ -73,12 +73,17 @@ function setBusy(button, busy) {
 // Run button and status stay visible for quick re-runs.
 const intakeBody = document.querySelector("#intakeBody");
 const intakeToggle = document.querySelector("#intakeToggle");
+const skipLink = document.querySelector("#skipLink");
 
 function setIntakeCollapsed(collapsed) {
   intakeBody.hidden = collapsed;
   intakeToggle.hidden = false;
   intakeToggle.setAttribute("aria-expanded", String(!collapsed));
   intakeToggle.textContent = collapsed ? "Edit intake" : "Collapse intake";
+  // Keep the skip link pointing at something visible: the hidden textarea
+  // cannot receive focus while collapsed.
+  skipLink.href = collapsed ? "#intakeToggle" : "#questionnaire";
+  skipLink.textContent = collapsed ? "Skip to intake controls" : "Skip to questionnaire";
 }
 
 intakeToggle.addEventListener("click", () => {
@@ -445,6 +450,10 @@ listMenu.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     setListMenuOpen(false);
     listMenuButton.focus();
+  } else if (event.key === "Tab") {
+    // Menu items are out of the tab order (ARIA menu pattern); Tab leaves
+    // the menu entirely, so close it and let focus move on naturally.
+    setListMenuOpen(false);
   } else if (event.key === "ArrowDown") {
     event.preventDefault();
     listMenuItems[(index + 1) % listMenuItems.length].focus();
