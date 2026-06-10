@@ -65,7 +65,9 @@
     updated. Set now 21 files.
     Loop iter 4 (integrity check): 21/21 files verified, all links resolve, all SVGs
     parse. Set complete and stable. Session recommended cancelling
-    loop job `268b2382` — **Navy cancelled it 2026-06-10.**
+    loop job `268b2382` — Navy moved to cancel 2026-06-10; the job fired once more
+    (it lived in that session), and the session executed CronDelete on that firing.
+    **Job actually deleted; loop closed. Final manifest: 21 files / 7.5 MB.**
     Loop iter 5 (upstream sync): `docs/architecture.svg` advanced on main
     (899d373 → 7f1a2ca); delta propagated into all 5 variants + statics + PDFs,
     index ref bumped, all re-verified. Still 21 files; repo untouched since `cf6b4dc`.

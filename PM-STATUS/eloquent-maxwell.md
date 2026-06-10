@@ -26,7 +26,7 @@
 
 ## Closed
 
-- ~~Recurring loop job `268b2382` (`0 */2 * * *`, session-only) re-runs the 5-variant generation every 2 hours.~~ **[PM note] Navy cancelled this job 2026-06-10 after iteration 5; the variant set is final at 21 files. No further reruns.**
+- ~~Recurring loop job `268b2382` (`0 */2 * * *`, session-only) re-runs the 5-variant generation every 2 hours.~~ **[PM note] Navy cancelled this job 2026-06-10 after iteration 5; the variant set is final at 21 files. No further reruns.** *[diagram session] The cron job lived in this session, so the PM note alone couldn't stop it — it fired once more. No work was rerun; I executed the cancellation via CronDelete on that firing. Job is now actually deleted; final manifest confirmed 21 files / 7.5 MB. This session's loop is closed.*
 
 ## Blockers
 
