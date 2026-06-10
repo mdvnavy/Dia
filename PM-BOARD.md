@@ -30,6 +30,16 @@
   "?" affordance (hover/focus/tap), screen-reader text preserved in the h1.
   Bonus `a510664`: Codex review fixes (native dblclick + 600ms copy grace; Share on X
   via documented /intent/tweet). All PR #11 review threads resolved. Browser-verified.
+- **Directive #3 ✅ DELIVERED — PR #12 MERGED to main 2026-06-10 17:27Z.** PM live
+  browser walkthrough passed everything: tooltip, collapse flow, spinner, Gemini Q&A,
+  bold/lettered-list dropdown, undo/redo (DOM-verified), and the REAL clipboard test —
+  single-click copy landed 889 chars in the OS clipboard, double-click paste round-trip
+  verified and undone. Last feature-pack caveat closed.
+- **Directive #4 SENT 2026-06-10 (~17:30Z) — final pre-video polish:** (1) PRIORITY:
+  tier card 12/20 vs live agent saying 8/20 on the same intake — agent must ground in
+  actual run results; (2) cosmetic: editor action status prints next to Run Intake,
+  should live near the draft editor. Video records when these land (or Navy skips
+  asking for scores on camera if the fix is deep).
   **PR #11 MERGED to main 2026-06-10 16:44Z (merged by PM on Navy's behalf — auto-merge button never appears without branch protection).**
 - **Directive #3 SENT 2026-06-10 (~17:05Z) — Navy's post-merge live test pass** (verdict
   on the pack: "absolute fire"). New branch/PR required since #11 merged. Items:
