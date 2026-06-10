@@ -157,19 +157,29 @@
     <!-- web-ui rides the top lane into the hub's top edge -->
     <g opacity="0">
       <animate attributeName="opacity" from="0" to="0.75" begin="1.9s" dur="0.4s" fill="freeze"/>
-      <polyline points="260,142 450,142 450,244" stroke="#60a5fa" stroke-width="1.2" marker-end="url(#arrowBlue)"/>
+      <polyline points="260,142 450,142 450,244" stroke="#60a5fa" stroke-width="1.2" stroke-dasharray="6 4" marker-end="url(#arrowBlue)">
+        <animate attributeName="stroke-dashoffset" values="0;-50" dur="1.25s" repeatCount="indefinite"/>
+      </polyline>
     </g>
     <!-- middle three connect directly to the hub's left edge -->
     <g opacity="0">
       <animate attributeName="opacity" from="0" to="0.75" begin="2.1s" dur="0.4s" fill="freeze"/>
-      <polyline points="260,228 320,228 320,275 344,275" stroke="#60a5fa" stroke-width="1.2" marker-end="url(#arrowBlue)"/>
-      <polyline points="350,321 264,321" stroke="#4ade80" stroke-width="1.2" stroke-dasharray="4 3" marker-end="url(#arrowGreen)"/>
-      <polyline points="260,414 320,414 320,365 344,365" stroke="#6b6b76" stroke-width="1.2" stroke-dasharray="3 3" marker-end="url(#arrowMuted)"/>
+      <polyline points="260,228 320,228 320,275 344,275" stroke="#60a5fa" stroke-width="1.2" stroke-dasharray="6 4" marker-end="url(#arrowBlue)">
+        <animate attributeName="stroke-dashoffset" values="0;-50" dur="1.25s" repeatCount="indefinite"/>
+      </polyline>
+      <polyline points="350,321 264,321" stroke="#4ade80" stroke-width="1.2" stroke-dasharray="4 3" marker-end="url(#arrowGreen)">
+        <animate attributeName="stroke-dashoffset" values="0;-56" dur="1.4s" repeatCount="indefinite"/>
+      </polyline>
+      <polyline points="260,414 320,414 320,365 344,365" stroke="#6b6b76" stroke-width="1.2" stroke-dasharray="3 3" marker-end="url(#arrowMuted)">
+        <animate attributeName="stroke-dashoffset" values="0;-48" dur="1.6s" repeatCount="indefinite"/>
+      </polyline>
     </g>
     <!-- gemini-api rides the bottom lane into the hub's bottom edge -->
     <g opacity="0">
       <animate attributeName="opacity" from="0" to="0.6" begin="2.3s" dur="0.4s" fill="freeze"/>
-      <polyline points="260,500 450,500 450,396" stroke="#6b6b76" stroke-width="1.2" stroke-dasharray="3 3" marker-end="url(#arrowMuted)"/>
+      <polyline points="260,500 450,500 450,396" stroke="#6b6b76" stroke-width="1.2" stroke-dasharray="3 3" marker-end="url(#arrowMuted)">
+        <animate attributeName="stroke-dashoffset" values="0;-48" dur="1.6s" repeatCount="indefinite"/>
+      </polyline>
     </g>
   </g>
 
