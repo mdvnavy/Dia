@@ -32,8 +32,10 @@ The demo UI is dependency-free (vanilla JS + built-in browser APIs):
   the reply, listen again) plus one-shot **Dictate** into the Ask-DIA box
   (Web Speech `SpeechRecognition`; controls disable where unsupported).
 - **Draft editor** - load any generated document (typically the proposal)
-  into an editable textarea and polish it into a sendable email, with
-  Copy/Paste/Clear toolbar buttons.
+  into a light rich-text editor and polish it into a sendable email: bold,
+  italic, underline, bulleted/numbered/lettered lists, visible Undo/Redo
+  buttons, and a multifunctional clipboard button (click to copy - with
+  formatting where the browser allows - double-click to paste).
 - **Share on X** - opens a prefilled x.com post with the score and tier
   summary only (no client details).
 - **Accessibility** - keyboard-navigable document tabs (arrow/Home/End),

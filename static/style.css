@@ -327,8 +327,39 @@ button.recording {
   font-size: 12px;
 }
 
-.draft-editor textarea {
+.editor-toolbar .fmt {
+  min-width: 42px;
+}
+
+.rich-editor {
   min-height: 180px;
+  max-height: 46vh;
+  overflow: auto;
+  border: 1px solid var(--border);
+  background: var(--inset);
+  color: var(--soft);
+  padding: 14px;
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.rich-editor:empty::before {
+  content: attr(data-placeholder);
+  color: var(--muted);
+  pointer-events: none;
+}
+
+.rich-editor ul,
+.rich-editor ol {
+  white-space: normal;
+  margin: 6px 0;
+  padding-left: 26px;
+}
+
+.rich-editor ol.lettered {
+  list-style-type: lower-alpha;
 }
 
 .agent {

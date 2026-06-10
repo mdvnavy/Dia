@@ -200,18 +200,30 @@ copySection.addEventListener("click", async () => {
 
 const draftEditor = document.querySelector("#draftEditor");
 const draftLoad = document.querySelector("#draftLoad");
-const draftCopy = document.querySelector("#draftCopy");
-const draftPaste = document.querySelector("#draftPaste");
+const draftCopyPaste = document.querySelector("#draftCopyPaste");
+const draftUndo = document.querySelector("#draftUndo");
+const draftRedo = document.querySelector("#draftRedo");
 const draftClear = document.querySelector("#draftClear");
+const formatButtons = [...document.querySelectorAll(".fmt")];
+
+function draftText() {
+  return draftEditor.innerText.replace(/\u00a0/g, " ");
+}
 
 function refreshDraftControls() {
-  const hasText = draftEditor.value.trim().length > 0;
-  draftCopy.disabled = !hasText;
-  draftClear.disabled = !hasText;
+  draftClear.disabled = draftText().trim().length === 0;
   draftLoad.disabled = !documents[activeDoc];
 }
 
 draftEditor.addEventListener("input", refreshDraftControls);
+
+// Route content changes through execCommand so they land on the editor's
+// native undo stack and the visible Undo/Redo buttons can revert them.
+function replaceDraftContent(text) {
+  draftEditor.focus();
+  document.execCommand("selectAll");
+  document.execCommand("insertText", false, text);
+}
 
 draftLoad.addEventListener("click", () => {
   const content = documents[activeDoc];
@@ -219,17 +231,35 @@ draftLoad.addEventListener("click", () => {
     statusText.textContent = "Run an intake first";
     return;
   }
-  draftEditor.value = content;
+  replaceDraftContent(content);
   refreshDraftControls();
-  draftEditor.focus();
   statusText.textContent = `${activeLabel()} loaded into draft editor`;
 });
 
-draftCopy.addEventListener("click", async () => {
-  await copyText(draftEditor.value, "Draft copied");
-});
+async function copyDraft() {
+  const text = draftText();
+  if (!text.trim()) {
+    statusText.textContent = "No draft to copy";
+    return;
+  }
+  try {
+    if (navigator.clipboard?.write && window.ClipboardItem && window.isSecureContext) {
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          "text/html": new Blob([draftEditor.innerHTML], { type: "text/html" }),
+          "text/plain": new Blob([text], { type: "text/plain" }),
+        }),
+      ]);
+      statusText.textContent = "Draft copied (with formatting)";
+      return;
+    }
+  } catch (error) {
+    // Rich copy denied; fall through to the plain-text helper and its fallbacks.
+  }
+  await copyText(text, "Draft copied");
+}
 
-draftPaste.addEventListener("click", async () => {
+async function pasteIntoDraft() {
   if (!navigator.clipboard?.readText || !window.isSecureContext) {
     statusText.textContent = "Paste blocked by browser - use Ctrl+V in the editor";
     draftEditor.focus();
@@ -241,23 +271,92 @@ draftPaste.addEventListener("click", async () => {
       statusText.textContent = "Clipboard is empty";
       return;
     }
-    const start = draftEditor.selectionStart ?? draftEditor.value.length;
-    const end = draftEditor.selectionEnd ?? draftEditor.value.length;
-    draftEditor.setRangeText(clip, start, end, "end");
-    refreshDraftControls();
     draftEditor.focus();
+    document.execCommand("insertText", false, clip);
+    refreshDraftControls();
     statusText.textContent = "Pasted from clipboard";
   } catch (error) {
     statusText.textContent = "Paste blocked by browser - use Ctrl+V in the editor";
     draftEditor.focus();
   }
+}
+
+// One multifunctional button: click = copy, double-click = paste. Copy fires
+// optimistically on the first click (it is idempotent and harmless before a
+// paste), so single-click copy has zero lag; a second click inside the window
+// upgrades the gesture to paste.
+let copyPasteTimer = null;
+let pendingCopy = Promise.resolve();
+
+draftCopyPaste.addEventListener("click", () => {
+  if (copyPasteTimer) {
+    clearTimeout(copyPasteTimer);
+    copyPasteTimer = null;
+    // Wait for the optimistic copy to finish so the paste outcome (not the
+    // earlier copy status) is what the user ends up seeing.
+    pendingCopy.then(() => pasteIntoDraft());
+    return;
+  }
+  pendingCopy = copyDraft();
+  copyPasteTimer = setTimeout(() => {
+    copyPasteTimer = null;
+  }, 350);
+});
+
+draftUndo.addEventListener("click", () => {
+  draftEditor.focus();
+  document.execCommand("undo");
+  refreshDraftControls();
+});
+
+draftRedo.addEventListener("click", () => {
+  draftEditor.focus();
+  document.execCommand("redo");
+  refreshDraftControls();
 });
 
 draftClear.addEventListener("click", () => {
-  draftEditor.value = "";
-  refreshDraftControls();
   draftEditor.focus();
+  document.execCommand("selectAll");
+  document.execCommand("delete");
+  refreshDraftControls();
   statusText.textContent = "Draft cleared";
+});
+
+function closestInEditor(tagName) {
+  let node = window.getSelection()?.anchorNode;
+  while (node && node !== draftEditor) {
+    if (node.nodeName === tagName) {
+      return node;
+    }
+    node = node.parentNode;
+  }
+  return null;
+}
+
+formatButtons.forEach((button) => {
+  // Keep focus (and the selection) in the editor while clicking the toolbar.
+  button.addEventListener("mousedown", (event) => event.preventDefault());
+  button.addEventListener("click", () => {
+    const command = button.dataset.cmd;
+    draftEditor.focus();
+    if (command === "letteredList") {
+      document.execCommand("insertOrderedList");
+      const list = closestInEditor("OL");
+      if (list) {
+        list.classList.add("lettered");
+      }
+    } else if (command === "insertOrderedList") {
+      document.execCommand("insertOrderedList");
+      const list = closestInEditor("OL");
+      if (list) {
+        list.classList.remove("lettered");
+      }
+    } else {
+      document.execCommand(command, false, null);
+    }
+    refreshDraftControls();
+  });
 });
 
 function renderIssues(items) {

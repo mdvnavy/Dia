@@ -83,17 +83,29 @@
             <h2 id="draftHeading">Draft Editor</h2>
             <div class="editor-toolbar" role="group" aria-label="Draft editor actions">
               <button id="draftLoad" type="button" disabled>Load current document</button>
-              <button id="draftCopy" class="icon-button" type="button" disabled>
-                <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                Copy
-              </button>
-              <button id="draftPaste" class="icon-button" type="button">
+              <button id="draftCopyPaste" class="icon-button" type="button" title="Click: copy the draft. Double-click: paste from clipboard." aria-label="Copy draft, double-click to paste">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
-                Paste
+                Copy / Paste
+              </button>
+              <button id="draftUndo" class="icon-button" type="button" aria-label="Undo">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+                Undo
+              </button>
+              <button id="draftRedo" class="icon-button" type="button" aria-label="Redo">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.13-9.36L23 10"/></svg>
+                Redo
               </button>
               <button id="draftClear" type="button" disabled>Clear</button>
             </div>
-            <textarea id="draftEditor" spellcheck="true" aria-labelledby="draftHeading" placeholder="Load the proposal (or any generated document) here and edit it into a sendable email."></textarea>
+            <div class="editor-toolbar" role="group" aria-label="Draft formatting">
+              <button class="fmt" data-cmd="bold" type="button" aria-label="Bold"><strong>B</strong></button>
+              <button class="fmt" data-cmd="italic" type="button" aria-label="Italic"><em>I</em></button>
+              <button class="fmt" data-cmd="underline" type="button" aria-label="Underline"><u>U</u></button>
+              <button class="fmt" data-cmd="insertUnorderedList" type="button" aria-label="Bulleted list">&bull; List</button>
+              <button class="fmt" data-cmd="insertOrderedList" type="button" aria-label="Numbered list">1. List</button>
+              <button class="fmt" data-cmd="letteredList" type="button" aria-label="Lettered list">a. List</button>
+            </div>
+            <div id="draftEditor" class="rich-editor" contenteditable="true" spellcheck="true" role="textbox" aria-multiline="true" aria-labelledby="draftHeading" data-placeholder="Load the proposal (or any generated document) here and edit it into a sendable email."></div>
           </section>
 
           <div class="agent">
