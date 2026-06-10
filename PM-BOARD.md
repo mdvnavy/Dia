@@ -30,8 +30,7 @@
   "?" affordance (hover/focus/tap), screen-reader text preserved in the h1.
   Bonus `a510664`: Codex review fixes (native dblclick + 600ms copy grace; Share on X
   via documented /intent/tweet). All PR #11 review threads resolved. Browser-verified.
-  **PR #11 ready for Navy's merge — CI re-running on the new push; auto-merge now
-  available repo-wide.**
+  **PR #11 MERGED to main 2026-06-10 16:44Z (merged by PM on Navy's behalf — auto-merge button never appears without branch protection). Workstream CLOSED.**
 
 ### 2. Diagram session — `claude/eloquent-maxwell-77ceed`
 - Session: "Architecture diagram polish" (`local_12c24ba5-6372-4bd3-b3da-05cffe123efe`)
