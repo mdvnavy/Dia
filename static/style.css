@@ -2,18 +2,76 @@
   --bg: #0c0c0e;
   --surface: #141416;
   --raised: #1c1c1f;
+  --inset: #101012;
   --border: #2a2a2e;
   --text: #e8e8ec;
   --soft: #cfcfd5;
-  --muted: #7b7b86;
+  --muted: #8d8d98;
   --accent: #c8a96e;
   --accent-strong: #d6bd86;
   --good: #8bd39c;
   --mono: "JetBrains Mono", Consolas, monospace;
   --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color-scheme: dark;
+}
+
+html[data-theme="light"] {
+  --bg: #f3f1ec;
+  --surface: #fdfcfa;
+  --raised: #f0ede6;
+  --inset: #faf8f4;
+  --border: #d9d4c9;
+  --text: #1d1c1a;
+  --soft: #3a3833;
+  --muted: #6e6962;
+  --accent: #8a6c33;
+  --accent-strong: #6f5526;
+  --good: #1f6e3c;
+  color-scheme: light;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  body, button, textarea, pre {
+    transition: background-color .25s ease, color .25s ease, border-color .25s ease;
+  }
 }
 
 * { box-sizing: border-box; }
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.skip-link {
+  position: absolute;
+  top: -100px;
+  left: 16px;
+  z-index: 10;
+  padding: 10px 14px;
+  border: 1px solid var(--accent);
+  background: var(--raised);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 13px;
+  text-decoration: none;
+}
+
+.skip-link:focus {
+  top: 12px;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 
 body {
   margin: 0;
@@ -41,8 +99,35 @@ button:hover, button.active {
 }
 
 button:disabled {
-  cursor: wait;
+  cursor: not-allowed;
   opacity: .65;
+}
+
+/* Busy = working, not broken: spinner ring instead of a dead hourglass. */
+button.busy {
+  cursor: progress;
+}
+
+button.busy::after {
+  content: "";
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  margin-left: 8px;
+  vertical-align: -1px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  button.busy::after {
+    animation: dia-spin .7s linear infinite;
+  }
+}
+
+@keyframes dia-spin {
+  to { transform: rotate(360deg); }
 }
 
 .shell {
@@ -65,13 +150,45 @@ button:disabled {
   padding: 22px;
 }
 
-.kicker {
-  margin: 0 0 6px;
-  color: var(--accent);
+.app-tip {
+  position: relative;
+  display: inline-block;
+  margin-left: 10px;
+  vertical-align: middle;
+}
+
+.info-tip {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 50%;
   font-family: var(--mono);
   font-size: 12px;
-  letter-spacing: .12em;
-  text-transform: uppercase;
+  line-height: 1;
+}
+
+.tip-bubble {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 20;
+  white-space: nowrap;
+  border: 1px solid var(--accent);
+  background: var(--raised);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: .06em;
+  padding: 8px 10px;
+  opacity: 0;
+  visibility: hidden;
+}
+
+.app-tip:hover .tip-bubble,
+.app-tip:focus-within .tip-bubble,
+.app-tip.open .tip-bubble {
+  opacity: 1;
+  visibility: visible;
 }
 
 h1 {
@@ -112,7 +229,7 @@ textarea {
   min-height: 62vh;
   resize: vertical;
   border: 1px solid var(--border);
-  background: #101012;
+  background: var(--inset);
   color: var(--soft);
   padding: 14px;
   font-family: var(--mono);
@@ -197,12 +314,111 @@ pre {
   white-space: pre-wrap;
   overflow: auto;
   border: 1px solid var(--border);
-  background: #101012;
+  background: var(--inset);
   color: var(--soft);
   padding: 14px;
   font-family: var(--mono);
   font-size: 13px;
   line-height: 1.45;
+}
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 9px 11px;
+}
+
+.icon-button svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.icon-button svg.fill-icon {
+  fill: currentColor;
+  stroke: none;
+}
+
+html[data-theme="light"] .theme-icon-moon,
+html:not([data-theme="light"]) .theme-icon-sun {
+  display: none;
+}
+
+.actions button[aria-pressed="true"],
+.export-bar button[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent-strong);
+}
+
+button.recording {
+  border-color: var(--good);
+  color: var(--good);
+}
+
+.draft-editor {
+  margin-top: 18px;
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+}
+
+.editor-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.editor-toolbar button {
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
+.editor-toolbar .fmt {
+  min-width: 42px;
+}
+
+.rich-editor {
+  min-height: 180px;
+  max-height: 46vh;
+  overflow: auto;
+  border: 1px solid var(--border);
+  background: var(--inset);
+  color: var(--soft);
+  padding: 14px;
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.rich-editor:empty::before {
+  content: attr(data-placeholder);
+  color: var(--muted);
+  pointer-events: none;
+}
+
+.rich-editor ul,
+.rich-editor ol {
+  white-space: normal;
+  margin: 6px 0;
+  padding-left: 26px;
+}
+
+.rich-editor ol.lettered {
+  list-style-type: lower-alpha;
 }
 
 .agent {

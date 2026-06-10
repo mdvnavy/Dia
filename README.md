@@ -18,6 +18,30 @@ It ships two complementary paths:
    `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) is configured; degrades gracefully
    otherwise.
 
+## UI features
+
+The demo UI is dependency-free (vanilla JS + built-in browser APIs):
+
+- **Light/dark mode** - sun/moon toggle in the topbar; follows the system
+  preference by default and persists the choice.
+- **Text-to-speech** - Listen buttons read the generated documents and agent
+  replies aloud (Web Speech `speechSynthesis`).
+- **Voice responses** - an Auto-speak toggle reads each Gemini reply as it
+  arrives; the setting persists across visits.
+- **Conversation mode** - hands-free loop (listen, send to the agent, speak
+  the reply, listen again) plus one-shot **Dictate** into the Ask-DIA box
+  (Web Speech `SpeechRecognition`; controls disable where unsupported).
+- **Draft editor** - load any generated document (typically the proposal)
+  into a light rich-text editor and polish it into a sendable email: bold,
+  italic, underline, bulleted/numbered/lettered lists, visible Undo/Redo
+  buttons, and a multifunctional clipboard button (click to copy - with
+  formatting where the browser allows - double-click to paste).
+- **Share on X** - opens a prefilled x.com post with the score and tier
+  summary only (no client details).
+- **Accessibility** - keyboard-navigable document tabs (arrow/Home/End),
+  aria-live announcements for status and agent output, a skip link, and
+  visible focus outlines.
+
 ## Run locally
 
 ```bash
