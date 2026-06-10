@@ -1,0 +1,32 @@
+flowchart LR
+    subgraph CR["Google Cloud Run"]
+        UI["Web UI<br/>intake form + Ask DIA chat"]
+        subgraph SRV["Hardened Python HTTP server<br/>(body caps, timeouts, graceful errors)"]
+            API["/api/process"]
+            AGAPI["/api/agent"]
+        end
+        subgraph PIPE["Deterministic pipeline"]
+            P["parse"] --> V["validate"] --> S["score"] --> G["generate docs<br/>profile / analysis / proposal"]
+        end
+        AG["Gemini ADK agent<br/>LlmAgent · gemini-2.5-flash<br/>function tools + McpToolset"]
+    end
+    SM["Secret Manager<br/>GEMINI_API_KEY · MAKE_MCP_TOKEN"]
+    subgraph MAKE["Make — DIA Agent Toolbox (MCP server)"]
+        T1["email_proposal → Gmail"]
+        T2["crm_record_lead → Notion"]
+        T3["enrich_prospect_website → HTTP"]
+        T4["create_followup_task → Taskade"]
+        T5["escalate_to_human → Gmail"]
+    end
+    OBS["OBS Studio capture<br/>(local demo aid, opt-in)"]
+    GEM["Gemini API"]
+
+    UI --> API
+    UI --> AGAPI
+    API --> PIPE
+    AGAPI --> AG
+    AG -- "function tools" --> PIPE
+    AG -- "LLM turns" --> GEM
+    AG == "MCP (streamable HTTP + bearer key)" ==> MAKE
+    SM -.-> AG
+    API -. "on validation issues<br/>(OBS_CAPTURE=1)" .-> OBS
