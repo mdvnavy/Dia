@@ -22,8 +22,11 @@
 
 ## Pending
 
-- Recurring loop job `268b2382` (`0 */2 * * *`, session-only) re-runs the 5-variant generation every 2 hours; next iterations refine in place unless redirected.
 - No further repo changes planned; awaiting any user feedback ahead of the June 11, 5 PM PT Devpost deadline.
+
+## Closed
+
+- ~~Recurring loop job `268b2382` (`0 */2 * * *`, session-only) re-runs the 5-variant generation every 2 hours.~~ **[PM note] Navy cancelled this job 2026-06-10 after iteration 5; the variant set is final at 21 files. No further reruns.**
 
 ## Blockers
 

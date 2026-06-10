@@ -41,11 +41,13 @@
   Gemini Q&A, bold/lettered-list dropdown, undo/redo (DOM-verified), and the REAL
   clipboard test — single-click copy landed 889 chars in the OS clipboard, double-click
   paste round-trip verified and undone. Last feature-pack caveat closed.
-- **Directive #4 SENT 2026-06-10 (~17:30Z) — final pre-video polish (ACTIVE):**
-  (1) PRIORITY: tier card 12/20 vs live agent saying 8/20 on the same intake — agent
-  must ground in actual run results; (2) cosmetic: editor action status prints next to
-  Run Intake, should live near the draft editor. Video records when these land (or Navy
-  skips asking for scores on camera if the fix is deep). Awaiting status note + PR.
+- **Directive #4 ✅ DELIVERED — PR #13 MERGED to main 2026-06-10 (~17:50Z).**
+  (1) Score mismatch root-caused: chat context carried only the viewed document, so the
+  agent re-scored a lossy re-parse (8/20); context now leads with authoritative run
+  results as ground truth. Verified live: agent returns 12/20 / Custom AI Agent,
+  identical to the card — safe to ask for scores on camera. (2) Editor/export actions
+  report in auto-clearing inline statuses beside their controls; intake line reports
+  intake only. **Workstream CLOSED — main is demo-ready, recording unblocked.**
 
 ### 2. Diagram session — `claude/eloquent-maxwell-77ceed`
 - Session: "Architecture diagram polish" (`local_12c24ba5-6372-4bd3-b3da-05cffe123efe`)
