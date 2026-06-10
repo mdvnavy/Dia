@@ -27,11 +27,16 @@ constraint), X API integration (needs OAuth keys; web intent needs none).
    into the Ask-DIA box. "Conversation" toggle runs the hands-free loop:
    listen → send to agent → speak reply → listen again. Stops on toggle-off,
    error, or unsupported browser (button disabled with explanation).
-4. **Draft email editor** — lightweight editor section under the results pane:
-   "Edit in draft editor" loads the active document (typically the proposal)
-   into a textarea for tweaks; toolbar has Copy and Paste buttons using
-   standard clipboard SVG icons, plus Clear. Copy uses the existing clipboard
-   helper; Paste uses `navigator.clipboard.readText` with fallback messaging.
+4. **Draft email editor** — *(amended same-day by PM directive)* a light
+   rich-text editor section under the results pane: "Load current document"
+   pulls the active document (typically the proposal) into a `contenteditable`
+   surface, editable in place with bold/italic/underline and bulleted,
+   numbered, and lettered (a, b, c) lists. Toolbar has a single
+   multifunctional clipboard button (single click = copy, double click =
+   paste, copy deferred past the double-click window so it cannot clobber the
+   clipboard being pasted), visible Undo/Redo buttons on the native undo
+   stack, and Clear. Copy writes text/html + text/plain where allowed; paste
+   uses `navigator.clipboard.readText` with fallback messaging.
 5. **Accessibility** — proper tablist/tab/tabpanel roles with arrow-key
    navigation; `aria-live` on status, agent output, and issues; `aria-pressed`
    on toggles; `aria-label` on icon buttons; skip-to-content link; visible

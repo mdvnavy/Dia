@@ -85,6 +85,7 @@ runAgent.addEventListener("click", async () => {
 
 function selectTab(tab, { focus = false } = {}) {
   activeDoc = tab.dataset.doc;
+  output.setAttribute("aria-labelledby", tab.id);
   tabs.forEach((item) => {
     const isActive = item === tab;
     item.classList.toggle("active", isActive);
@@ -317,6 +318,11 @@ draftClear.addEventListener("click", () => {
   draftEditor.focus();
   document.execCommand("selectAll");
   document.execCommand("delete");
+  // Browsers often leave a stray <br> behind, which defeats the :empty
+  // placeholder; strip the leftover markup once the text is gone.
+  if (!draftEditor.innerText.trim()) {
+    draftEditor.innerHTML = "";
+  }
   refreshDraftControls();
   statusText.textContent = "Draft cleared";
 });
@@ -579,23 +585,27 @@ function listenOnce({ onTranscript, onError }) {
   rec.lang = navigator.language || "en-US";
   rec.interimResults = false;
   rec.maxAlternatives = 1;
-  let gotResult = false;
+  let settled = false;
   rec.onstart = () => {
     recognizing = true;
     micButton.setAttribute("aria-pressed", "true");
   };
   rec.onresult = (event) => {
-    gotResult = true;
-    onTranscript(event.results[0][0].transcript.trim());
+    settled = true;
+    if (!rec.cancelled) {
+      onTranscript(event.results[0][0].transcript.trim());
+    }
   };
   rec.onerror = (event) => {
-    gotResult = true;
-    onError(event.error);
+    settled = true;
+    if (!rec.cancelled) {
+      onError(event.error);
+    }
   };
   rec.onend = () => {
     recognizing = false;
     micButton.setAttribute("aria-pressed", "false");
-    if (!gotResult) {
+    if (!settled && !rec.cancelled) {
       onError("no-speech");
     }
   };
@@ -603,13 +613,21 @@ function listenOnce({ onTranscript, onError }) {
   return rec;
 }
 
+// Aborting a recognizer still fires its error/end events asynchronously;
+// the cancelled flag keeps those late events from overwriting whatever
+// status message the cancelling code just set.
+function cancelRecognition() {
+  if (recognition && recognizing) {
+    recognition.cancelled = true;
+    recognition.abort();
+  }
+}
+
 function stopConversation(message) {
   conversationActive = false;
   conversationMode.setAttribute("aria-pressed", "false");
   conversationMode.classList.remove("recording");
-  if (recognition && recognizing) {
-    recognition.abort();
-  }
+  cancelRecognition();
   stopSpeaking();
   if (message) {
     statusText.textContent = message;
@@ -672,7 +690,7 @@ if (SpeechRecognitionImpl) {
       return;
     }
     if (recognizing) {
-      recognition.abort();
+      cancelRecognition();
       statusText.textContent = "Dictation cancelled";
       return;
     }
@@ -702,9 +720,7 @@ if (SpeechRecognitionImpl) {
       stopConversation("Conversation ended");
       return;
     }
-    if (recognizing) {
-      recognition.abort();
-    }
+    cancelRecognition();
     conversationActive = true;
     conversationMode.setAttribute("aria-pressed", "true");
     conversationMode.classList.add("recording");

@@ -59,9 +59,9 @@
             <ul id="issues" aria-live="polite" aria-labelledby="issuesHeading"></ul>
           </div>
           <div class="tabs" role="tablist" aria-label="Generated documents">
-            <button class="tab active" data-doc="client-profile.md" type="button" role="tab" aria-selected="true" aria-controls="documentOutput">Profile</button>
-            <button class="tab" data-doc="opportunity-analysis.md" type="button" role="tab" aria-selected="false" aria-controls="documentOutput" tabindex="-1">Analysis</button>
-            <button class="tab" data-doc="proposal-draft.md" type="button" role="tab" aria-selected="false" aria-controls="documentOutput" tabindex="-1">Proposal</button>
+            <button class="tab active" id="tab-profile" data-doc="client-profile.md" type="button" role="tab" aria-selected="true" aria-controls="documentOutput">Profile</button>
+            <button class="tab" id="tab-analysis" data-doc="opportunity-analysis.md" type="button" role="tab" aria-selected="false" aria-controls="documentOutput" tabindex="-1">Analysis</button>
+            <button class="tab" id="tab-proposal" data-doc="proposal-draft.md" type="button" role="tab" aria-selected="false" aria-controls="documentOutput" tabindex="-1">Proposal</button>
           </div>
           <div class="export-bar" role="group" aria-label="Output export actions">
             <button id="copyAll" type="button" disabled>Copy all</button>
@@ -77,7 +77,7 @@
               Share on X
             </button>
           </div>
-          <pre id="documentOutput" role="tabpanel" tabindex="0" aria-label="Document output"></pre>
+          <pre id="documentOutput" role="tabpanel" tabindex="0" aria-labelledby="tab-profile"></pre>
 
           <section class="draft-editor">
             <h2 id="draftHeading">Draft Editor</h2>

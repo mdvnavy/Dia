@@ -3,7 +3,7 @@
   "configurations": [
     {
       "name": "dia",
-      "runtimeExecutable": "D:\\_cultco\\_agnt-ws\\_repos\\client-discovery-agent-adk\\.venv\\Scripts\\python.exe",
+      "runtimeExecutable": "python",
       "runtimeArgs": ["app.py"],
       "port": 8123,
       "autoPort": true
