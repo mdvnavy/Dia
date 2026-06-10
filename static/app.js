@@ -20,6 +20,31 @@ let documents = {};
 let latestPayload = null;
 let activeDoc = "client-profile.md";
 
+const themeToggle = document.querySelector("#themeToggle");
+
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  const isLight = theme === "light";
+  themeToggle.setAttribute("aria-pressed", String(isLight));
+  themeToggle.setAttribute(
+    "aria-label",
+    isLight ? "Switch to dark mode" : "Switch to light mode"
+  );
+}
+
+themeToggle.addEventListener("click", () => {
+  const next =
+    document.documentElement.dataset.theme === "light" ? "dark" : "light";
+  applyTheme(next);
+  try {
+    localStorage.setItem("dia-theme", next);
+  } catch (error) {
+    // Private browsing can block storage; the toggle still works for the session.
+  }
+});
+
+applyTheme(document.documentElement.dataset.theme || "dark");
+
 loadSample.addEventListener("click", async () => {
   statusText.textContent = "Loading sample...";
   const response = await fetch("/api/sample");
