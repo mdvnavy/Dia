@@ -19,6 +19,9 @@ const copySection = document.querySelector("#copySection");
 let documents = {};
 let latestPayload = null;
 let activeDoc = "client-profile.md";
+// The questionnaire text that produced latestPayload, so agent context always
+// matches the run shown in the tier card even if the textarea is edited later.
+let lastRunQuestionnaire = "";
 
 const themeToggle = document.querySelector("#themeToggle");
 
@@ -116,6 +119,7 @@ runAgent.addEventListener("click", async () => {
       throw new Error(payload.error || "Processing failed");
     }
     latestPayload = payload;
+    lastRunQuestionnaire = questionnaire.value;
     documents = payload.documents;
     tier.textContent = payload.score.tier;
     score.textContent = `${payload.score.total_score}/${payload.score.max_score} · ${payload.score.timeline}`;
@@ -188,13 +192,45 @@ async function refreshAgentStatus() {
   }
 }
 
+// Ground the agent in the deterministic run so its answers (scores, missing
+// fields, tier) agree with the tier card instead of re-scoring a lossy
+// re-parse of whichever generated document happens to be on screen.
+function buildAgentContext() {
+  const sections = [];
+  if (latestPayload) {
+    const scoreInfo = latestPayload.score;
+    const issueLines = latestPayload.issues.length
+      ? latestPayload.issues
+          .map((issue) => `  - ${issue.severity}: ${issue.message}`)
+          .join("\n")
+      : "  - none";
+    sections.push(
+      "Authoritative results from the deterministic intake run (treat these " +
+        "as ground truth; do not re-score unless explicitly asked to " +
+        "re-evaluate):\n" +
+        `- Recommended tier: ${scoreInfo.tier}\n` +
+        `- Score: ${scoreInfo.total_score}/${scoreInfo.max_score}\n` +
+        `- Timeline: ${scoreInfo.timeline}\n` +
+        `- Validation issues:\n${issueLines}`
+    );
+    sections.push(
+      "Original questionnaire markdown (use THIS as input if you run any " +
+        "intake tools):\n" + lastRunQuestionnaire
+    );
+  }
+  if (documents[activeDoc]) {
+    sections.push(`Currently viewed document (${activeDoc}):\n${documents[activeDoc]}`);
+  }
+  return sections.length ? `\n\nContext:\n${sections.join("\n\n---\n\n")}` : "";
+}
+
 async function sendAgentMessage() {
   const message = agentMessage.value.trim();
   if (!message) {
     agentOutput.textContent = "Type a question for the agent first.";
     return null;
   }
-  const context = documents[activeDoc] ? `\n\nContext:\n${documents[activeDoc]}` : "";
+  const context = buildAgentContext();
   agentOutput.textContent = "Thinking...";
   setBusy(runChat, true);
   try {
@@ -227,12 +263,12 @@ runChat.addEventListener("click", async () => {
 refreshAgentStatus();
 
 copyAll.addEventListener("click", async () => {
-  await copyText(buildMarkdownExport(), "All outputs copied");
+  await copyText(buildMarkdownExport(), "All outputs copied", exportStatus);
 });
 
 downloadMarkdown.addEventListener("click", () => {
   downloadFile("dia-outputs.md", buildMarkdownExport(), "text/markdown");
-  statusText.textContent = "Markdown downloaded";
+  flashStatus(exportStatus, "Markdown downloaded");
 });
 
 downloadJson.addEventListener("click", () => {
@@ -241,14 +277,15 @@ downloadJson.addEventListener("click", () => {
     JSON.stringify(latestPayload, null, 2),
     "application/json"
   );
-  statusText.textContent = "JSON downloaded";
+  flashStatus(exportStatus, "JSON downloaded");
 });
 
 copySection.addEventListener("click", async () => {
-  await copyText(documents[activeDoc] || "", `${activeLabel()} copied`);
+  await copyText(documents[activeDoc] || "", `${activeLabel()} copied`, exportStatus);
 });
 
 const draftEditor = document.querySelector("#draftEditor");
+const draftStatus = document.querySelector("#draftStatus");
 const draftLoad = document.querySelector("#draftLoad");
 const draftCopyPaste = document.querySelector("#draftCopyPaste");
 const draftUndo = document.querySelector("#draftUndo");
@@ -278,18 +315,18 @@ function replaceDraftContent(text) {
 draftLoad.addEventListener("click", () => {
   const content = documents[activeDoc];
   if (!content) {
-    statusText.textContent = "Run an intake first";
+    flashStatus(draftStatus, "Run an intake first");
     return;
   }
   replaceDraftContent(content);
   refreshDraftControls();
-  statusText.textContent = `${activeLabel()} loaded into draft editor`;
+  flashStatus(draftStatus, `${activeLabel()} loaded into draft editor`);
 });
 
 async function copyDraft() {
   const text = draftText();
   if (!text.trim()) {
-    statusText.textContent = "No draft to copy";
+    flashStatus(draftStatus, "No draft to copy");
     return;
   }
   try {
@@ -300,33 +337,33 @@ async function copyDraft() {
           "text/plain": new Blob([text], { type: "text/plain" }),
         }),
       ]);
-      statusText.textContent = "Draft copied (with formatting)";
+      flashStatus(draftStatus, "Draft copied (with formatting)");
       return;
     }
   } catch (error) {
     // Rich copy denied; fall through to the plain-text helper and its fallbacks.
   }
-  await copyText(text, "Draft copied");
+  await copyText(text, "Draft copied", draftStatus);
 }
 
 async function pasteIntoDraft() {
   if (!navigator.clipboard?.readText || !window.isSecureContext) {
-    statusText.textContent = "Paste blocked by browser - use Ctrl+V in the editor";
+    flashStatus(draftStatus, "Paste blocked by browser - use Ctrl+V in the editor");
     draftEditor.focus();
     return;
   }
   try {
     const clip = await navigator.clipboard.readText();
     if (!clip) {
-      statusText.textContent = "Clipboard is empty";
+      flashStatus(draftStatus, "Clipboard is empty");
       return;
     }
     draftEditor.focus();
     document.execCommand("insertText", false, clip);
     refreshDraftControls();
-    statusText.textContent = "Pasted from clipboard";
+    flashStatus(draftStatus, "Pasted from clipboard");
   } catch (error) {
-    statusText.textContent = "Paste blocked by browser - use Ctrl+V in the editor";
+    flashStatus(draftStatus, "Paste blocked by browser - use Ctrl+V in the editor");
     draftEditor.focus();
   }
 }
@@ -381,7 +418,7 @@ draftClear.addEventListener("click", () => {
     draftEditor.innerHTML = "";
   }
   refreshDraftControls();
-  statusText.textContent = "Draft cleared";
+  flashStatus(draftStatus, "Draft cleared");
 });
 
 function closestInEditor(tagName) {
@@ -514,9 +551,24 @@ function buildMarkdownExport() {
     .join("\n\n---\n\n");
 }
 
-async function copyText(text, successMessage) {
+// Inline statuses keep action feedback next to the controls that caused it;
+// the intake status line reports intake state only. Messages auto-clear.
+const statusTimers = new Map();
+
+function flashStatus(statusEl, message) {
+  statusEl.textContent = message;
+  clearTimeout(statusTimers.get(statusEl));
+  statusTimers.set(
+    statusEl,
+    setTimeout(() => {
+      statusEl.textContent = "";
+    }, 4000)
+  );
+}
+
+async function copyText(text, successMessage, statusEl) {
   if (!text) {
-    statusText.textContent = "No output to copy";
+    flashStatus(statusEl, "No output to copy");
     return;
   }
 
@@ -526,15 +578,15 @@ async function copyText(text, successMessage) {
     } else {
       copyTextFallback(text);
     }
-    statusText.textContent = successMessage;
+    flashStatus(statusEl, successMessage);
   } catch (error) {
     // Embedded contexts (iframes, previews) can deny the async clipboard API
     // even on localhost; the execCommand fallback usually still works there.
     try {
       copyTextFallback(text);
-      statusText.textContent = successMessage;
+      flashStatus(statusEl, successMessage);
     } catch (fallbackError) {
-      statusText.textContent = "Copy failed";
+      flashStatus(statusEl, "Copy failed");
     }
   }
 }
@@ -845,10 +897,11 @@ if (SpeechRecognitionImpl) {
 // --- Share on X ---
 
 const shareX = document.querySelector("#shareX");
+const exportStatus = document.querySelector("#exportStatus");
 
 shareX.addEventListener("click", () => {
   if (!latestPayload) {
-    statusText.textContent = "Run an intake first";
+    flashStatus(exportStatus, "Run an intake first");
     return;
   }
   const scoreInfo = latestPayload.score;
@@ -858,5 +911,5 @@ shareX.addEventListener("click", () => {
     `drafted in seconds by a Gemini ADK agent.`;
   const url = `https://x.com/intent/tweet?text=${encodeURIComponent(text)}`;
   window.open(url, "_blank", "noopener");
-  statusText.textContent = "Opening X share window";
+  flashStatus(exportStatus, "Opening X share window");
 });
