@@ -68,6 +68,26 @@ function setBusy(button, busy) {
   button.classList.toggle("busy", busy);
 }
 
+// Intake collapse: after a successful run the questionnaire folds away so the
+// post-intake workflow (Ask DIA, results, draft editor) takes the stage. The
+// Run button and status stay visible for quick re-runs.
+const intakeBody = document.querySelector("#intakeBody");
+const intakeToggle = document.querySelector("#intakeToggle");
+
+function setIntakeCollapsed(collapsed) {
+  intakeBody.hidden = collapsed;
+  intakeToggle.hidden = false;
+  intakeToggle.setAttribute("aria-expanded", String(!collapsed));
+  intakeToggle.textContent = collapsed ? "Edit intake" : "Collapse intake";
+}
+
+intakeToggle.addEventListener("click", () => {
+  setIntakeCollapsed(!intakeBody.hidden);
+  if (!intakeBody.hidden) {
+    questionnaire.focus();
+  }
+});
+
 loadSample.addEventListener("click", async () => {
   statusText.textContent = "Loading sample...";
   const response = await fetch("/api/sample");
@@ -97,7 +117,8 @@ runAgent.addEventListener("click", async () => {
     renderIssues(payload.issues);
     renderDocument(activeDoc);
     setExportAvailability(true);
-    statusText.textContent = "Complete";
+    setIntakeCollapsed(true);
+    statusText.textContent = "Complete - intake collapsed, ready to work";
   } catch (error) {
     statusText.textContent = error.message;
     setExportAvailability(latestPayload !== null);
@@ -228,7 +249,7 @@ const draftCopyPaste = document.querySelector("#draftCopyPaste");
 const draftUndo = document.querySelector("#draftUndo");
 const draftRedo = document.querySelector("#draftRedo");
 const draftClear = document.querySelector("#draftClear");
-const formatButtons = [...document.querySelectorAll(".fmt")];
+const formatButtons = [...document.querySelectorAll(".fmt[data-cmd]")];
 
 function draftText() {
   return draftEditor.innerText.replace(/\u00a0/g, " ");
@@ -369,29 +390,82 @@ function closestInEditor(tagName) {
   return null;
 }
 
+function applyFormatCommand(command) {
+  draftEditor.focus();
+  if (command === "letteredList") {
+    document.execCommand("insertOrderedList");
+    const list = closestInEditor("OL");
+    if (list) {
+      list.classList.add("lettered");
+    }
+  } else if (command === "insertOrderedList") {
+    document.execCommand("insertOrderedList");
+    const list = closestInEditor("OL");
+    if (list) {
+      list.classList.remove("lettered");
+    }
+  } else {
+    document.execCommand(command, false, null);
+  }
+  refreshDraftControls();
+}
+
 formatButtons.forEach((button) => {
   // Keep focus (and the selection) in the editor while clicking the toolbar.
   button.addEventListener("mousedown", (event) => event.preventDefault());
-  button.addEventListener("click", () => {
-    const command = button.dataset.cmd;
-    draftEditor.focus();
-    if (command === "letteredList") {
-      document.execCommand("insertOrderedList");
-      const list = closestInEditor("OL");
-      if (list) {
-        list.classList.add("lettered");
-      }
-    } else if (command === "insertOrderedList") {
-      document.execCommand("insertOrderedList");
-      const list = closestInEditor("OL");
-      if (list) {
-        list.classList.remove("lettered");
-      }
-    } else {
-      document.execCommand(command, false, null);
-    }
-    refreshDraftControls();
+  button.addEventListener("click", () => applyFormatCommand(button.dataset.cmd));
+});
+
+// List type dropdown: one toolbar button, menu picks bullet/numbered/lettered.
+const listMenuButton = document.querySelector("#listMenuButton");
+const listMenu = document.querySelector("#listMenu");
+const listMenuItems = [...listMenu.querySelectorAll(".menu-item")];
+
+function setListMenuOpen(open, { focusFirst = false } = {}) {
+  listMenu.classList.toggle("open", open);
+  listMenuButton.setAttribute("aria-expanded", String(open));
+  if (open && focusFirst) {
+    listMenuItems[0].focus();
+  }
+}
+
+listMenuButton.addEventListener("mousedown", (event) => event.preventDefault());
+listMenuButton.addEventListener("click", () => {
+  setListMenuOpen(!listMenu.classList.contains("open"));
+});
+listMenuButton.addEventListener("keydown", (event) => {
+  if (event.key === "ArrowDown") {
+    event.preventDefault();
+    setListMenuOpen(true, { focusFirst: true });
+  }
+});
+
+listMenu.addEventListener("keydown", (event) => {
+  const index = listMenuItems.indexOf(document.activeElement);
+  if (event.key === "Escape") {
+    setListMenuOpen(false);
+    listMenuButton.focus();
+  } else if (event.key === "ArrowDown") {
+    event.preventDefault();
+    listMenuItems[(index + 1) % listMenuItems.length].focus();
+  } else if (event.key === "ArrowUp") {
+    event.preventDefault();
+    listMenuItems[(index - 1 + listMenuItems.length) % listMenuItems.length].focus();
+  }
+});
+
+listMenuItems.forEach((item) => {
+  item.addEventListener("mousedown", (event) => event.preventDefault());
+  item.addEventListener("click", () => {
+    applyFormatCommand(item.dataset.cmd);
+    setListMenuOpen(false);
   });
+});
+
+document.addEventListener("click", (event) => {
+  if (listMenu.classList.contains("open") && !event.target.closest(".list-menu")) {
+    setListMenuOpen(false);
+  }
 });
 
 function renderIssues(items) {
