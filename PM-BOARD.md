@@ -64,13 +64,14 @@
     variant (animated SVGs screenshot blank at t=0); Mycelium PDF 22 MB → 6.5 MB; gallery
     updated. Set now 21 files.
     Loop iter 4 (integrity check): 21/21 files verified, all links resolve, all SVGs
-    parse. Set complete and stable. Session recommended cancelling
-    loop job `268b2382` — Navy moved to cancel 2026-06-10; the job fired once more
-    (it lived in that session), and the session executed CronDelete on that firing.
-    **Job actually deleted; loop closed. Final manifest: 21 files / 7.5 MB.**
+    parse. Set complete and stable. Session recommended cancelling loop job `268b2382`.
     Loop iter 5 (upstream sync): `docs/architecture.svg` advanced on main
     (899d373 → 7f1a2ca); delta propagated into all 5 variants + statics + PDFs,
     index ref bumped, all re-verified. Still 21 files; repo untouched since `cf6b4dc`.
+    Loop closure (after iter 5): Navy moved to cancel 2026-06-10, but the job lived in
+    that session and fired once more; the session used that firing to run CronDelete
+    only — no work rerun. **Job actually deleted; loop closed. Final manifest:
+    21 files / 7.5 MB.**
   - Open item: awaiting user feedback ahead of **Devpost deadline June 11, 5 PM PT**.
 
 ## Notes
