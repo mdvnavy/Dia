@@ -31,6 +31,12 @@ attempt scoring changes only if they preserve all fixture totals.
 
 ## Setup (interactive, do this with the human)
 
+0. Environment check: bare `python` on this machine may resolve to the
+   system interpreter, not the project venv. The venv lives at the MAIN
+   repo root: `D:\_cultco\_agnt-ws\_repos\client-discovery-agent-adk\.venv`.
+   Activate it (`.venv\Scripts\activate`) or use its python.exe explicitly
+   for EVERY `python` command in this program. Verify before baseline:
+   `python -c "import sys; print(sys.prefix)"` must print the venv path.
 1. Agree on a run tag from today's date (e.g. `jun10`). The branch
    `autoresearch/<tag>` must NOT already exist -- this is a fresh run.
 2. Create the branch: `git checkout -b autoresearch/<tag>`.
