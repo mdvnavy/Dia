@@ -61,7 +61,7 @@ def _make_mcp_toolset() -> list:
         logger.info("MAKE_MCP_URL not set; running without the Make MCP toolbox.")
         return []
     try:
-        from google.adk.tools.mcp_tool import McpToolset
+        from google.adk.tools.mcp_tool.mcp_toolset import McpToolset
         from google.adk.tools.mcp_tool.mcp_session_manager import (
             StreamableHTTPConnectionParams,
         )
@@ -96,7 +96,7 @@ def _gcp_mcp_toolset() -> list:
         logger.info("GCP_MCP_URL not set; running without GCP MCP tools.")
         return []
     try:
-        from google.adk.tools.mcp_tool import McpToolset
+        from google.adk.tools.mcp_tool.mcp_toolset import McpToolset
         from google.adk.tools.mcp_tool.mcp_session_manager import (
             StreamableHTTPConnectionParams,
         )
