@@ -127,13 +127,26 @@ def _gcp_mcp_toolset() -> list:
     ]
 
 
-def build_agent() -> LlmAgent:
+def build_agent(
+    *, include_make_mcp: bool = False, include_gcp_mcp: bool = False
+) -> LlmAgent:
     """Construct a fresh DIA agent.
 
     MCP toolsets bind to the event loop they first connect on, so callers that
     run each turn in its own asyncio.run() loop (like agent_runtime) must build
     a fresh agent per turn rather than sharing the module-level root_agent.
     """
+    tools = [
+        parse_intake,
+        validate_intake_fields,
+        score_client_opportunity,
+        generate_intake_documents,
+    ]
+    if include_make_mcp:
+        tools.extend(_make_mcp_toolset())
+    if include_gcp_mcp:
+        tools.extend(_gcp_mcp_toolset())
+
     return LlmAgent(
         # Overridable so deploys can pin a model and local testing can dodge
         # per-model free-tier quotas without a code change.
@@ -168,14 +181,7 @@ def build_agent() -> LlmAgent:
                 )
             )
         ),
-        tools=[
-            parse_intake,
-            validate_intake_fields,
-            score_client_opportunity,
-            generate_intake_documents,
-            *_make_mcp_toolset(),
-            *_gcp_mcp_toolset(),
-        ],
+        tools=tools,
     )
 
 
