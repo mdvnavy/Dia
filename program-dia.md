@@ -120,4 +120,6 @@ detail to aim your next idea.
    - golden entries or pinned tests you disagree with, if any
    - suggested ideas for the next run
 3. Commit the report to the run branch. Do NOT merge. Do NOT push.
-4. Print a 5-line summary to the console and halt.
+4. Print a 5-line summary to the console and halt. (The human may choose to
+   run a few live Gemini smoke calls at review time -- that is their call,
+   never yours; the loop itself stays offline.)

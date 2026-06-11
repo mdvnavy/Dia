@@ -5,3 +5,8 @@ __pycache__/
 *.pyc
 server.*.log
 generated/
+
+# autoresearch loop scratch files (program-dia.md)
+results.tsv
+eval.log
+gate.log
