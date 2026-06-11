@@ -88,3 +88,30 @@ def test_check_rubric_flags_placeholder_leak():
     fraction, failures = run_eval.check_rubric(result)
     # minimal intake is missing fields, so today's templates leak TBD/None
     assert "no_placeholders" in failures
+
+
+def test_bootstrap_covers_every_fixture():
+    snapshot = run_eval.bootstrap()
+    fixture_names = {p.name for p in FIXTURES.glob("*.md")}
+    assert set(snapshot) == fixture_names
+    entry = snapshot["complete_intake.md"]
+    assert entry["expected_tier"] == "Custom AI Agent"
+    assert entry["expected_score_range"] == [10, 14]   # total 12, +/- 2
+    assert entry["expected_issues"] == []
+    assert entry["must_parse"]["company_name"] == "Northstar Studio"
+
+
+def test_evaluate_handles_broken_fixture_without_crashing(tmp_path, monkeypatch):
+    # A fixture that explodes the pipeline must score 0, not kill the harness.
+    bad = tmp_path / "explodes.md"
+    bad.write_text("anything", encoding="utf-8")
+    monkeypatch.setattr(run_eval, "FIXTURES_DIR", tmp_path)
+
+    def boom(path):
+        raise ValueError("pipeline exploded")
+
+    monkeypatch.setattr(run_eval, "run_fixture", boom)
+    golden_pts, rubric_pts, results = run_eval.evaluate({"explodes.md": {}})
+    assert golden_pts == 0.0
+    assert rubric_pts == 0.0
+    assert results[0].failures and "exception" in results[0].failures[0]
