@@ -405,6 +405,7 @@ def test_f2_empty_sections(client):
     assert any(issue["code"] == "missing_pain_points" for issue in response["issues"])
 
 
+@pytest.mark.baseline_pin
 def test_f2_malformed_tables(client, load_questionnaire):
     """Tables missing leading/trailing pipes or with mismatched headers."""
     questionnaire = load_questionnaire("malformed_tables_intake.md")

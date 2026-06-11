@@ -9,6 +9,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 _spec = importlib.util.spec_from_file_location(
@@ -27,7 +29,7 @@ FIXTURES = REPO_ROOT / "tests" / "e2e" / "fixtures" / "inputs"
 def test_run_fixture_complete_intake():
     result = run_eval.run_fixture(FIXTURES / "complete_intake.md")
     assert result["score"].tier == "Custom AI Agent"
-    assert result["score"].total_score == 12
+    assert 10 <= result["score"].total_score <= 14  # golden band; scoring is loop-mutable
     assert result["issues"] == []
     assert set(result["docs"]) == {
         "client-profile.md", "opportunity-analysis.md", "proposal-draft.md"
@@ -65,6 +67,7 @@ def test_check_golden_detects_wrong_tier_and_issues():
     assert fraction < 1.0
 
 
+@pytest.mark.baseline_pin
 def test_check_rubric_flags_pain_grounding_at_baseline():
     # The current proposal template never cites pain points -- this is
     # intentional headroom for the experiment loop.
@@ -84,6 +87,7 @@ def test_check_rubric_passes_on_grounded_docs():
     assert "pain_grounding" not in failures
 
 
+@pytest.mark.baseline_pin
 def test_check_rubric_flags_placeholder_leak():
     result = run_eval.run_fixture(FIXTURES / "minimal_intake.md")
     fraction, failures = run_eval.check_rubric(result)
@@ -91,6 +95,7 @@ def test_check_rubric_flags_placeholder_leak():
     assert "no_placeholders" in failures
 
 
+@pytest.mark.baseline_pin
 def test_bootstrap_covers_every_fixture():
     snapshot = run_eval.bootstrap()
     fixture_names = {p.name for p in FIXTURES.glob("*.md")}
@@ -118,6 +123,7 @@ def test_evaluate_handles_broken_fixture_without_crashing(tmp_path, monkeypatch)
     assert results[0].failures and "exception" in results[0].failures[0]
 
 
+@pytest.mark.baseline_pin
 def test_baseline_dia_score_in_expected_band():
     golden_map = json.loads(
         (REPO_ROOT / "eval" / "golden.json").read_text(encoding="utf-8")
