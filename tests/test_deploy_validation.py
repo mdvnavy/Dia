@@ -46,6 +46,13 @@ def mock_gcloud_env():
     except Exception:
         pass
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="PATH-dependent on Windows: WSL-stub bash chokes on deploy.sh CRLF "
+    "line endings while Git Bash tolerates them; excluded from the "
+    "autoresearch test gate. Linux CI still runs it. See "
+    "docs/superpowers/specs/2026-06-10-dia-autoresearch-design.md"
+)
 def test_deploy_sh_validation_empty_project(mock_gcloud_env):
     """Verify deploy.sh exits gracefully with status 1 and instructions if PROJECT_ID is empty."""
     # Check if bash is available
