@@ -12,6 +12,8 @@
 #
 # Usage:
 #   PROJECT_ID=my-project GEMINI_API_KEY=xxxx ./deploy-cloudrun.sh
+#   PROJECT_ID=my-project GEMINI_API_KEY=xxxx \
+#     GCP_MCP_URL=https://monitoring.googleapis.com/mcp ./deploy-cloudrun.sh
 set -euo pipefail
 
 PROJECT_ID="${PROJECT_ID:?Set PROJECT_ID to your Google Cloud project id}"
@@ -19,6 +21,11 @@ SERVICE="${SERVICE:-dia-discovery-intake}"
 REGION="${REGION:-us-central1}"
 SECRET_NAME="${SECRET_NAME:-gemini-api-key}"
 GEMINI_API_KEY="${GEMINI_API_KEY:?Set GEMINI_API_KEY for live Gemini agent runs}"
+
+DEPLOY_ENV_ARGS=()
+if [[ -n "${GCP_MCP_URL:-}" ]]; then
+  DEPLOY_ENV_ARGS+=(--set-env-vars "GCP_MCP_URL=${GCP_MCP_URL}")
+fi
 
 echo "Enabling required Google Cloud services..."
 gcloud services enable run.googleapis.com cloudbuild.googleapis.com \
@@ -48,7 +55,8 @@ gcloud run deploy "${SERVICE}" \
   --region "${REGION}" \
   --source . \
   --allow-unauthenticated \
-  --set-secrets "GEMINI_API_KEY=${SECRET_NAME}:latest"
+  --set-secrets "GEMINI_API_KEY=${SECRET_NAME}:latest" \
+  "${DEPLOY_ENV_ARGS[@]}"
 
 echo "Done. Service URL:"
 gcloud run services describe "${SERVICE}" \

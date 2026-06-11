@@ -9,6 +9,7 @@ gracefully when ``GEMINI_API_KEY`` / ``GOOGLE_API_KEY`` is not configured.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import uuid
 from pathlib import Path
@@ -23,6 +24,7 @@ load_dotenv(override=False)
 
 APP_NAME = "dia_discovery_intake_agent"
 USER_ID = "demo-user"
+logger = logging.getLogger(__name__)
 
 
 class AgentNotConfigured(RuntimeError):

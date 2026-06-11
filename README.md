@@ -76,6 +76,18 @@ building the container with Cloud Build and deploying it. The app binds to
 `0.0.0.0` and honours Cloud Run's injected `PORT`, and exposes `/healthz` for
 health checks. The script prints the public service URL when finished.
 
+To enable Google-managed MCP tools in Cloud Run, pass `GCP_MCP_URL` to the same
+script, for example:
+
+```bash
+PROJECT_ID=your-project GEMINI_API_KEY=your-key \
+  GCP_MCP_URL=https://monitoring.googleapis.com/mcp ./deploy-cloudrun.sh
+```
+
+The MCP URL is configuration, not a secret. Authentication uses the Cloud Run
+runtime service account through Application Default Credentials, so grant that
+service account only the Google Cloud roles the selected MCP endpoint needs.
+
 ## Run in Codespaces
 
 This repo includes a `.devcontainer/devcontainer.json` for GitHub Codespaces
