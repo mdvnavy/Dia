@@ -20,8 +20,10 @@
   - Verified in browser preview (undo round-trip, list conversions, click dispatch) +
     backend suite 68 passed (2 pre-existing flaky deploy-validation failures, fix chip
     already spawned).
-  - **Open caveat for Navy:** real clipboard read/write can't be exercised headless —
-    needs one human click in a real browser to confirm end-to-end.
+  - ~~Open caveat: real clipboard read/write can't be exercised headless.~~ **RESOLVED
+    later same day** — PM verified in a real browser (copy landed 889 chars in the OS
+    clipboard via Get-Clipboard; paste round-trip 839→1678 undone cleanly). See
+    Directive #3 entry below; no re-testing needed.
   - Bonus from overnight: light mode, TTS, auto-speak, conversation mode, dictation,
     Share on X, accessibility pass (`eff1576..f4412cc`).
 - **Directive #2 ✅ DELIVERED 2026-06-10 (~16:35Z), commit `032e52b` on PR #11:**
