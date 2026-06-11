@@ -1,0 +1,168 @@
+{
+  "complete_intake.md": {
+    "expected_tier": "Custom AI Agent",
+    "expected_score_range": [
+      10,
+      14
+    ],
+    "expected_issues": [],
+    "must_parse": {
+      "pain_points_count": 2,
+      "goals_count": 2,
+      "company_name": "Northstar Studio"
+    }
+  },
+  "enterprise_scenario_intake.md": {
+    "expected_tier": "Full Integration",
+    "expected_score_range": [
+      11,
+      15
+    ],
+    "expected_issues": [],
+    "must_parse": {
+      "pain_points_count": 4,
+      "goals_count": 2,
+      "company_name": "Acme Enterprise"
+    }
+  },
+  "extreme_pain_points_intake.md": {
+    "expected_tier": "Full Integration",
+    "expected_score_range": [
+      11,
+      15
+    ],
+    "expected_issues": [],
+    "must_parse": {
+      "pain_points_count": 100,
+      "goals_count": 4,
+      "company_name": "Extreme Co"
+    }
+  },
+  "large_intake.md": {
+    "expected_tier": "Full Integration",
+    "expected_score_range": [
+      11,
+      15
+    ],
+    "expected_issues": [],
+    "must_parse": {
+      "pain_points_count": 4,
+      "goals_count": 4,
+      "company_name": "Enterprise Solutions"
+    }
+  },
+  "malformed_tables_intake.md": {
+    "expected_tier": "Custom AI Agent",
+    "expected_score_range": [
+      7,
+      11
+    ],
+    "expected_issues": [
+      "missing_budget",
+      "missing_decision_maker",
+      "missing_start_date"
+    ],
+    "must_parse": {
+      "company_name": "Broken Studio",
+      "pain_points_count": 2,
+      "goals_count": 2
+    }
+  },
+  "minimal_intake.md": {
+    "expected_tier": "Quick Win",
+    "expected_score_range": [
+      8,
+      12
+    ],
+    "expected_issues": [],
+    "must_parse": {
+      "pain_points_count": 1,
+      "goals_count": 1,
+      "company_name": "Solopreneur Inc"
+    }
+  },
+  "missing_fields_warning_intake.md": {
+    "expected_tier": "Quick Win",
+    "expected_score_range": [
+      6,
+      10
+    ],
+    "expected_issues": [
+      "missing_budget",
+      "missing_decision_maker",
+      "missing_start_date"
+    ],
+    "must_parse": {
+      "pain_points_count": 1,
+      "goals_count": 1,
+      "company_name": "Signal Forge"
+    }
+  },
+  "missing_pain_points_error_intake.md": {
+    "expected_tier": "Custom AI Agent",
+    "expected_score_range": [
+      7,
+      11
+    ],
+    "expected_issues": [
+      "missing_pain_points"
+    ],
+    "must_parse": {
+      "pain_points_count": 0,
+      "goals_count": 1,
+      "company_name": "Painless Co"
+    }
+  },
+  "no_tools_intake.md": {
+    "expected_tier": "Custom AI Agent",
+    "expected_score_range": [
+      9,
+      13
+    ],
+    "expected_issues": [],
+    "must_parse": {
+      "pain_points_count": 2,
+      "goals_count": 2,
+      "company_name": "Northstar Studio"
+    }
+  },
+  "regulated_compliance_intake.md": {
+    "expected_tier": "Full Integration",
+    "expected_score_range": [
+      11,
+      15
+    ],
+    "expected_issues": [],
+    "must_parse": {
+      "pain_points_count": 4,
+      "goals_count": 2,
+      "company_name": "Health Secure"
+    }
+  },
+  "special_characters_intake.md": {
+    "expected_tier": "Custom AI Agent",
+    "expected_score_range": [
+      8,
+      12
+    ],
+    "expected_issues": [],
+    "must_parse": {
+      "pain_points_count": 2,
+      "goals_count": 2,
+      "company_name": "Rocket \ud83d\ude80 & Fire \ud83d\udd25 Studio \u4e2d\u6587"
+    }
+  },
+  "tech_person_only_intake.md": {
+    "expected_tier": "Custom AI Agent",
+    "expected_score_range": [
+      9,
+      13
+    ],
+    "expected_issues": [],
+    "must_parse": {
+      "pain_points_count": 2,
+      "goals_count": 2,
+      "company_name": "Northstar Tech Only"
+    }
+  }
+}

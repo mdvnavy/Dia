@@ -5,6 +5,7 @@ via the test gate. Loaded with importlib because the eval/ directory is
 deliberately not a package.
 """
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -115,3 +116,17 @@ def test_evaluate_handles_broken_fixture_without_crashing(tmp_path, monkeypatch)
     assert golden_pts == 0.0
     assert rubric_pts == 0.0
     assert results[0].failures and "exception" in results[0].failures[0]
+
+
+def test_baseline_dia_score_in_expected_band():
+    golden_map = json.loads(
+        (REPO_ROOT / "eval" / "golden.json").read_text(encoding="utf-8")
+    )
+    golden_pts, rubric_pts, results = run_eval.evaluate(golden_map)
+    dia_score = golden_pts + rubric_pts
+    # Aspirational goldens + rubric headroom: baseline must sit below a
+    # perfect score but well above half. Bounds are deliberately loose so
+    # ordinary refactors don't trip this; the experiment loop is what
+    # should move the number.
+    assert 60.0 <= dia_score < 96.0, f"baseline dia_score={dia_score:.2f}"
+    assert len(results) == 12

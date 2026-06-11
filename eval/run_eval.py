@@ -199,6 +199,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"wrote {GOLDEN_PATH}")
         return 0
 
+    if not GOLDEN_PATH.exists():
+        print(f"no golden.json at {GOLDEN_PATH}; run --bootstrap first")
+        return 1
+
     start = time.perf_counter()
     golden_map = json.loads(GOLDEN_PATH.read_text(encoding="utf-8"))
     golden_pts, rubric_pts, results = evaluate(golden_map)
