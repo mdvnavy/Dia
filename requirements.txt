@@ -1,5 +1,6 @@
 google-adk==2.2.0
 google-genai==2.4.0
+mcp==1.27.2
 python-dotenv==1.2.2
 pytest==9.0.3
 requests==2.34.2
