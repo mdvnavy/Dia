@@ -73,3 +73,57 @@ def check_golden(result: dict, golden: dict) -> tuple[float, list[str]]:
 
     failures = [name for name, ok in checks if not ok]
     return sum(ok for _, ok in checks) / len(checks), failures
+
+
+REQUIRED_SECTIONS = {
+    "client-profile.md": [
+        "## Overview", "## Current Tools", "## Decision Context", "## Notes",
+    ],
+    "opportunity-analysis.md": [
+        "## Pain Points", "## Goals", "## Recommendation", "## Score Reasons",
+    ],
+    "proposal-draft.md": [
+        "## Executive Summary", "## Recommended Solution", "## Delivery Plan",
+        "## Investment", "## Next Step",
+    ],
+}
+PLACEHOLDERS = ("TBD", "Unknown", "None listed.", "None provided.")
+DOC_LENGTH_BOUNDS = (200, 8000)
+
+
+def check_rubric(result: dict) -> tuple[float, list[str]]:
+    """Deterministic doc-quality rubric. Returns (fraction, failures)."""
+    docs = result["docs"]
+    intake = result["intake"]
+    checks: list[tuple[str, bool]] = []
+
+    for doc_name, sections in REQUIRED_SECTIONS.items():
+        body = docs.get(doc_name, "")
+        checks.append((f"sections:{doc_name}", all(s in body for s in sections)))
+
+    all_text = "\n".join(docs.values())
+    checks.append(
+        ("no_placeholders", not any(p in all_text for p in PLACEHOLDERS))
+    )
+    if intake.company_name.strip():
+        checks.append(
+            ("company_grounding",
+             all(intake.company_name in body for body in docs.values()))
+        )
+    if intake.pain_points:
+        checks.append(
+            ("pain_grounding",
+             intake.pain_points[0] in docs.get("proposal-draft.md", ""))
+        )
+    if intake.goals:
+        analysis = docs.get("opportunity-analysis.md", "")
+        checks.append(
+            ("goal_grounding", all(goal in analysis for goal in intake.goals))
+        )
+    lo, hi = DOC_LENGTH_BOUNDS
+    checks.append(
+        ("length_sanity", all(lo <= len(body) <= hi for body in docs.values()))
+    )
+
+    failures = [name for name, ok in checks if not ok]
+    return sum(ok for _, ok in checks) / len(checks), failures

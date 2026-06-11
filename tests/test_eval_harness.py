@@ -62,3 +62,29 @@ def test_check_golden_detects_wrong_tier_and_issues():
     assert "tier" in failures
     assert "issues" in failures
     assert fraction < 1.0
+
+
+def test_check_rubric_flags_pain_grounding_at_baseline():
+    # The current proposal template never cites pain points -- this is
+    # intentional headroom for the experiment loop.
+    result = run_eval.run_fixture(FIXTURES / "complete_intake.md")
+    fraction, failures = run_eval.check_rubric(result)
+    assert "pain_grounding" in failures
+    assert 0.0 < fraction < 1.0
+
+
+def test_check_rubric_passes_on_grounded_docs():
+    result = run_eval.run_fixture(FIXTURES / "complete_intake.md")
+    intake = result["intake"]
+    # Simulate an improved template: inject the first pain point into the
+    # proposal so grounding passes.
+    result["docs"]["proposal-draft.md"] += f"\n## Why Now\n{intake.pain_points[0]}\n"
+    fraction, failures = run_eval.check_rubric(result)
+    assert "pain_grounding" not in failures
+
+
+def test_check_rubric_flags_placeholder_leak():
+    result = run_eval.run_fixture(FIXTURES / "minimal_intake.md")
+    fraction, failures = run_eval.check_rubric(result)
+    # minimal intake is missing fields, so today's templates leak TBD/None
+    assert "no_placeholders" in failures
