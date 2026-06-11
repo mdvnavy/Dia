@@ -74,6 +74,17 @@
     21 files / 7.5 MB.**
   - Open item: awaiting user feedback ahead of **Devpost deadline June 11, 5 PM PT**.
 
+### 3. Demo video — PM-produced (DONE)
+- **FINAL CUT DELIVERED 2026-06-11 ~03:05 ET: `DIA-demo-final.mp4`** (68s, in the
+  stoic-cray worktree + sent to Navy). Title card (Z-Image backdrop + composited type)
+  → 54s live take (Vertex-routed gemini-2.5-flash, grounded 12/20 reply on camera,
+  draft-editor beats incl. on-camera "Draft copied (with formatting)", clipboard-verified)
+  → outro. Edge-TTS narration (Andrew) across 7 segments.
+- Vertex wiring (main repo .env + ADC, by another session ~02:24) removed the free-tier
+  quota blocker; the 3:17 AM retake cron was cancelled as redundant.
+- Source take: Videos/2026-06-11 02-59-07.mp4. Earlier failed takes (06-10 18:xx,
+  06-11 02-4x) left in Videos/ for Navy to delete.
+
 ## Notes
 - Direct session messaging now works (Navy enabled permissions 2026-06-10); both
   directives delivered via `send_message`. The `PM-DIRECTIVE.md` files in each worktree
