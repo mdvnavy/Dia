@@ -87,7 +87,7 @@ REQUIRED_SECTIONS = {
         "## Investment", "## Next Step",
     ],
 }
-PLACEHOLDERS = ("TBD", "Unknown", "None listed.", "None provided.")
+PLACEHOLDERS = ("TBD", "Unknown", "None listed", "None provided")
 DOC_LENGTH_BOUNDS = (200, 8000)
 
 
