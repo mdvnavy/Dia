@@ -81,6 +81,52 @@ def _make_mcp_toolset() -> list:
     ]
 
 
+def _gcp_mcp_toolset() -> list:
+    """Connect the agent to a GCP-managed MCP server when one is configured.
+
+    Google publishes managed MCP endpoints for core Cloud APIs (monitoring,
+    logging, storage, ...) — the same servers registered in the project's
+    Agent Registry and governable through its Agent Gateway. Auth is the
+    local Google credential (ADC), not an API key. Disabled (returns [])
+    when GCP_MCP_URL is unset so tests and keyless local runs need no
+    network or gcloud setup.
+    """
+    url = os.environ.get("GCP_MCP_URL")
+    if not url:
+        logger.info("GCP_MCP_URL not set; running without GCP MCP tools.")
+        return []
+    try:
+        from google.adk.tools.mcp_tool import McpToolset
+        from google.adk.tools.mcp_tool.mcp_session_manager import (
+            StreamableHTTPConnectionParams,
+        )
+        import google.auth
+        import google.auth.transport.requests
+    except ImportError as error:
+        logger.warning("GCP MCP tools disabled, dependency missing: %s", error)
+        return []
+    try:
+        credentials, _ = google.auth.default(
+            scopes=["https://www.googleapis.com/auth/cloud-platform"]
+        )
+        # Tokens live ~1h; build_agent() runs per turn, so each fresh agent
+        # gets a fresh token and long sessions never hold an expired one.
+        credentials.refresh(google.auth.transport.requests.Request())
+    except Exception as error:
+        logger.warning("GCP MCP tools disabled, ADC unavailable: %s", error)
+        return []
+    headers = {
+        "Accept": "application/json, text/event-stream",
+        "Authorization": f"Bearer {credentials.token}",
+    }
+    logger.info("GCP MCP tools enabled at %s", url)
+    return [
+        McpToolset(
+            connection_params=StreamableHTTPConnectionParams(url=url, headers=headers)
+        )
+    ]
+
+
 def build_agent() -> LlmAgent:
     """Construct a fresh DIA agent.
 
@@ -110,6 +156,9 @@ def build_agent() -> LlmAgent:
         - When Make toolbox tools are available and an intake is qualified (or the
           user asks for follow-up actions), use them to execute the handoff, e.g.
           lead automation. Report exactly which tool ran and what it returned.
+        - When GCP Cloud tools are available (monitoring, logging, etc.), use them
+          for operational questions about the agent itself, e.g. its own request
+          metrics or recent errors. Report exactly which tool ran and what it returned.
     """,
         generate_content_config=types.GenerateContentConfig(
             http_options=types.HttpOptions(
@@ -125,6 +174,7 @@ def build_agent() -> LlmAgent:
             score_client_opportunity,
             generate_intake_documents,
             *_make_mcp_toolset(),
+            *_gcp_mcp_toolset(),
         ],
     )
 
