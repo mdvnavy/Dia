@@ -30,19 +30,13 @@ GOLDEN_PATH = Path(__file__).resolve().parent / "golden.json"
 GOLDEN_WEIGHT = 60.0
 RUBRIC_WEIGHT = 40.0
 
-# Register this module in sys.modules so @dataclass can resolve the module dict
-# when this file is loaded via importlib (e.g., from tests/test_eval_harness.py).
-if __name__ not in sys.modules:
-    sys.modules[__name__] = sys.modules.get(__name__) or __import__("types").ModuleType(__name__)
-    sys.modules[__name__].__dict__.update({k: v for k, v in globals().items()})
-
 
 @dataclass
 class FixtureResult:
     name: str
     golden_fraction: float = 0.0
     rubric_fraction: float = 0.0
-    failures: list = field(default_factory=list)
+    failures: list[str] = field(default_factory=list)
 
 
 def run_fixture(path: Path) -> dict:

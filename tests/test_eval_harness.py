@@ -5,6 +5,7 @@ via the test gate. Loaded with importlib because the eval/ directory is
 deliberately not a package.
 """
 import importlib.util
+import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -13,6 +14,10 @@ _spec = importlib.util.spec_from_file_location(
     "dia_run_eval", REPO_ROOT / "eval" / "run_eval.py"
 )
 run_eval = importlib.util.module_from_spec(_spec)
+# Register before exec_module: CPython 3.13 dataclasses._is_type calls
+# sys.modules.get(cls.__module__).__dict__ with no None-guard, so the module
+# must already be in sys.modules before @dataclass processes the class body.
+sys.modules[_spec.name] = run_eval
 _spec.loader.exec_module(run_eval)
 
 FIXTURES = REPO_ROOT / "tests" / "e2e" / "fixtures" / "inputs"
