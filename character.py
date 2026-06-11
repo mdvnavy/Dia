@@ -73,7 +73,7 @@ def _make_mcp_toolset() -> list:
     token = os.environ.get("MAKE_MCP_TOKEN")
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    logger.info("Make MCP toolbox enabled at %s", url.split("?")[0])
+    logger.info("Make MCP toolbox enabled.")
     return [
         McpToolset(
             connection_params=StreamableHTTPConnectionParams(url=url, headers=headers)
@@ -119,7 +119,7 @@ def _gcp_mcp_toolset() -> list:
         "Accept": "application/json, text/event-stream",
         "Authorization": f"Bearer {credentials.token}",
     }
-    logger.info("GCP MCP tools enabled at %s", url)
+    logger.info("GCP MCP tools enabled.")
     return [
         McpToolset(
             connection_params=StreamableHTTPConnectionParams(url=url, headers=headers)

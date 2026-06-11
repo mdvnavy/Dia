@@ -28,6 +28,18 @@ def test_toolset_enabled_with_url(monkeypatch):
     assert "text/event-stream" in params.headers["Accept"]
 
 
+def test_toolset_does_not_log_make_url(monkeypatch, caplog):
+    url = "https://us2.make.com/mcp/api/v1/u/test-token/mcp"
+    monkeypatch.setenv("MAKE_MCP_URL", url)
+    monkeypatch.setenv("MAKE_MCP_TOKEN", "test-bearer")
+    caplog.set_level("INFO", logger="character")
+
+    character._make_mcp_toolset()
+
+    assert url not in caplog.text
+    assert "test-token" not in caplog.text
+
+
 def test_toolset_omits_auth_header_without_token(monkeypatch):
     monkeypatch.setenv("MAKE_MCP_URL", "https://us2.make.com/mcp/api/v1/u/test-token/mcp")
     monkeypatch.delenv("MAKE_MCP_TOKEN", raising=False)
