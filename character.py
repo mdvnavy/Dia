@@ -147,10 +147,17 @@ def build_agent(
     if include_gcp_mcp:
         tools.extend(_gcp_mcp_toolset())
 
+    model = os.environ.get("DIA_MODEL", "gemini-2.5-flash")
+    if os.environ.get("GOOGLE_GENAI_USE_VERTEXAI", "").strip().lower() in {"1", "true", "yes", "on"} and not model.startswith("projects/"):
+        project = os.environ.get("GOOGLE_CLOUD_PROJECT") or os.environ.get("GCP_PROJECT_ID")
+        location = os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1")
+        if project:
+            model = f"projects/{project}/locations/{location}/publishers/google/models/{model}"
+
     return LlmAgent(
         # Overridable so deploys can pin a model and local testing can dodge
         # per-model free-tier quotas without a code change.
-        model=os.environ.get("DIA_MODEL", "gemini-2.5-flash"),
+        model=model,
         name="dia_discovery_intake_agent",
         instruction="""
         You are DIA, the discovery intake agent for a startup services team.

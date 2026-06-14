@@ -64,7 +64,8 @@ gcloud run deploy $ServiceName `
   --image $ImageTag `
   --region $Region `
   --platform managed `
-  --allow-unauthenticated
+  --allow-unauthenticated `
+  --set-env-vars "GOOGLE_GENAI_USE_VERTEXAI=TRUE,GOOGLE_CLOUD_PROJECT=${ProjectId},GOOGLE_CLOUD_LOCATION=${Region}"
 
 Write-Host "========================================================" -ForegroundColor Green
 $ServiceUrl = gcloud run services describe $ServiceName --region $Region --project $ProjectId --format='value(status.url)'

@@ -101,6 +101,9 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
         if path == "/api/agent":
             self.handle_agent()
             return
+        if path == "/api/export":
+            self.handle_export()
+            return
         self.send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
 
     def handle_process(self) -> None:
@@ -122,6 +125,47 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
         # locally and the intake surfaced issues. It never affects the response.
         if response.get("issues") and _obs_capture_enabled():
             self._trigger_obs_capture()
+
+    def handle_export(self) -> None:
+        try:
+            payload = self.read_json()
+        except json.JSONDecodeError:
+            self.send_json({"error": "invalid json"}, HTTPStatus.BAD_REQUEST)
+            return
+        except ValueError as error:
+            self.send_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
+            return
+
+        fmt = str(payload.get("format", "")).strip().lower()
+        markdown = str(payload.get("markdown", ""))
+
+        if not markdown:
+            self.send_json({"error": "markdown content is required"}, HTTPStatus.BAD_REQUEST)
+            return
+
+        if fmt == "txt":
+            from client_discovery.export import markdown_to_txt
+            result_txt = markdown_to_txt(markdown)
+            body = result_txt.encode("utf-8")
+            content_type = "text/plain; charset=utf-8"
+        elif fmt == "docx":
+            from client_discovery.export import markdown_to_docx
+            body = markdown_to_docx(markdown)
+            content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        elif fmt == "pdf":
+            from client_discovery.export import markdown_to_pdf
+            body = markdown_to_pdf(markdown)
+            content_type = "application/pdf"
+        else:
+            self.send_json({"error": f"unsupported format: {fmt}"}, HTTPStatus.BAD_REQUEST)
+            return
+
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
 
     def _trigger_obs_capture(self) -> None:
         try:

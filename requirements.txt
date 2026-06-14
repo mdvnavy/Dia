@@ -6,3 +6,6 @@ pytest==9.0.3
 requests==2.34.2
 obsws-python==1.6.1
 obs-websocket-py==1.0
+python-docx==1.2.0
+reportlab==4.5.1
+

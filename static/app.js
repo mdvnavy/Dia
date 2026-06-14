@@ -12,8 +12,8 @@ const runChat = document.querySelector("#runChat");
 const agentOutput = document.querySelector("#agentOutput");
 const agentStatus = document.querySelector("#agentStatus");
 const copyAll = document.querySelector("#copyAll");
-const downloadMarkdown = document.querySelector("#downloadMarkdown");
-const downloadJson = document.querySelector("#downloadJson");
+const downloadBtn = document.querySelector("#downloadBtn");
+const downloadDropdownMenu = document.querySelector("#downloadDropdownMenu");
 const copySection = document.querySelector("#copySection");
 
 let documents = {};
@@ -266,18 +266,99 @@ copyAll.addEventListener("click", async () => {
   await copyText(buildMarkdownExport(), "All outputs copied", exportStatus);
 });
 
-downloadMarkdown.addEventListener("click", () => {
-  downloadFile("dia-outputs.md", buildMarkdownExport(), "text/markdown");
-  flashStatus(exportStatus, "Markdown downloaded");
+// Dropdown Toggle
+downloadBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  const isExpanded = downloadBtn.getAttribute("aria-expanded") === "true";
+  downloadBtn.setAttribute("aria-expanded", !isExpanded);
+  downloadDropdownMenu.classList.toggle("show", !isExpanded);
 });
 
-downloadJson.addEventListener("click", () => {
-  downloadFile(
-    "dia-export.json",
-    JSON.stringify(latestPayload, null, 2),
-    "application/json"
-  );
-  flashStatus(exportStatus, "JSON downloaded");
+// Close dropdown on click outside
+document.addEventListener("click", () => {
+  downloadBtn.setAttribute("aria-expanded", "false");
+  downloadDropdownMenu.classList.remove("show");
+});
+
+// Close dropdown on Escape key
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    downloadBtn.setAttribute("aria-expanded", "false");
+    downloadDropdownMenu.classList.remove("show");
+  }
+});
+
+// Handle dropdown item click
+downloadDropdownMenu.addEventListener("click", async (e) => {
+  const item = e.target.closest(".dropdown-item");
+  if (!item) return;
+  
+  e.stopPropagation();
+  downloadBtn.setAttribute("aria-expanded", "false");
+  downloadDropdownMenu.classList.remove("show");
+  
+  const scope = item.dataset.scope;
+  const format = item.dataset.format;
+  
+  if (!latestPayload) {
+    flashStatus(exportStatus, "Run an intake first");
+    return;
+  }
+  
+  let content = "";
+  let baseFilename = "dia-outputs";
+  
+  if (scope === "active") {
+    content = documents[activeDoc] || "";
+    const activeDocBase = activeDoc.replace(/\.[^/.]+$/, "");
+    baseFilename = activeDocBase;
+  } else {
+    content = buildMarkdownExport();
+  }
+  
+  if (format === "json") {
+    downloadFile(
+      "dia-export.json",
+      JSON.stringify(latestPayload, null, 2),
+      "application/json"
+    );
+    flashStatus(exportStatus, "JSON downloaded");
+    return;
+  }
+  
+  if (format === "md") {
+    downloadFile(`${baseFilename}.md`, content, "text/markdown");
+    flashStatus(exportStatus, "Markdown downloaded");
+    return;
+  }
+  
+  // For TXT, DOCX, and PDF, run via backend
+  flashStatus(exportStatus, `Generating ${format.toUpperCase()}...`);
+  try {
+    const response = await fetch("/api/export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ format, markdown: content }),
+    });
+    
+    if (!response.ok) {
+      const errPayload = await response.json();
+      throw new Error(errPayload.error || "Failed to generate export file");
+    }
+    
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${baseFilename}.${format}`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 100);
+    flashStatus(exportStatus, `${format.toUpperCase()} downloaded`);
+  } catch (error) {
+    flashStatus(exportStatus, `Export failed: ${error.message}`);
+  }
 });
 
 copySection.addEventListener("click", async () => {
@@ -536,8 +617,7 @@ function renderDocument(name) {
 
 function setExportAvailability(isAvailable) {
   copyAll.disabled = !isAvailable;
-  downloadMarkdown.disabled = !isAvailable;
-  downloadJson.disabled = !isAvailable;
+  downloadBtn.disabled = !isAvailable;
   copySection.disabled = !isAvailable;
   listenDocument.disabled = !isAvailable;
   shareX.disabled = !isAvailable;
@@ -632,10 +712,73 @@ const listenAgent = document.querySelector("#listenAgent");
 const autoSpeak = document.querySelector("#autoSpeak");
 const micButton = document.querySelector("#micButton");
 const conversationMode = document.querySelector("#conversationMode");
+const voiceSelect = document.querySelector("#voiceSelect");
 
 const ttsSupported = "speechSynthesis" in window;
 const SpeechRecognitionImpl =
   window.SpeechRecognition || window.webkitSpeechRecognition || null;
+
+let voices = [];
+
+function populateVoiceList() {
+  if (!ttsSupported || !voiceSelect) return;
+  voices = window.speechSynthesis.getVoices();
+  
+  const englishVoices = voices.filter(v => v.lang.toLowerCase().startsWith("en"));
+  voiceSelect.innerHTML = "";
+  
+  if (englishVoices.length === 0) {
+    const opt = document.createElement("option");
+    opt.textContent = "No English voices";
+    voiceSelect.appendChild(opt);
+    return;
+  }
+  
+  englishVoices.sort((a, b) => {
+    const aName = a.name.toLowerCase();
+    const bName = b.name.toLowerCase();
+    const aIsPremium = aName.includes("natural") || aName.includes("online") || aName.includes("neural") || aName.includes("google") || aName.includes("premium");
+    const bIsPremium = bName.includes("natural") || bName.includes("online") || bName.includes("neural") || bName.includes("google") || bName.includes("premium");
+    
+    if (aIsPremium && !bIsPremium) return -1;
+    if (!aIsPremium && bIsPremium) return 1;
+    return a.name.localeCompare(b.name);
+  });
+  
+  englishVoices.forEach(voice => {
+    const option = document.createElement("option");
+    option.value = voice.name;
+    option.textContent = voice.name
+      .replace("Microsoft ", "")
+      .replace("Google ", "")
+      .replace("Desktop - English (United States)", "")
+      .replace(" - English (United States)", "")
+      .trim();
+    voiceSelect.appendChild(option);
+  });
+  
+  try {
+    const saved = localStorage.getItem("dia-voice");
+    if (saved) {
+      voiceSelect.value = saved;
+    } else if (englishVoices[0]) {
+      voiceSelect.value = englishVoices[0].name;
+    }
+  } catch (error) {}
+}
+
+if (ttsSupported) {
+  populateVoiceList();
+  if (window.speechSynthesis.onvoiceschanged !== undefined) {
+    window.speechSynthesis.onvoiceschanged = populateVoiceList;
+  }
+  
+  voiceSelect.addEventListener("change", () => {
+    try {
+      localStorage.setItem("dia-voice", voiceSelect.value);
+    } catch (e) {}
+  });
+}
 
 if (!ttsSupported) {
   document
@@ -683,6 +826,12 @@ function speakText(text, button, { onDone } = {}) {
   }
   stopSpeaking();
   const utterance = new SpeechSynthesisUtterance(clean);
+  if (voiceSelect && voices.length > 0) {
+    const selectedVoice = voices.find(v => v.name === voiceSelect.value);
+    if (selectedVoice) {
+      utterance.voice = selectedVoice;
+    }
+  }
   currentSpeakButton = button || null;
   setSpeakingState(currentSpeakButton, true);
   const finish = () => {

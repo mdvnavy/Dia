@@ -340,6 +340,83 @@ textarea {
   font-size: 12px;
 }
 
+/* Dropdown Container */
+.dropdown {
+  position: relative;
+  display: inline-block;
+}
+
+/* Dropdown Menu */
+.dropdown-menu {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 100;
+  min-width: 190px;
+  background-color: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  margin-top: 4px;
+  border-radius: 4px;
+  padding: 6px 0;
+  animation: dropdownFadeIn 0.15s ease-out;
+}
+
+.dropdown-menu.show {
+  display: block;
+}
+
+/* Section headers inside dropdown */
+.dropdown-section-header {
+  font-family: var(--sans);
+  font-size: 10px;
+  color: var(--muted);
+  padding: 6px 12px 2px 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+}
+
+/* Divider line */
+.dropdown-divider {
+  height: 1px;
+  background-color: var(--border);
+  margin: 6px 0;
+}
+
+/* Dropdown items */
+.dropdown-item {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  text-align: left;
+  border: none !important;
+  background: transparent !important;
+  color: var(--soft) !important;
+  font-family: var(--sans);
+  font-size: 13px;
+  cursor: pointer;
+  outline: none;
+  border-radius: 0 !important;
+}
+
+.dropdown-item:hover, .dropdown-item:focus {
+  background-color: var(--raised) !important;
+  color: var(--text) !important;
+}
+
+.dropdown-item:disabled {
+  color: var(--muted) !important;
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+@keyframes dropdownFadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 pre {
   margin: 0;
   min-height: 44vh;
@@ -518,6 +595,28 @@ button.recording {
 #agentOutput {
   min-height: 18vh;
   margin-top: 12px;
+}
+
+#voiceSelect {
+  font-family: var(--sans);
+  font-size: 13px;
+  background-color: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 6px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  outline: none;
+  max-width: 180px;
+  text-overflow: ellipsis;
+}
+
+#voiceSelect:hover {
+  border-color: var(--soft);
+}
+
+#voiceSelect:focus {
+  border-color: var(--accent);
 }
 
 @media (max-width: 860px) {
