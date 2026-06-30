@@ -13,6 +13,7 @@ def _request(method: str, path: str, body: str | None = None):
     server = ThreadingHTTPServer(("127.0.0.1", 0), ClientDiscoveryHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
+    connection = None
     try:
         connection = http.client.HTTPConnection("127.0.0.1", server.server_port)
         connection.request(
@@ -25,7 +26,8 @@ def _request(method: str, path: str, body: str | None = None):
         raw = response.read().decode("utf-8")
         status = response.status
     finally:
-        connection.close()
+        if connection is not None:
+            connection.close()
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
@@ -53,6 +55,13 @@ def test_process_endpoint_returns_invalid_json_for_malformed_body():
 
     assert status == 400
     assert payload == {"error": "invalid json"}
+
+
+def test_post_invalid_endpoint_returns_not_found():
+    status, payload = _request("POST", "/api/invalid", "{}")
+
+    assert status == 404
+    assert payload == {"error": "not found"}
 
 
 def test_healthz_endpoint_reports_ok():
