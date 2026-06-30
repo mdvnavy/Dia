@@ -7,6 +7,10 @@ const score = document.querySelector("#score");
 const issues = document.querySelector("#issues");
 const output = document.querySelector("#documentOutput");
 const tabs = [...document.querySelectorAll(".tab")];
+const agentMessage = document.querySelector("#agentMessage");
+const runChat = document.querySelector("#runChat");
+const agentOutput = document.querySelector("#agentOutput");
+const agentStatus = document.querySelector("#agentStatus");
 const copyAll = document.querySelector("#copyAll");
 const downloadMarkdown = document.querySelector("#downloadMarkdown");
 const downloadJson = document.querySelector("#downloadJson");
@@ -15,6 +19,82 @@ const copySection = document.querySelector("#copySection");
 let documents = {};
 let latestPayload = null;
 let activeDoc = "client-profile.md";
+// The questionnaire text that produced latestPayload, so agent context always
+// matches the run shown in the tier card even if the textarea is edited later.
+let lastRunQuestionnaire = "";
+
+const themeToggle = document.querySelector("#themeToggle");
+
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  const isLight = theme === "light";
+  themeToggle.setAttribute("aria-pressed", String(isLight));
+  themeToggle.setAttribute(
+    "aria-label",
+    isLight ? "Switch to dark mode" : "Switch to light mode"
+  );
+}
+
+themeToggle.addEventListener("click", () => {
+  const next =
+    document.documentElement.dataset.theme === "light" ? "dark" : "light";
+  applyTheme(next);
+  try {
+    localStorage.setItem("dia-theme", next);
+  } catch (error) {
+    // Private browsing can block storage; the toggle still works for the session.
+  }
+});
+
+applyTheme(document.documentElement.dataset.theme || "dark");
+
+// Header tooltip: hover/focus shows the full app name via CSS; click/tap
+// toggles it for touch devices, where hover does not exist.
+const appTip = document.querySelector(".app-tip");
+const appInfo = document.querySelector("#appInfo");
+
+appInfo.addEventListener("click", (event) => {
+  event.stopPropagation();
+  const open = appTip.classList.toggle("open");
+  appInfo.setAttribute("aria-expanded", String(open));
+});
+
+document.addEventListener("click", (event) => {
+  if (appTip.classList.contains("open") && !appTip.contains(event.target)) {
+    appTip.classList.remove("open");
+    appInfo.setAttribute("aria-expanded", "false");
+  }
+});
+
+function setBusy(button, busy) {
+  button.disabled = busy;
+  button.classList.toggle("busy", busy);
+}
+
+// Intake collapse: after a successful run the questionnaire folds away so the
+// post-intake workflow (Ask DIA, results, draft editor) takes the stage. The
+// Run button and status stay visible for quick re-runs.
+const intakeBody = document.querySelector("#intakeBody");
+const intakeToggle = document.querySelector("#intakeToggle");
+const skipLink = document.querySelector("#skipLink");
+
+function setIntakeCollapsed(collapsed) {
+  intakeBody.hidden = collapsed;
+  intakeToggle.hidden = false;
+  intakeToggle.setAttribute("aria-expanded", String(!collapsed));
+  intakeToggle.textContent = collapsed ? "Edit intake" : "Collapse intake";
+  // Keep the skip link pointing at something visible: the hidden textarea
+  // cannot receive focus while collapsed.
+  skipLink.href = collapsed ? "#intakeToggle" : "#questionnaire";
+  skipLink.textContent = collapsed ? "Skip to intake controls" : "Skip to questionnaire";
+}
+
+intakeToggle.addEventListener("click", () => {
+  setIntakeCollapsed(!intakeBody.hidden);
+  if (!intakeBody.hidden) {
+    questionnaire.focus();
+  }
+});
 
 loadSample.addEventListener("click", async () => {
   statusText.textContent = "Loading sample...";
@@ -26,7 +106,7 @@ loadSample.addEventListener("click", async () => {
 
 runAgent.addEventListener("click", async () => {
   statusText.textContent = "Processing...";
-  runAgent.disabled = true;
+  setBusy(runAgent, true);
   setExportAvailability(false);
   try {
     const response = await fetch("/api/process", {
@@ -39,36 +119,156 @@ runAgent.addEventListener("click", async () => {
       throw new Error(payload.error || "Processing failed");
     }
     latestPayload = payload;
+    lastRunQuestionnaire = questionnaire.value;
     documents = payload.documents;
     tier.textContent = payload.score.tier;
     score.textContent = `${payload.score.total_score}/${payload.score.max_score} · ${payload.score.timeline}`;
     renderIssues(payload.issues);
     renderDocument(activeDoc);
     setExportAvailability(true);
-    statusText.textContent = "Complete";
+    setIntakeCollapsed(true);
+    statusText.textContent = "Complete - intake collapsed, ready to work";
   } catch (error) {
     statusText.textContent = error.message;
     setExportAvailability(latestPayload !== null);
   } finally {
-    runAgent.disabled = false;
+    setBusy(runAgent, false);
   }
 });
 
-tabs.forEach((tab) => {
-  tab.addEventListener("click", () => {
-    activeDoc = tab.dataset.doc;
-    tabs.forEach((item) => item.classList.toggle("active", item === tab));
-    renderDocument(activeDoc);
+function selectTab(tab, { focus = false } = {}) {
+  activeDoc = tab.dataset.doc;
+  output.setAttribute("aria-labelledby", tab.id);
+  tabs.forEach((item) => {
+    const isActive = item === tab;
+    item.classList.toggle("active", isActive);
+    item.setAttribute("aria-selected", String(isActive));
+    item.tabIndex = isActive ? 0 : -1;
   });
+  if (focus) {
+    tab.focus();
+  }
+  renderDocument(activeDoc);
+}
+
+tabs.forEach((tab) => {
+  tab.addEventListener("click", () => selectTab(tab));
 });
 
+document.querySelector(".tabs").addEventListener("keydown", (event) => {
+  const current = tabs.indexOf(document.activeElement);
+  if (current === -1) {
+    return;
+  }
+  let next = null;
+  if (event.key === "ArrowRight") {
+    next = (current + 1) % tabs.length;
+  } else if (event.key === "ArrowLeft") {
+    next = (current - 1 + tabs.length) % tabs.length;
+  } else if (event.key === "Home") {
+    next = 0;
+  } else if (event.key === "End") {
+    next = tabs.length - 1;
+  }
+  if (next !== null) {
+    event.preventDefault();
+    selectTab(tabs[next], { focus: true });
+  }
+});
+
+async function refreshAgentStatus() {
+  try {
+    const response = await fetch("/api/agent/status");
+    const payload = await response.json();
+    if (payload.configured) {
+      agentStatus.textContent = "Gemini connected";
+      agentStatus.classList.add("ok");
+    } else {
+      agentStatus.textContent = "API key not set";
+      agentStatus.classList.remove("ok");
+    }
+  } catch (error) {
+    agentStatus.textContent = "status unavailable";
+  }
+}
+
+// Ground the agent in the deterministic run so its answers (scores, missing
+// fields, tier) agree with the tier card instead of re-scoring a lossy
+// re-parse of whichever generated document happens to be on screen.
+function buildAgentContext() {
+  const sections = [];
+  if (latestPayload) {
+    const scoreInfo = latestPayload.score;
+    const issueLines = latestPayload.issues.length
+      ? latestPayload.issues
+          .map((issue) => `  - ${issue.severity}: ${issue.message}`)
+          .join("\n")
+      : "  - none";
+    sections.push(
+      "Authoritative results from the deterministic intake run (treat these " +
+        "as ground truth; do not re-score unless explicitly asked to " +
+        "re-evaluate):\n" +
+        `- Recommended tier: ${scoreInfo.tier}\n` +
+        `- Score: ${scoreInfo.total_score}/${scoreInfo.max_score}\n` +
+        `- Timeline: ${scoreInfo.timeline}\n` +
+        `- Validation issues:\n${issueLines}`
+    );
+    sections.push(
+      "Original questionnaire markdown (use THIS as input if you run any " +
+        "intake tools):\n" + lastRunQuestionnaire
+    );
+  }
+  if (documents[activeDoc]) {
+    sections.push(`Currently viewed document (${activeDoc}):\n${documents[activeDoc]}`);
+  }
+  return sections.length ? `\n\nContext:\n${sections.join("\n\n---\n\n")}` : "";
+}
+
+async function sendAgentMessage() {
+  const message = agentMessage.value.trim();
+  if (!message) {
+    agentOutput.textContent = "Type a question for the agent first.";
+    return null;
+  }
+  const context = buildAgentContext();
+  agentOutput.textContent = "Thinking...";
+  setBusy(runChat, true);
+  try {
+    const response = await fetch("/api/agent", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: message + context }),
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.error || "Agent run failed");
+    }
+    agentOutput.textContent = payload.reply || "(empty response)";
+    return payload.reply || "";
+  } catch (error) {
+    agentOutput.textContent = error.message;
+    return null;
+  } finally {
+    setBusy(runChat, false);
+  }
+}
+
+runChat.addEventListener("click", async () => {
+  const reply = await sendAgentMessage();
+  if (autoSpeakEnabled && reply) {
+    speakText(reply, listenAgent);
+  }
+});
+
+refreshAgentStatus();
+
 copyAll.addEventListener("click", async () => {
-  await copyText(buildMarkdownExport(), "All outputs copied");
+  await copyText(buildMarkdownExport(), "All outputs copied", exportStatus);
 });
 
 downloadMarkdown.addEventListener("click", () => {
   downloadFile("dia-outputs.md", buildMarkdownExport(), "text/markdown");
-  statusText.textContent = "Markdown downloaded";
+  flashStatus(exportStatus, "Markdown downloaded");
 });
 
 downloadJson.addEventListener("click", () => {
@@ -77,11 +277,241 @@ downloadJson.addEventListener("click", () => {
     JSON.stringify(latestPayload, null, 2),
     "application/json"
   );
-  statusText.textContent = "JSON downloaded";
+  flashStatus(exportStatus, "JSON downloaded");
 });
 
 copySection.addEventListener("click", async () => {
-  await copyText(documents[activeDoc] || "", `${activeLabel()} copied`);
+  await copyText(documents[activeDoc] || "", `${activeLabel()} copied`, exportStatus);
+});
+
+const draftEditor = document.querySelector("#draftEditor");
+const draftStatus = document.querySelector("#draftStatus");
+const draftLoad = document.querySelector("#draftLoad");
+const draftCopyPaste = document.querySelector("#draftCopyPaste");
+const draftUndo = document.querySelector("#draftUndo");
+const draftRedo = document.querySelector("#draftRedo");
+const draftClear = document.querySelector("#draftClear");
+const formatButtons = [...document.querySelectorAll(".fmt[data-cmd]")];
+
+function draftText() {
+  return draftEditor.innerText.replace(/\u00a0/g, " ");
+}
+
+function refreshDraftControls() {
+  draftClear.disabled = draftText().trim().length === 0;
+  draftLoad.disabled = !documents[activeDoc];
+}
+
+draftEditor.addEventListener("input", refreshDraftControls);
+
+// Route content changes through execCommand so they land on the editor's
+// native undo stack and the visible Undo/Redo buttons can revert them.
+function replaceDraftContent(text) {
+  draftEditor.focus();
+  document.execCommand("selectAll");
+  document.execCommand("insertText", false, text);
+}
+
+draftLoad.addEventListener("click", () => {
+  const content = documents[activeDoc];
+  if (!content) {
+    flashStatus(draftStatus, "Run an intake first");
+    return;
+  }
+  replaceDraftContent(content);
+  refreshDraftControls();
+  flashStatus(draftStatus, `${activeLabel()} loaded into draft editor`);
+});
+
+async function copyDraft() {
+  const text = draftText();
+  if (!text.trim()) {
+    flashStatus(draftStatus, "No draft to copy");
+    return;
+  }
+  try {
+    if (navigator.clipboard?.write && window.ClipboardItem && window.isSecureContext) {
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          "text/html": new Blob([draftEditor.innerHTML], { type: "text/html" }),
+          "text/plain": new Blob([text], { type: "text/plain" }),
+        }),
+      ]);
+      flashStatus(draftStatus, "Draft copied (with formatting)");
+      return;
+    }
+  } catch (error) {
+    // Rich copy denied; fall through to the plain-text helper and its fallbacks.
+  }
+  await copyText(text, "Draft copied", draftStatus);
+}
+
+async function pasteIntoDraft() {
+  if (!navigator.clipboard?.readText || !window.isSecureContext) {
+    flashStatus(draftStatus, "Paste blocked by browser - use Ctrl+V in the editor");
+    draftEditor.focus();
+    return;
+  }
+  try {
+    const clip = await navigator.clipboard.readText();
+    if (!clip) {
+      flashStatus(draftStatus, "Clipboard is empty");
+      return;
+    }
+    draftEditor.focus();
+    document.execCommand("insertText", false, clip);
+    refreshDraftControls();
+    flashStatus(draftStatus, "Pasted from clipboard");
+  } catch (error) {
+    flashStatus(draftStatus, "Paste blocked by browser - use Ctrl+V in the editor");
+    draftEditor.focus();
+  }
+}
+
+// One multifunctional button: click = copy, double-click = paste. Copy must
+// NOT fire while a double-click can still be recognized: it would overwrite
+// the clipboard with the draft, so the paste would re-insert the draft
+// instead of what the user meant to paste. Paste rides the browser's native
+// dblclick recognition; copy waits out a grace period above common OS
+// double-click intervals (Windows defaults to 500ms) and is cancelled the
+// moment a second click arrives (event.detail > 1).
+const DOUBLE_CLICK_GRACE_MS = 600;
+let copyPasteTimer = null;
+
+draftCopyPaste.addEventListener("click", (event) => {
+  clearTimeout(copyPasteTimer);
+  copyPasteTimer = null;
+  if (event.detail > 1) {
+    return; // part of a multi-click gesture; dblclick handles it
+  }
+  copyPasteTimer = setTimeout(() => {
+    copyPasteTimer = null;
+    copyDraft();
+  }, DOUBLE_CLICK_GRACE_MS);
+});
+
+draftCopyPaste.addEventListener("dblclick", () => {
+  clearTimeout(copyPasteTimer);
+  copyPasteTimer = null;
+  pasteIntoDraft();
+});
+
+draftUndo.addEventListener("click", () => {
+  draftEditor.focus();
+  document.execCommand("undo");
+  refreshDraftControls();
+});
+
+draftRedo.addEventListener("click", () => {
+  draftEditor.focus();
+  document.execCommand("redo");
+  refreshDraftControls();
+});
+
+draftClear.addEventListener("click", () => {
+  draftEditor.focus();
+  document.execCommand("selectAll");
+  document.execCommand("delete");
+  // Browsers often leave a stray <br> behind, which defeats the :empty
+  // placeholder; strip the leftover markup once the text is gone.
+  if (!draftEditor.innerText.trim()) {
+    draftEditor.innerHTML = "";
+  }
+  refreshDraftControls();
+  flashStatus(draftStatus, "Draft cleared");
+});
+
+function closestInEditor(tagName) {
+  let node = window.getSelection()?.anchorNode;
+  while (node && node !== draftEditor) {
+    if (node.nodeName === tagName) {
+      return node;
+    }
+    node = node.parentNode;
+  }
+  return null;
+}
+
+function applyFormatCommand(command) {
+  draftEditor.focus();
+  if (command === "letteredList") {
+    document.execCommand("insertOrderedList");
+    const list = closestInEditor("OL");
+    if (list) {
+      list.classList.add("lettered");
+    }
+  } else if (command === "insertOrderedList") {
+    document.execCommand("insertOrderedList");
+    const list = closestInEditor("OL");
+    if (list) {
+      list.classList.remove("lettered");
+    }
+  } else {
+    document.execCommand(command, false, null);
+  }
+  refreshDraftControls();
+}
+
+formatButtons.forEach((button) => {
+  // Keep focus (and the selection) in the editor while clicking the toolbar.
+  button.addEventListener("mousedown", (event) => event.preventDefault());
+  button.addEventListener("click", () => applyFormatCommand(button.dataset.cmd));
+});
+
+// List type dropdown: one toolbar button, menu picks bullet/numbered/lettered.
+const listMenuButton = document.querySelector("#listMenuButton");
+const listMenu = document.querySelector("#listMenu");
+const listMenuItems = [...listMenu.querySelectorAll(".menu-item")];
+
+function setListMenuOpen(open, { focusFirst = false } = {}) {
+  listMenu.classList.toggle("open", open);
+  listMenuButton.setAttribute("aria-expanded", String(open));
+  if (open && focusFirst) {
+    listMenuItems[0].focus();
+  }
+}
+
+listMenuButton.addEventListener("mousedown", (event) => event.preventDefault());
+listMenuButton.addEventListener("click", () => {
+  setListMenuOpen(!listMenu.classList.contains("open"));
+});
+listMenuButton.addEventListener("keydown", (event) => {
+  if (event.key === "ArrowDown") {
+    event.preventDefault();
+    setListMenuOpen(true, { focusFirst: true });
+  }
+});
+
+listMenu.addEventListener("keydown", (event) => {
+  const index = listMenuItems.indexOf(document.activeElement);
+  if (event.key === "Escape") {
+    setListMenuOpen(false);
+    listMenuButton.focus();
+  } else if (event.key === "Tab") {
+    // Menu items are out of the tab order (ARIA menu pattern); Tab leaves
+    // the menu entirely, so close it and let focus move on naturally.
+    setListMenuOpen(false);
+  } else if (event.key === "ArrowDown") {
+    event.preventDefault();
+    listMenuItems[(index + 1) % listMenuItems.length].focus();
+  } else if (event.key === "ArrowUp") {
+    event.preventDefault();
+    listMenuItems[(index - 1 + listMenuItems.length) % listMenuItems.length].focus();
+  }
+});
+
+listMenuItems.forEach((item) => {
+  item.addEventListener("mousedown", (event) => event.preventDefault());
+  item.addEventListener("click", () => {
+    applyFormatCommand(item.dataset.cmd);
+    setListMenuOpen(false);
+  });
+});
+
+document.addEventListener("click", (event) => {
+  if (listMenu.classList.contains("open") && !event.target.closest(".list-menu")) {
+    setListMenuOpen(false);
+  }
 });
 
 function renderIssues(items) {
@@ -101,6 +531,7 @@ function renderIssues(items) {
 
 function renderDocument(name) {
   output.textContent = documents[name] || "Run an intake to generate this document.";
+  refreshDraftControls();
 }
 
 function setExportAvailability(isAvailable) {
@@ -108,6 +539,8 @@ function setExportAvailability(isAvailable) {
   downloadMarkdown.disabled = !isAvailable;
   downloadJson.disabled = !isAvailable;
   copySection.disabled = !isAvailable;
+  listenDocument.disabled = !isAvailable;
+  shareX.disabled = !isAvailable;
 }
 
 function buildMarkdownExport() {
@@ -118,9 +551,24 @@ function buildMarkdownExport() {
     .join("\n\n---\n\n");
 }
 
-async function copyText(text, successMessage) {
+// Inline statuses keep action feedback next to the controls that caused it;
+// the intake status line reports intake state only. Messages auto-clear.
+const statusTimers = new Map();
+
+function flashStatus(statusEl, message) {
+  statusEl.textContent = message;
+  clearTimeout(statusTimers.get(statusEl));
+  statusTimers.set(
+    statusEl,
+    setTimeout(() => {
+      statusEl.textContent = "";
+    }, 4000)
+  );
+}
+
+async function copyText(text, successMessage, statusEl) {
   if (!text) {
-    statusText.textContent = "No output to copy";
+    flashStatus(statusEl, "No output to copy");
     return;
   }
 
@@ -130,9 +578,16 @@ async function copyText(text, successMessage) {
     } else {
       copyTextFallback(text);
     }
-    statusText.textContent = successMessage;
+    flashStatus(statusEl, successMessage);
   } catch (error) {
-    statusText.textContent = "Copy failed";
+    // Embedded contexts (iframes, previews) can deny the async clipboard API
+    // even on localhost; the execCommand fallback usually still works there.
+    try {
+      copyTextFallback(text);
+      flashStatus(statusEl, successMessage);
+    } catch (fallbackError) {
+      flashStatus(statusEl, "Copy failed");
+    }
   }
 }
 
@@ -169,3 +624,292 @@ function activeLabel() {
   const tab = tabs.find((item) => item.dataset.doc === activeDoc);
   return tab ? tab.textContent : activeDoc;
 }
+
+// --- Speech: text-to-speech, voice responses, conversation mode ---
+
+const listenDocument = document.querySelector("#listenDocument");
+const listenAgent = document.querySelector("#listenAgent");
+const autoSpeak = document.querySelector("#autoSpeak");
+const micButton = document.querySelector("#micButton");
+const conversationMode = document.querySelector("#conversationMode");
+
+const ttsSupported = "speechSynthesis" in window;
+const SpeechRecognitionImpl =
+  window.SpeechRecognition || window.webkitSpeechRecognition || null;
+
+if (!ttsSupported) {
+  document
+    .querySelectorAll(".speech-only")
+    .forEach((el) => (el.hidden = true));
+}
+if (!SpeechRecognitionImpl) {
+  document.querySelectorAll(".speech-input-only").forEach((el) => {
+    el.disabled = true;
+    el.title = "Speech recognition is not supported in this browser";
+  });
+}
+
+let currentSpeakButton = null;
+
+function setSpeakingState(button, speaking) {
+  if (!button) {
+    return;
+  }
+  button.setAttribute("aria-pressed", String(speaking));
+  const label = button.querySelector(".speech-label");
+  if (label) {
+    label.textContent = speaking ? "Stop" : "Listen";
+  }
+}
+
+function stopSpeaking() {
+  if (ttsSupported) {
+    window.speechSynthesis.cancel();
+  }
+  setSpeakingState(currentSpeakButton, false);
+  currentSpeakButton = null;
+}
+
+function speakText(text, button, { onDone } = {}) {
+  if (!ttsSupported) {
+    return;
+  }
+  // Strip markdown decoration so headings and emphasis read naturally.
+  const clean = (text || "").replace(/[#*`_]/g, "").trim();
+  if (!clean) {
+    statusText.textContent = "Nothing to read aloud";
+    if (onDone) onDone();
+    return;
+  }
+  stopSpeaking();
+  const utterance = new SpeechSynthesisUtterance(clean);
+  currentSpeakButton = button || null;
+  setSpeakingState(currentSpeakButton, true);
+  const finish = () => {
+    setSpeakingState(button, false);
+    if (currentSpeakButton === button) {
+      currentSpeakButton = null;
+    }
+    if (onDone) onDone();
+  };
+  utterance.onend = finish;
+  utterance.onerror = finish;
+  window.speechSynthesis.speak(utterance);
+}
+
+function toggleSpeak(text, button) {
+  if (currentSpeakButton === button && window.speechSynthesis.speaking) {
+    stopSpeaking();
+    return;
+  }
+  speakText(text, button);
+}
+
+if (ttsSupported) {
+  listenDocument.addEventListener("click", () => {
+    toggleSpeak(documents[activeDoc] || "", listenDocument);
+  });
+  listenAgent.addEventListener("click", () => {
+    toggleSpeak(agentOutput.textContent, listenAgent);
+  });
+}
+
+let autoSpeakEnabled = false;
+
+function applyAutoSpeak(enabled) {
+  autoSpeakEnabled = enabled && ttsSupported;
+  autoSpeak.setAttribute("aria-pressed", String(autoSpeakEnabled));
+  autoSpeak.textContent = `Auto-speak: ${autoSpeakEnabled ? "on" : "off"}`;
+}
+
+autoSpeak.addEventListener("click", () => {
+  applyAutoSpeak(!autoSpeakEnabled);
+  if (!autoSpeakEnabled) {
+    stopSpeaking();
+  }
+  try {
+    localStorage.setItem("dia-autospeak", autoSpeakEnabled ? "on" : "off");
+  } catch (error) {
+    // Storage can be blocked; the toggle still works for this session.
+  }
+});
+
+try {
+  applyAutoSpeak(localStorage.getItem("dia-autospeak") === "on");
+} catch (error) {
+  applyAutoSpeak(false);
+}
+
+// --- Voice input: one-shot dictation and hands-free conversation mode ---
+
+let recognition = null;
+let recognizing = false;
+let conversationActive = false;
+
+function listenOnce({ onTranscript, onError }) {
+  const rec = new SpeechRecognitionImpl();
+  rec.lang = navigator.language || "en-US";
+  rec.interimResults = false;
+  rec.maxAlternatives = 1;
+  let settled = false;
+  rec.onstart = () => {
+    recognizing = true;
+    micButton.setAttribute("aria-pressed", "true");
+  };
+  rec.onresult = (event) => {
+    settled = true;
+    if (!rec.cancelled) {
+      onTranscript(event.results[0][0].transcript.trim());
+    }
+  };
+  rec.onerror = (event) => {
+    settled = true;
+    if (!rec.cancelled) {
+      onError(event.error);
+    }
+  };
+  rec.onend = () => {
+    recognizing = false;
+    micButton.setAttribute("aria-pressed", "false");
+    if (!settled && !rec.cancelled) {
+      onError("no-speech");
+    }
+  };
+  rec.start();
+  return rec;
+}
+
+// Aborting a recognizer still fires its error/end events asynchronously;
+// the cancelled flag keeps those late events from overwriting whatever
+// status message the cancelling code just set.
+function cancelRecognition() {
+  if (recognition && recognizing) {
+    recognition.cancelled = true;
+    recognition.abort();
+  }
+}
+
+function stopConversation(message) {
+  conversationActive = false;
+  conversationMode.setAttribute("aria-pressed", "false");
+  conversationMode.classList.remove("recording");
+  cancelRecognition();
+  stopSpeaking();
+  if (message) {
+    statusText.textContent = message;
+  }
+}
+
+function conversationTurn() {
+  if (!conversationActive) {
+    return;
+  }
+  statusText.textContent = "Listening...";
+  recognition = listenOnce({
+    onTranscript: async (text) => {
+      if (!conversationActive) {
+        return;
+      }
+      if (!text) {
+        conversationTurn();
+        return;
+      }
+      agentMessage.value = text;
+      statusText.textContent = "Sending to agent...";
+      const reply = await sendAgentMessage();
+      if (!conversationActive) {
+        return;
+      }
+      if (reply) {
+        statusText.textContent = "Speaking reply...";
+        speakText(reply, listenAgent, {
+          onDone: () => {
+            if (conversationActive) {
+              conversationTurn();
+            }
+          },
+        });
+      } else {
+        stopConversation("Conversation paused: agent error");
+      }
+    },
+    onError: (error) => {
+      if (error === "no-speech" || error === "aborted") {
+        if (conversationActive && error === "no-speech") {
+          conversationTurn();
+        }
+        return;
+      }
+      stopConversation(
+        error === "not-allowed"
+          ? "Microphone permission denied"
+          : `Conversation stopped (${error})`
+      );
+    },
+  });
+}
+
+if (SpeechRecognitionImpl) {
+  micButton.addEventListener("click", () => {
+    if (conversationActive) {
+      stopConversation("Conversation ended");
+      return;
+    }
+    if (recognizing) {
+      cancelRecognition();
+      statusText.textContent = "Dictation cancelled";
+      return;
+    }
+    statusText.textContent = "Listening...";
+    recognition = listenOnce({
+      onTranscript: (text) => {
+        if (text) {
+          const existing = agentMessage.value.trim();
+          agentMessage.value = existing ? `${existing} ${text}` : text;
+          statusText.textContent = "Dictation added";
+          agentMessage.focus();
+        }
+      },
+      onError: (error) => {
+        statusText.textContent =
+          error === "not-allowed"
+            ? "Microphone permission denied"
+            : error === "no-speech"
+              ? "No speech detected"
+              : `Dictation failed (${error})`;
+      },
+    });
+  });
+
+  conversationMode.addEventListener("click", () => {
+    if (conversationActive) {
+      stopConversation("Conversation ended");
+      return;
+    }
+    cancelRecognition();
+    conversationActive = true;
+    conversationMode.setAttribute("aria-pressed", "true");
+    conversationMode.classList.add("recording");
+    conversationTurn();
+  });
+}
+
+// --- Share on X ---
+
+const shareX = document.querySelector("#shareX");
+const exportStatus = document.querySelector("#exportStatus");
+
+shareX.addEventListener("click", () => {
+  if (!latestPayload) {
+    flashStatus(exportStatus, "Run an intake first");
+    return;
+  }
+  const scoreInfo = latestPayload.score;
+  const text =
+    `DIA scored this discovery intake ${scoreInfo.total_score}/${scoreInfo.max_score} ` +
+    `and recommends the "${scoreInfo.tier}" tier. Profile, analysis, and proposal ` +
+    `drafted in seconds by a Gemini ADK agent.`;
+  const url = `https://x.com/intent/tweet?text=${encodeURIComponent(text)}`;
+  window.open(url, "_blank", "noopener");
+  flashStatus(exportStatus, "Opening X share window");
+});

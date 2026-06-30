@@ -1,0 +1,33 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: client-discovery-agent-adk
+  labels:
+    cloud.googleapis.com/location: us-central1
+spec:
+  template:
+    spec:
+      containers:
+        - image: us-central1-docker.pkg.dev/PROJECT_ID/client-discovery-repo/client-discovery-agent-adk:latest
+          resources:
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          ports:
+            - containerPort: 8080
+          env:
+            - name: HOST
+              value: "0.0.0.0"
+            - name: PORT
+              value: "8080"
+            # In production, bind these to Google Secret Manager secrets:
+            # - name: GEMINI_API_KEY
+            #   valueFrom:
+            #     secretKeyRef:
+            #       name: gemini-api-key
+            #       key: latest
+            # - name: JULES_API_KEY
+            #   valueFrom:
+            #     secretKeyRef:
+            #       name: jules-api-key
+            #       key: latest

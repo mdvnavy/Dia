@@ -1,0 +1,12 @@
+# gitleaks config — scan the whole tree for secrets.
+# Run locally with:  gitleaks detect --source . --redact
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Ignore local virtualenv, git internals, and example env files."
+paths = [
+  '''\.venv/''',
+  '''\.git/''',
+  '''\.env\.example$''',
+]

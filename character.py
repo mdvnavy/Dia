@@ -14,11 +14,12 @@ from client_discovery.core import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parent
-WORKSPACE_ROOT = REPO_ROOT.parent.parent
-DIA_ENV_PATH = WORKSPACE_ROOT / "cdx-ws" / "DIA" / ".env"
 
-load_dotenv(DIA_ENV_PATH, override=False)
+# Load a repo-local .env if present, then fall back to any .env discovered up
+# the tree. Existing environment variables (e.g. Cloud Run / Codespaces
+# secrets) always win because override stays False.
 load_dotenv(REPO_ROOT / ".env", override=False)
+load_dotenv(override=False)
 
 logger = logging.getLogger(__name__)
 
@@ -47,10 +48,111 @@ def generate_intake_documents(questionnaire_markdown: str) -> dict:
     return generate_documents(intake, score)
 
 
-root_agent = LlmAgent(
-    model="gemini-2.5-flash",
-    name="dia_discovery_intake_agent",
-    instruction="""
+def _make_mcp_toolset() -> list:
+    """Connect the agent to a Make MCP Toolbox when one is configured.
+
+    The toolbox is a curated MCP server on the Make side: only the scenarios
+    published into it are exposed as tools, so the agent never sees the rest
+    of the Make account. Disabled (returns []) when MAKE_MCP_URL is unset so
+    tests and keyless local runs need no network or Make account.
+    """
+    url = os.environ.get("MAKE_MCP_URL")
+    if not url:
+        logger.info("MAKE_MCP_URL not set; running without the Make MCP toolbox.")
+        return []
+    try:
+        from google.adk.tools.mcp_tool.mcp_toolset import McpToolset
+        from google.adk.tools.mcp_tool.mcp_session_manager import (
+            StreamableHTTPConnectionParams,
+        )
+    except ImportError as error:
+        logger.warning("Make MCP toolbox disabled, ADK MCP support missing: %s", error)
+        return []
+
+    headers = {"Accept": "application/json, text/event-stream"}
+    token = os.environ.get("MAKE_MCP_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    logger.info("Make MCP toolbox enabled.")
+    return [
+        McpToolset(
+            connection_params=StreamableHTTPConnectionParams(url=url, headers=headers)
+        )
+    ]
+
+
+def _gcp_mcp_toolset() -> list:
+    """Connect the agent to a GCP-managed MCP server when one is configured.
+
+    Google publishes managed MCP endpoints for core Cloud APIs (monitoring,
+    logging, storage, ...) — the same servers registered in the project's
+    Agent Registry and governable through its Agent Gateway. Auth is the
+    local Google credential (ADC), not an API key. Disabled (returns [])
+    when GCP_MCP_URL is unset so tests and keyless local runs need no
+    network or gcloud setup.
+    """
+    url = os.environ.get("GCP_MCP_URL")
+    if not url:
+        logger.info("GCP_MCP_URL not set; running without GCP MCP tools.")
+        return []
+    try:
+        from google.adk.tools.mcp_tool.mcp_toolset import McpToolset
+        from google.adk.tools.mcp_tool.mcp_session_manager import (
+            StreamableHTTPConnectionParams,
+        )
+        import google.auth
+        import google.auth.transport.requests
+    except ImportError as error:
+        logger.warning("GCP MCP tools disabled, dependency missing: %s", error)
+        return []
+    try:
+        credentials, _ = google.auth.default(
+            scopes=["https://www.googleapis.com/auth/cloud-platform"]
+        )
+        # Tokens live ~1h; build_agent() runs per turn, so each fresh agent
+        # gets a fresh token and long sessions never hold an expired one.
+        credentials.refresh(google.auth.transport.requests.Request())
+    except Exception as error:
+        logger.warning("GCP MCP tools disabled, ADC unavailable: %s", error)
+        return []
+    headers = {
+        "Accept": "application/json, text/event-stream",
+        "Authorization": f"Bearer {credentials.token}",
+    }
+    logger.info("GCP MCP tools enabled.")
+    return [
+        McpToolset(
+            connection_params=StreamableHTTPConnectionParams(url=url, headers=headers)
+        )
+    ]
+
+
+def build_agent(
+    *, include_make_mcp: bool = False, include_gcp_mcp: bool = False
+) -> LlmAgent:
+    """Construct a fresh DIA agent.
+
+    MCP toolsets bind to the event loop they first connect on, so callers that
+    run each turn in its own asyncio.run() loop (like agent_runtime) must build
+    a fresh agent per turn rather than sharing the module-level root_agent.
+    """
+    tools = [
+        parse_intake,
+        validate_intake_fields,
+        score_client_opportunity,
+        generate_intake_documents,
+    ]
+    if include_make_mcp:
+        tools.extend(_make_mcp_toolset())
+    if include_gcp_mcp:
+        tools.extend(_gcp_mcp_toolset())
+
+    return LlmAgent(
+        # Overridable so deploys can pin a model and local testing can dodge
+        # per-model free-tier quotas without a code change.
+        model=os.environ.get("DIA_MODEL", "gemini-2.5-flash"),
+        name="dia_discovery_intake_agent",
+        instruction="""
         You are DIA, the discovery intake agent for a startup services team.
 
         Mission:
@@ -64,22 +166,29 @@ root_agent = LlmAgent(
         - Do not expose secrets, private client data, or unrelated internal product material.
         - Ask targeted follow-up questions when budget, decision maker, start date, goals, or pain points are missing.
         - Keep recommendations grounded in the scoring tool output.
+        - When Make toolbox tools are available and an intake is qualified (or the
+          user asks for follow-up actions), use them to execute the handoff, e.g.
+          lead automation. Report exactly which tool ran and what it returned.
+        - When GCP Cloud tools are available (monitoring, logging, etc.), use them
+          for operational questions about the agent itself, e.g. its own request
+          metrics or recent errors. Report exactly which tool ran and what it returned.
     """,
-    generate_content_config=types.GenerateContentConfig(
-        http_options=types.HttpOptions(
-            retry_options=types.HttpRetryOptions(
-                attempts=3,
-                initial_delay=1.0,
+        generate_content_config=types.GenerateContentConfig(
+            http_options=types.HttpOptions(
+                retry_options=types.HttpRetryOptions(
+                    attempts=3,
+                    initial_delay=1.0,
+                )
             )
-        )
-    ),
-    tools=[
-        parse_intake,
-        validate_intake_fields,
-        score_client_opportunity,
-        generate_intake_documents,
-    ],
-)
+        ),
+        tools=tools,
+    )
 
-if not os.environ.get("GEMINI_API_KEY"):
-    logger.warning("GEMINI_API_KEY is not set; ADK chat runs will fail until configured.")
+
+# Module-level agent for ADK CLI / single-loop consumers (e.g. `adk run`).
+root_agent = build_agent()
+
+if not (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")):
+    logger.warning(
+        "GEMINI_API_KEY/GOOGLE_API_KEY is not set; ADK chat runs will fail until configured."
+    )
