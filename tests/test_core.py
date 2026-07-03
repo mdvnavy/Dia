@@ -23,6 +23,9 @@ from client_discovery.core import (
 )
 
 
+from client_discovery.models import ClientIntake
+
+
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
@@ -80,6 +83,24 @@ def test_generate_documents_returns_public_safe_markdown_outputs():
     assert "Northstar Studio" in combined
     assert "Custom AI Agent" in combined
     assert "billin" not in combined.lower()
+
+
+def test_score_opportunity_quick_win_tier():
+    intake = ClientIntake(pain_points=["pain1"], tools="")
+    score = score_opportunity(intake)
+    assert score.tier == "Quick Win"
+    assert score.price_range == "$500-$2,500"
+
+
+def test_score_opportunity_full_integration_tier():
+    intake = ClientIntake(
+        pain_points=["p1", "p2", "p3", "p4"],
+        goals=["g1", "g2", "g3", "g4"],
+        tools="Some Tool"
+    )
+    score = score_opportunity(intake)
+    assert score.tier == "Full Integration"
+    assert score.price_range == "$10,000-$25,000"
 
 
 def test_refine_with_jules_success():
