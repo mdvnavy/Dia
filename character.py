@@ -12,6 +12,7 @@ from client_discovery.core import (
     score_opportunity,
     validate_intake,
 )
+from client_discovery import memory
 
 REPO_ROOT = Path(__file__).resolve().parent
 
@@ -45,7 +46,20 @@ def generate_intake_documents(questionnaire_markdown: str) -> dict:
     """Generate profile, opportunity analysis, and proposal draft markdown."""
     intake = parse_questionnaire_markdown(questionnaire_markdown)
     score = score_opportunity(intake)
-    return generate_documents(intake, score)
+    documents = generate_documents(intake, score)
+    # Record the completed run in client memory (no-op unless MEMORY_SHEET_ID
+    # is set; never raises). This is the agent path's write trigger — the
+    # deterministic /api/process path records in app.py.
+    memory.record_engagement(
+        intake, score, source="/api/agent", documents=sorted(documents)
+    )
+    return documents
+
+
+def recall_client_history(company_name: str, website: str = "") -> dict:
+    """Look up whether this company has been seen before and return its
+    prior engagement history (client record + recent intake runs)."""
+    return memory.recall_summary(company_name, website)
 
 
 def _make_mcp_toolset() -> list:
@@ -142,6 +156,12 @@ def build_agent(
         score_client_opportunity,
         generate_intake_documents,
     ]
+    # Plain-function tool, not MCP (spec Open Question #6): auto-included when
+    # MEMORY_SHEET_ID is set, same present-means-on pattern as the MCP URLs.
+    # Cheap to include unconditionally per turn — it's a local function, not a
+    # network toolset, so it needs no per-message keyword routing.
+    if memory.is_enabled():
+        tools.append(recall_client_history)
     if include_make_mcp:
         tools.extend(_make_mcp_toolset())
     if include_gcp_mcp:
@@ -172,6 +192,10 @@ def build_agent(
         - When GCP Cloud tools are available (monitoring, logging, etc.), use them
           for operational questions about the agent itself, e.g. its own request
           metrics or recent errors. Report exactly which tool ran and what it returned.
+        - When the recall_client_history tool is available and an intake names a
+          company, check for prior history before drafting recommendations. If the
+          client is known, reference the prior engagement context (last tier, prior
+          pain points, proposal status) instead of treating them as brand new.
     """,
         generate_content_config=types.GenerateContentConfig(
             http_options=types.HttpOptions(
