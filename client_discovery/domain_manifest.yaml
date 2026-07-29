@@ -1,0 +1,92 @@
+domain_name: "client_discovery"
+version: "1.0.0"
+description: "Startup client discovery intake domain"
+
+question_aliases:
+  company_name: ["company name"]
+  website: ["website"]
+  industry: ["industry / niche", "industry", "niche"]
+  size: ["company size", "size"]
+  years_in_business: ["years in business"]
+  location: ["location"]
+  tools: ["what tools/software do you use today?", "what tools/software do you use", "tools/software do you use", "tools"]
+  budget: ["budget range", "budget"]
+  decision_maker: ["final decision-maker", "decision maker", "decision-maker"]
+  start_date: ["preferred start date", "start date"]
+  tech_person: ["in-house tech person", "tech person"]
+  compliance: ["compliance requirements", "compliance"]
+  notes: ["anything else we should know", "notes"]
+
+section_queries:
+  pain_points:
+    start_heading: "3. Pain Points"
+    end_heading_prefix: "4. Goals"
+  goals:
+    start_heading: "4. Goals"
+    end_heading_prefix: "5."
+
+validation_rules:
+  required_fields:
+    company_name:
+      code: "missing_company_name"
+      message: "Company name is required for generated documents."
+      severity: "warning"
+    budget:
+      code: "missing_budget"
+      message: "Budget range is needed to check fit against the recommended tier."
+      severity: "warning"
+    decision_maker:
+      code: "missing_decision_maker"
+      message: "Decision maker is needed before proposal handoff."
+      severity: "warning"
+    start_date:
+      code: "missing_start_date"
+      message: "Preferred start date is needed for timeline fit."
+      severity: "warning"
+  required_sections:
+    pain_points:
+      code: "missing_pain_points"
+      message: "At least one pain point is required for scoring."
+      severity: "error"
+    goals:
+      code: "missing_goals"
+      message: "At least one goal is required to generate a useful proposal."
+      severity: "warning"
+
+scoring:
+  tiers:
+    - name: "Quick Win"
+      scope: "One targeted automation with a narrow handoff."
+      price_range: "$500-$2,500"
+      timeline: "1-2 weeks"
+    - name: "Custom AI Agent"
+      scope: "Purpose-built client workflow agent for the core bottleneck."
+      price_range: "$2,500-$10,000"
+      timeline: "2-4 weeks"
+    - name: "Full Integration"
+      scope: "System-wide automation connecting multiple tools and teams."
+      price_range: "$10,000-$25,000"
+      timeline: "4-8 weeks"
+  max_score: 20
+  strategic_value: 3
+
+agent_instruction: |
+  You are DIA, the discovery intake agent for a startup services team.
+
+  Mission:
+  - Convert a founder or prospect questionnaire into a structured discovery profile.
+  - Identify missing fields before a proposal is trusted.
+  - Score the opportunity with transparent reasons.
+  - Generate practical markdown outputs: client profile, opportunity analysis, and proposal draft.
+
+  Operating rules:
+  - Use only fictional or user-provided demo data.
+  - Do not expose secrets, private client data, or unrelated internal product material.
+  - Ask targeted follow-up questions when budget, decision maker, start date, goals, or pain points are missing.
+  - Keep recommendations grounded in the scoring tool output.
+  - When Make toolbox tools are available and an intake is qualified (or the
+    user asks for follow-up actions), use them to execute the handoff, e.g.
+    lead automation. Report exactly which tool ran and what it returned.
+  - When GCP Cloud tools are available (monitoring, logging, etc.), use them
+    for operational questions about the agent itself, e.g. its own request
+    metrics or recent errors. Report exactly which tool ran and what it returned.

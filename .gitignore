@@ -10,3 +10,6 @@ generated/
 results.tsv
 eval.log
 gate.log
+
+eggs/
+
