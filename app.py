@@ -116,12 +116,33 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
 
         self.send_json(response)
 
+        # Record the completed run in client memory AFTER the response is on
+        # the wire, so a slow or unreachable Sheet can never delay an intake.
+        # No-op unless MEMORY_SHEET_ID is set; never raises.
+        self._record_engagement(response)
+
         # OBS capture is a LOCAL-ONLY convenience for recording demo videos.
         # It is off by default (so the deployed Cloud Run service never pokes a
         # non-existent OBS) and only runs when OBS_CAPTURE is explicitly enabled
         # locally and the intake surfaced issues. It never affects the response.
         if response.get("issues") and _obs_capture_enabled():
             self._trigger_obs_capture()
+
+    def _record_engagement(self, response: dict[str, object]) -> None:
+        try:
+            from client_discovery import memory
+            from client_discovery.models import ClientIntake, OpportunityScore
+
+            if not memory.is_enabled():
+                return
+            memory.record_engagement(
+                ClientIntake(**response["intake"]),
+                OpportunityScore(**response["score"]),
+                source="/api/process",
+                documents=sorted(response.get("documents", {})),
+            )
+        except Exception as error:  # noqa: BLE001 - memory must never break intake
+            logger.warning("client memory recording skipped: %s", error)
 
     def _trigger_obs_capture(self) -> None:
         try:

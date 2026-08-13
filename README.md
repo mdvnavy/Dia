@@ -88,6 +88,33 @@ The MCP URL is configuration, not a secret. Authentication uses the Cloud Run
 runtime service account through Application Default Credentials, so grant that
 service account only the Google Cloud roles the selected MCP endpoint needs.
 
+## Client memory (optional, Sheets-backed)
+
+DIA can remember clients between intakes using a Google Sheet **in your own
+Google account** — client data never leaves your Drive and never touches any
+shared infrastructure. Design: `docs/2026-07-07_client-memory-layer_design.md`.
+
+Setup:
+
+1. Create a Google Sheet with two tabs named `clients` and `engagements`.
+   Put these header rows in row 1:
+   - `clients`: `client_id | company_name | website | industry | first_seen_at | last_seen_at | engagement_count | last_tier | last_total_score | status | updated_at`
+   - `engagements`: `engagement_id | client_id | timestamp | source | tier | total_score | max_score | pain_points | goals | budget | documents_generated | proposal_outcome | notes`
+2. Set `MEMORY_SHEET_ID` to the Sheet's ID (the long segment of its URL).
+3. Auth is ADC: locally, `gcloud auth application-default login`; on Cloud
+   Run, share the Sheet (Editor) with the runtime service account's email.
+
+Behavior: every scored intake appends an `engagements` row (INSERT_ROWS —
+safe under concurrent writers) and updates the client's rollup row. The live
+agent gains a `recall_client_history` tool and references prior engagements
+when a repeat company comes in. `proposal_outcome` and `status` are yours to
+edit directly in the Sheet (e.g. mark a proposal `won`) — human-in-the-loop
+memory editing is a feature of the design, not a workaround.
+
+Unset `MEMORY_SHEET_ID` and DIA behaves exactly as before — memory is an
+enhancement, never a dependency; an unreachable Sheet degrades to a logged
+warning and never blocks or delays an intake.
+
 ## Run in Codespaces
 
 This repo includes a `.devcontainer/devcontainer.json` for GitHub Codespaces
