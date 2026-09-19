@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from dataclasses import asdict
 import logging
-import os
 from pathlib import Path
 from unittest.mock import Mock
 
 from character import root_agent
 from google.adk.agents.llm_agent import LlmAgent
+from client_discovery.config import load_config, require_gemini_api_key
 
 from client_discovery.core import (
     generate_documents,
@@ -40,8 +40,10 @@ def build_intake_response(questionnaire: str) -> dict[str, object]:
 
     # Resolve strategic analysis
     strategic_analysis = None
-    gemini_api_key = os.environ.get("GEMINI_API_KEY")
-    if not gemini_api_key:
+    config = load_config()
+    try:
+        require_gemini_api_key(config)
+    except ValueError:
         strategic_analysis = "DIA Agent Error: GEMINI_API_KEY is missing or invalid."
     else:
         try:
@@ -65,7 +67,7 @@ def build_intake_response(questionnaire: str) -> dict[str, object]:
                 
             draft = gemini_resp.text
             
-            jules_api_key = os.environ.get("JULES_API_KEY")
+            jules_api_key = str(config.get("JULES_API_KEY") or "").strip()
             if not jules_api_key:
                 strategic_analysis = draft
             else:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
+from typing import Any
 from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
@@ -15,9 +16,9 @@ REPO_ENV_PATH = REPO_ROOT / ".env"
 _dotenv_loaded = False
 
 
-def load_and_validate_config() -> dict[str, any]:
+def load_and_validate_config() -> dict[str, Any]:
     """
-    Locates and loads environment variables, validates them, and returns
+    Locates and loads environment variables and returns
     a dictionary of configuration parameters.
     """
     global _dotenv_loaded
@@ -27,13 +28,6 @@ def load_and_validate_config() -> dict[str, any]:
         _dotenv_loaded = True
 
     gemini_api_key = os.environ.get("GEMINI_API_KEY")
-    testing = os.environ.get("TESTING") == "true"
-
-    if not gemini_api_key:
-        if testing:
-            logger.warning("GEMINI_API_KEY is not set.")
-        else:
-            raise ValueError("GEMINI_API_KEY is required but missing from the environment.")
 
     # Optional variables
     jules_api_key = os.environ.get("JULES_API_KEY")
@@ -84,6 +78,15 @@ def load_and_validate_config() -> dict[str, any]:
         "SERVER_PORT": port_val,
         "SERVER_PASSWORD": server_password,
     }
+
+
+def require_gemini_api_key(config: dict[str, Any] | None = None) -> str:
+    """Returns a configured Gemini API key or raises if missing/empty."""
+    resolved_config = config if config is not None else load_and_validate_config()
+    gemini_api_key = str(resolved_config.get("GEMINI_API_KEY") or "").strip()
+    if not gemini_api_key:
+        raise ValueError("GEMINI_API_KEY is required but missing from the environment.")
+    return gemini_api_key
 
 
 # Provide load_config alias
