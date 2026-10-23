@@ -38,6 +38,11 @@ The demo UI is dependency-free (vanilla JS + built-in browser APIs):
   formatting where the browser allows - double-click to paste).
 - **Share on X** - opens a prefilled x.com post with the score and tier
   summary only (no client details).
+- **Tia-style shell** - centred wordmark, pill composer with a round send
+  button, slim top bar with a wordmark menu, and a "Learn how to use DIA"
+  dialog. Ask DIA and the results appear below the composer after a run.
+- **Command palette** - Ctrl/Cmd+K opens it; type to filter, arrow keys to
+  move, Enter to run, Esc to close. Press `/` to jump to the input.
 - **Accessibility** - keyboard-navigable document tabs (arrow/Home/End),
   aria-live announcements for status and agent output, a skip link, and
   visible focus outlines.

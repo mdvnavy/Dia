@@ -87,6 +87,7 @@ function setIntakeCollapsed(collapsed) {
   // cannot receive focus while collapsed.
   skipLink.href = collapsed ? "#intakeToggle" : "#questionnaire";
   skipLink.textContent = collapsed ? "Skip to intake controls" : "Skip to questionnaire";
+  if (!collapsed) autosizeComposer(questionnaire);
 }
 
 intakeToggle.addEventListener("click", () => {
@@ -101,6 +102,8 @@ loadSample.addEventListener("click", async () => {
   const response = await fetch("/api/sample");
   const payload = await response.json();
   questionnaire.value = payload.questionnaire;
+  if (intakeBody.hidden) setIntakeCollapsed(false);
+  autosizeComposer(questionnaire);
   statusText.textContent = "Sample loaded";
 });
 
@@ -127,6 +130,7 @@ runAgent.addEventListener("click", async () => {
     renderDocument(activeDoc);
     setExportAvailability(true);
     setIntakeCollapsed(true);
+    setStage("results");
     statusText.textContent = "Complete - intake collapsed, ready to work";
   } catch (error) {
     statusText.textContent = error.message;
@@ -815,6 +819,7 @@ function conversationTurn() {
         return;
       }
       agentMessage.value = text;
+      autosizeComposer(agentMessage);
       statusText.textContent = "Sending to agent...";
       const reply = await sendAgentMessage();
       if (!conversationActive) {
@@ -866,6 +871,7 @@ if (SpeechRecognitionImpl) {
         if (text) {
           const existing = agentMessage.value.trim();
           agentMessage.value = existing ? `${existing} ${text}` : text;
+          autosizeComposer(agentMessage);
           statusText.textContent = "Dictation added";
           agentMessage.focus();
         }
@@ -912,4 +918,381 @@ shareX.addEventListener("click", () => {
   const url = `https://x.com/intent/tweet?text=${encodeURIComponent(text)}`;
   window.open(url, "_blank", "noopener");
   flashStatus(exportStatus, "Opening X share window");
+});
+
+// --- Tia-style shell: stages, pill composers, menu, help, command palette ---
+
+const breadcrumbStage = document.querySelector("#breadcrumbStage");
+
+// "landing" shows only the hero + intake pill (like Tia's empty workspace);
+// "results" reveals Ask DIA and the generated documents below the composer.
+function setStage(stage) {
+  document.body.dataset.stage = stage;
+  breadcrumbStage.textContent =
+    stage === "results" ? "Discovery intake · Results" : "Discovery intake · Questionnaire";
+  autosizeComposer(agentMessage);
+}
+
+// Ask DIA can be opened before any intake has run (the agent works on its own).
+function openAgent() {
+  document.body.dataset.agent = "open";
+  autosizeComposer(agentMessage);
+  agentMessage.focus();
+}
+
+// Pill composers grow with their content; past one line they become a
+// rounded panel so pasted questionnaires stay readable.
+function autosizeComposer(textarea) {
+  const bar = textarea.closest(".prompt-bar");
+  if (!textarea.getClientRects().length) {
+    // Hidden (collapsed intake / unopened Ask DIA): size it when it reappears.
+    textarea.style.height = "";
+    return;
+  }
+  textarea.style.height = "auto";
+  const lineHeight = parseFloat(getComputedStyle(textarea).lineHeight) || 27;
+  const multiline =
+    textarea.value !== "" &&
+    (textarea.value.includes("\n") || textarea.scrollHeight > lineHeight * 1.6);
+  if (bar) {
+    bar.classList.toggle("multiline", multiline);
+  }
+  textarea.style.height = "auto";
+  textarea.style.height = `${textarea.scrollHeight}px`;
+}
+
+[questionnaire, agentMessage].forEach((textarea) => {
+  textarea.addEventListener("input", () => autosizeComposer(textarea));
+  autosizeComposer(textarea);
+});
+
+// Questionnaires are multi-line markdown: Enter adds a line, Ctrl/Cmd+Enter runs.
+questionnaire.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && !event.isComposing) {
+    event.preventDefault();
+    if (!runAgent.disabled) runAgent.click();
+  }
+});
+
+// Ask DIA behaves like Tia's prompt: Enter sends, Shift+Enter is a new line.
+agentMessage.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+    event.preventDefault();
+    if (!runChat.disabled) runChat.click();
+  }
+});
+
+function newIntake() {
+  questionnaire.value = "";
+  if (intakeBody.hidden) setIntakeCollapsed(false);
+  autosizeComposer(questionnaire);
+  statusText.textContent = "Ready for a new intake";
+  questionnaire.focus();
+}
+
+function focusComposer() {
+  if (document.body.dataset.stage === "results" || document.body.dataset.agent === "open") {
+    agentMessage.focus();
+  } else {
+    if (intakeBody.hidden) setIntakeCollapsed(false);
+    questionnaire.focus();
+  }
+}
+
+// Mouse-reactive liquid wordmark (ported from Tia).
+(() => {
+  const title = document.querySelector("#titleBrand");
+  const noise = document.querySelector("#liquidNoise");
+  const displace = document.querySelector("#liquidDisplace");
+  if (!title || !noise || !displace) return;
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  let hovering = false;
+  let currentScale = 0;
+  let running = false;
+  const MAX_SCALE = 3;
+  const RAMP_SPEED = 0.06;
+  const DECAY_SPEED = 0.04;
+
+  function tick() {
+    currentScale = hovering
+      ? currentScale + (MAX_SCALE - currentScale) * RAMP_SPEED
+      : currentScale * (1 - DECAY_SPEED);
+    noise.setAttribute("seed", String(Math.floor(performance.now() / 200)));
+    displace.setAttribute("scale", currentScale.toFixed(2));
+    if (currentScale > 0.05 || hovering) {
+      requestAnimationFrame(tick);
+    } else {
+      running = false;
+      currentScale = 0;
+      displace.setAttribute("scale", "0");
+      title.classList.remove("liquid-active");
+    }
+  }
+
+  title.addEventListener("mouseenter", () => {
+    hovering = true;
+    title.classList.add("liquid-active");
+    if (!running) {
+      running = true;
+      tick();
+    }
+  });
+  title.addEventListener("mouseleave", () => {
+    hovering = false;
+  });
+  title.addEventListener("mousemove", (event) => {
+    if (!hovering) return;
+    const rect = title.getBoundingClientRect();
+    const nx = (event.clientX - rect.left) / rect.width;
+    const ny = (event.clientY - rect.top) / rect.height;
+    noise.setAttribute(
+      "baseFrequency",
+      `${(0.01 + nx * 0.015).toFixed(4)} ${(0.015 + ny * 0.01).toFixed(4)}`
+    );
+  });
+})();
+
+// Wordmark dropdown menu (Tia's "Tia ▾").
+const navBrandMenu = document.querySelector("#navBrandMenu");
+const navDropdown = document.querySelector("#navDropdown");
+const navItems = [...navDropdown.querySelectorAll(".dropdown-item")];
+
+function setNavMenu(open, { focusFirst = false } = {}) {
+  navDropdown.classList.toggle("show", open);
+  navBrandMenu.setAttribute("aria-expanded", String(open));
+  if (open && focusFirst) navItems[0].focus();
+}
+
+navBrandMenu.addEventListener("click", (event) => {
+  event.stopPropagation();
+  setNavMenu(!navDropdown.classList.contains("show"), { focusFirst: event.detail === 0 });
+});
+
+navDropdown.addEventListener("keydown", (event) => {
+  const index = navItems.indexOf(document.activeElement);
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    event.preventDefault();
+    const step = event.key === "ArrowDown" ? 1 : -1;
+    navItems[(index + step + navItems.length) % navItems.length].focus();
+  } else if (event.key === "Escape") {
+    setNavMenu(false);
+    navBrandMenu.focus();
+  }
+});
+
+document.addEventListener("click", (event) => {
+  if (navDropdown.classList.contains("show") && !event.target.closest(".nav-menu-container")) {
+    setNavMenu(false);
+  }
+});
+
+const helpDialog = document.querySelector("#diaHelpDialog");
+
+function openHelp() {
+  if (!helpDialog.open) helpDialog.showModal();
+}
+
+// --- Command palette (Cmd/Ctrl+K) ---
+// Built fresh for DIA in Tia's visual language. Every command drives an
+// existing control, so it behaves exactly like clicking that button. Commands
+// that are not available right now (e.g. exports before a run) are hidden.
+
+const palette = document.querySelector("#commandPalette");
+const paletteInput = document.querySelector("#paletteInput");
+const paletteList = document.querySelector("#paletteList");
+const paletteTrigger = document.querySelector("#paletteTrigger");
+const isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+const modKey = isMac ? "⌘" : "Ctrl";
+
+document.querySelectorAll("kbd.kbd-hint").forEach((kbd) => {
+  if (kbd.textContent === "⌘K") kbd.textContent = `${modKey} K`;
+});
+
+const clickable = (selector) => () => {
+  const el = document.querySelector(selector);
+  return Boolean(el) && !el.disabled && !el.hidden;
+};
+const press = (selector) => () => document.querySelector(selector).click();
+const hasResults = () => latestPayload !== null;
+
+const commands = [
+  { id: "new-intake", label: "New intake", hint: "Clear questionnaire", run: newIntake },
+  { id: "load-sample", label: "Load sample questionnaire", run: press("#loadSample") },
+  { id: "run-intake", label: "Run intake", hint: `${modKey} Enter`, enabled: () => !runAgent.disabled && questionnaire.value.trim() !== "", run: () => runAgent.click() },
+  { id: "edit-intake", label: "Edit intake", enabled: () => !intakeToggle.hidden && intakeBody.hidden, run: () => { setIntakeCollapsed(false); questionnaire.focus(); } },
+  { id: "focus", label: "Focus the input", hint: "/", run: focusComposer },
+  { id: "ask", label: "Ask DIA", run: openAgent },
+  { id: "dictate", label: "Dictate a message", enabled: clickable("#micButton"), run: () => { openAgent(); micButton.click(); } },
+  { id: "conversation", label: "Toggle conversation mode", enabled: clickable("#conversationMode"), run: () => { openAgent(); conversationMode.click(); } },
+  { id: "tab-profile", label: "View client profile", enabled: hasResults, run: () => selectTab(document.querySelector("#tab-profile"), { focus: true }) },
+  { id: "tab-analysis", label: "View opportunity analysis", enabled: hasResults, run: () => selectTab(document.querySelector("#tab-analysis"), { focus: true }) },
+  { id: "tab-proposal", label: "View proposal draft", enabled: hasResults, run: () => selectTab(document.querySelector("#tab-proposal"), { focus: true }) },
+  { id: "copy-all", label: "Copy all outputs", enabled: clickable("#copyAll"), run: press("#copyAll") },
+  { id: "download-md", label: "Download Markdown", enabled: clickable("#downloadMarkdown"), run: press("#downloadMarkdown") },
+  { id: "download-json", label: "Download JSON", enabled: clickable("#downloadJson"), run: press("#downloadJson") },
+  { id: "draft-load", label: "Load document into Draft Editor", enabled: clickable("#draftLoad"), run: () => { draftLoad.click(); draftEditor.focus(); } },
+  { id: "share-x", label: "Share score on X", enabled: clickable("#shareX"), run: press("#shareX") },
+  { id: "theme", label: "Toggle light / dark mode", run: press("#themeToggle") },
+  { id: "help", label: "Learn how to use DIA", run: openHelp },
+];
+
+let visibleCommands = [];
+let activeIndex = 0;
+let paletteReturnFocus = null;
+
+function isEnabled(command) {
+  return command.enabled ? command.enabled() : true;
+}
+
+function renderPalette() {
+  const query = paletteInput.value.trim().toLowerCase();
+  visibleCommands = commands.filter(
+    (command) =>
+      isEnabled(command) &&
+      `${command.label} ${command.hint || ""}`.toLowerCase().includes(query)
+  );
+  if (activeIndex >= visibleCommands.length) activeIndex = 0;
+  paletteList.replaceChildren();
+  if (!visibleCommands.length) {
+    const empty = document.createElement("li");
+    empty.className = "palette-empty";
+    empty.textContent = "No matching commands";
+    paletteList.append(empty);
+    paletteInput.removeAttribute("aria-activedescendant");
+    return;
+  }
+  visibleCommands.forEach((command, index) => {
+    const item = document.createElement("li");
+    item.className = "palette-item";
+    item.id = `cmd-${command.id}`;
+    item.setAttribute("role", "option");
+    item.setAttribute("aria-selected", String(index === activeIndex));
+    const label = document.createElement("span");
+    label.textContent = command.label;
+    item.append(label);
+    if (command.hint) {
+      const hint = document.createElement("small");
+      hint.textContent = command.hint;
+      item.append(hint);
+    }
+    item.addEventListener("mousemove", () => {
+      if (activeIndex !== index) {
+        activeIndex = index;
+        updateActive();
+      }
+    });
+    item.addEventListener("click", () => runCommand(command));
+    paletteList.append(item);
+  });
+  updateActive();
+}
+
+function updateActive() {
+  paletteList.querySelectorAll(".palette-item").forEach((item, index) => {
+    item.setAttribute("aria-selected", String(index === activeIndex));
+  });
+  const active = visibleCommands[activeIndex];
+  if (active) {
+    paletteInput.setAttribute("aria-activedescendant", `cmd-${active.id}`);
+    document.querySelector(`#cmd-${active.id}`)?.scrollIntoView({ block: "nearest" });
+  }
+}
+
+function openPalette() {
+  if (palette.open) return;
+  setNavMenu(false);
+  if (helpDialog.open) helpDialog.close();
+  paletteReturnFocus = document.activeElement;
+  paletteInput.value = "";
+  activeIndex = 0;
+  renderPalette();
+  palette.showModal();
+  paletteInput.focus();
+}
+
+function closePalette({ restoreFocus = true } = {}) {
+  if (!palette.open) return;
+  palette.close();
+  if (restoreFocus && paletteReturnFocus && document.contains(paletteReturnFocus)) {
+    paletteReturnFocus.focus();
+  }
+}
+
+function runCommand(command) {
+  if (!command || !isEnabled(command)) return;
+  closePalette({ restoreFocus: false });
+  command.run();
+}
+
+paletteInput.addEventListener("input", () => {
+  activeIndex = 0;
+  renderPalette();
+});
+
+paletteInput.addEventListener("keydown", (event) => {
+  if (!visibleCommands.length) return;
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    event.preventDefault();
+    const step = event.key === "ArrowDown" ? 1 : -1;
+    activeIndex = (activeIndex + step + visibleCommands.length) % visibleCommands.length;
+    updateActive();
+  } else if (event.key === "Home" || event.key === "End") {
+    event.preventDefault();
+    activeIndex = event.key === "Home" ? 0 : visibleCommands.length - 1;
+    updateActive();
+  } else if (event.key === "Enter") {
+    event.preventDefault();
+    runCommand(visibleCommands[activeIndex]);
+  }
+});
+
+// Esc: the native dialog fires "cancel"; route it through closePalette so
+// focus returns to where the user was.
+palette.addEventListener("cancel", (event) => {
+  event.preventDefault();
+  closePalette();
+});
+
+// Clicking the backdrop (outside the panel) closes the palette.
+palette.addEventListener("click", (event) => {
+  if (event.target === palette) closePalette();
+});
+
+paletteTrigger.addEventListener("click", openPalette);
+
+document.querySelectorAll("[data-command]").forEach((el) => {
+  el.addEventListener("click", () => {
+    const id = el.dataset.command;
+    setNavMenu(false);
+    if (id === "palette") {
+      openPalette();
+      return;
+    }
+    runCommand(commands.find((command) => command.id === id));
+  });
+});
+
+document.addEventListener("keydown", (event) => {
+  if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === "k") {
+    event.preventDefault();
+    if (palette.open) {
+      closePalette();
+    } else {
+      openPalette();
+    }
+    return;
+  }
+  if (event.key === "Escape" && navDropdown.classList.contains("show")) {
+    setNavMenu(false);
+    navBrandMenu.focus();
+    return;
+  }
+  const target = event.target;
+  const typing =
+    target instanceof HTMLElement &&
+    (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName));
+  if (event.key === "/" && !typing && !palette.open && !helpDialog.open) {
+    event.preventDefault();
+    focusComposer();
+  }
 });
