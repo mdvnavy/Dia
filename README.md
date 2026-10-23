@@ -160,85 +160,100 @@ python app.py   # forwarded port 8080
 | POST   | `/api/process`        | Deterministic parse/score/generate        |
 | POST   | `/api/agent`          | Live Gemini ADK agent turn                |
 
-## Live agent access
+## Access and usage limits (lockdown v2)
 
-Interim policy until DIA has proper accounts (`agent_auth.py`, `agent_quota.py`):
+**No use without signing in, same as Tia.** Signed out, anyone can read and
+browse: the landing page, How it works, the business card link, static
+assets, `/api/config` and health checks. Every functional route needs a
+verified Google sign-in and otherwise answers **401
+`{"error": "sign_in_required"}`** before reading the body or doing any work.
+The UI shows a calm "Sign in with Google" prompt where the composer and Run
+would be.
 
-| Who | Ask DIA (`/api/agent`) |
-| --- | ---------------------- |
-| Visitors | Open, no sign-in. **10 questions per visitor per calendar day (America/New_York)**, then a friendly 429: "You've used today's 10 questions. Come back tomorrow!" |
-| Signed in with Google, email in `OWNER_EMAILS` | Unlimited, and skips the burst guard. |
-| Signed in with any other Google account | Same as a visitor (10/day). |
+| Route | Signed out | Signed in (free) | Charged |
+| ----- | ---------- | ---------------- | ------- |
+| `GET /`, static files, `/healthz`, `/health`, `/api/config`, `/api/auth/config`, `/api/agent/status` | 200 | 200 | no |
+| `POST /api/auth/session`, `POST /api/auth/logout` | public (IP-hash burst guard) | — | no |
+| `POST /api/process` | 401 | 10 generations/day | 1 generation |
+| `POST /api/pdf` with `{questionnaire}` | 401 | counts as a generation | 1 generation |
+| `POST /api/pdf` with `{result}` (re-render a saved run) | 401 | export | no |
+| `POST /api/agent` | 503 if `ASK_DIA_ENABLED` off, else 401 | 5 Ask DIA/day | 1 Ask DIA |
+| `POST /api/extract`, `GET /api/sample` | 401 | allowed | no |
+| `GET /api/usage` | 401 | the caller's counts | no |
 
-**Google Sign-In.** The *Sign in* button sits in the top bar's right corner,
-just before the theme toggle. It uses Google Identity Services (the same
-pattern as Tia): the browser gets a Google ID token and POSTs it once to
-`/api/auth/session`, where the server verifies it with `google-auth`
-(signature, `aud` = `GOOGLE_CLIENT_ID`, `iss` = `accounts.google.com`, `exp`,
-`email_verified`). It then sets a `dia_session` cookie that lasts 12 hours. The
-cookie is HttpOnly, SameSite=Lax, Secure on Cloud Run, and HMAC-signed with
-`DIA_SESSION_SECRET`. It carries only the verified email, and owner status is
-re-checked against `OWNER_EMAILS` on every request. *Sign out* clears the
-cookie and calls `google.accounts.id.disableAutoSelect()`. The ID token is
-never stored in the page or logged.
+Routes live in one table in `app.py` (`GET_ROUTES` / `POST_ROUTES`), and
+`tests/test_sign_in_gate.py` fails if a route is added outside it or ungated
+without being on the public allow-list.
 
-Without `GOOGLE_CLIENT_ID` or a `DIA_SESSION_SECRET` of at least 32
-characters, the button is hidden and everyone gets the visitor cap. Rotating
-`DIA_SESSION_SECRET` signs everyone out.
+**Owners.** `OWNER_EMAILS` is a comma list. A user is an owner only when the
+verified ID token's `email` (with `email_verified: true`) matches an entry,
+trimmed and case-insensitive. Owners are uncapped and skip the burst guards.
+Nothing the client sends (body fields, headers, other cookies) can make
+someone an owner.
 
-**Who is a "visitor"?** Each question is charged to two buckets and allowed only
-if both are under the limit: the client IP (on Cloud Run the right-most
-`X-Forwarded-For` hop, which Google appends; the left-most hops are
-client-supplied and ignored; IPv6 is collapsed to its /64) and a random
-`dia_vid` cookie (HttpOnly, SameSite=Lax, Secure on Cloud Run). Clearing
-cookies doesn't reset the cap (the IP bucket is full), and nor does switching
-networks with the same browser (the cookie bucket is). Keys are stored as
-salted HMAC-SHA256 hashes (`DIA_VISITOR_SALT`), never raw IPs. People sharing
-one IP (an office NAT) share its 10 questions.
+**Sign-in.** Google Identity Services gives the browser an ID token, which is
+POSTed once to `/api/auth/session`. The server verifies it with `google-auth`
+(signature, `aud` = `GOOGLE_CLIENT_ID`, `iss`, `exp`, `email_verified`) and
+sets `dia_session`: HttpOnly, SameSite=Lax, Secure on Cloud Run, HMAC-signed
+with `DIA_SESSION_SECRET`, bound to the token's `sub` and the client ID, and
+valid for 2 hours by default. Tampered, expired or foreign cookies are
+refused. Replaying the same Google token just mints another cookie for the
+same `sub`, so it never adds quota.
 
-**Where counts live.** `DIA_QUOTA_STORE=firestore` keeps counters in
-Firestore (one atomic `commit` with an increment transform per question;
-documents in `dia_agent_quota` carry `expire_at` for a TTL policy), so the cap
-holds across Cloud Run instances. Without it the counters are **in memory, per
-instance, and lost when an instance restarts**: a visitor can get up to
-`10 x instances` questions a day, plus a fresh 10 whenever Cloud Run recycles
-an instance. If you run without Firestore, keep `--max-instances` at 1–2.
+**Counting.** Counts are keyed on an HMAC of the verified `sub`
+(`DIA_VISITOR_SALT`), never on IPs, cookies or anything client-side. A unit is
+charged atomically **before** the work and refunded on a server error. The
+day resets at midnight America/Toronto. At the cap the server answers **429**
+`{"error": "daily_limit", "bucket", "message", "usage"}` with `Retry-After`;
+the message is calm ("You've used today's 5 Ask DIA questions. More at
+midnight ET.") with no price and no urgency. A per-user burst guard (3 per 10
+seconds) sits in front.
 
-**If Firestore is down** the question is counted in the in-memory store
-instead (fail-soft): visitors aren't locked out by an outage, and spend is
-still capped (per instance), never unlimited.
+**Where counts live.** `DIA_QUOTA_STORE=firestore` keeps counters in a
+Firestore **Native-mode** database (`DIA_FIRESTORE_DATABASE`, planned
+`dia-quota`, because the project's `(default)` database is Datastore mode).
+Each charge is a read-write transaction (`beginTransaction` → read →
+`commit`), retried with jittered backoff on `ABORTED`, so parallel requests
+can't overspend. Documents carry `expire_at`; add a TTL policy on that field.
+Without Firestore, counters are in memory per instance. If Firestore is down,
+Ask DIA fails closed (503 `quota_unavailable`) and generations fall back to
+the per-instance memory store.
 
-Only questions that actually reach Gemini are charged: empty messages and
-"agent not configured" replies are free. A short per-IP burst guard
-(`DIA_AGENT_RATE_LIMIT`, default `10/60`, in memory) also stays in front, so
-scripted clients are throttled before touching the quota store. Owners bypass
-both. Sign-in attempts have their own burst guard.
+**Client IP.** Only the sign-in burst guard uses an IP, as a salted hash. On
+Cloud Run the **right-most** `X-Forwarded-For` entry is used: Google's front
+end appends the address it saw, and everything to its left is client-supplied
+and forgeable. If the service is ever put behind an external load balancer,
+revisit this (the right-most entry would be the balancer).
 
-**Kill switch.** `ASK_DIA_ENABLED=false` turns Ask DIA off for everyone,
-owners included, without a redeploy of code (an env change on the service is
-enough). `/api/agent` then answers **503** with `Retry-After: 300` and a calm
-"Ask DIA is temporarily unavailable" message before reading the body, touching
-the quota store or calling Gemini; `/api/agent/status` reports
-`"enabled": false`, and the UI shows the notice and disables the Ask DIA
-composer while the intake tools keep working. Unset or empty means enabled; an
-unrecognised value (a typo) is treated as **off**.
+**Kill switch.** Ask DIA is **off unless `ASK_DIA_ENABLED` is exactly
+`1`/`true`/`yes`/`on`**. Off, `/api/agent` answers **503** with
+`Retry-After: 3600` before sign-in, the body, the quota store or Gemini, for
+owners too. The intake tools keep working.
+
+**Usage counter.** Signed in, the top bar shows `GENERATIONS 7/10 · ASK DIA
+3/5` (owners see `OWNER · UNLIMITED`). It is display-only: it is filled from
+`GET /api/usage` and from the `usage` field of each run's response.
 
 MCP toolsets are attached only via `DIA_AGENT_MCP_MODE` (`none` by default, or
-`make`, `gcp`, `all`); words in a prompt never switch tools on. The
-deterministic `/api/process` path is unaffected by all of this.
+`make`, `gcp`, `all`); words in a prompt never switch tools on.
 
 | Variable | Default | Purpose |
 | -------- | ------- | ------- |
-| `ASK_DIA_ENABLED` | enabled | Kill switch: `false`/`0`/`off`/`no` (or any unrecognised value) returns 503 "temporarily unavailable". |
-| `GOOGLE_CLIENT_ID` | unset | OAuth Web client ID for Google Sign-In (public). Unset = no sign-in button. |
-| `OWNER_EMAILS` | unset | Comma list of Google emails with unlimited access (case-insensitive). |
-| `DIA_SESSION_SECRET` | unset | Signs the 12h session cookie (≥32 chars, from Secret Manager). Unset = sign-in off. |
-| `DIA_AGENT_DAILY_LIMIT` | `10` | Questions per visitor per day (`0` = visitors can't use Ask DIA). |
-| `DIA_QUOTA_STORE` | `memory` | `firestore` for a cap shared across instances. |
-| `DIA_FIRESTORE_PROJECT` / `DIA_FIRESTORE_DATABASE` / `DIA_FIRESTORE_COLLECTION` | ADC project / `(default)` / `dia_agent_quota` | Firestore location. |
-| `DIA_VISITOR_SALT` | built-in | Secret salt for hashing visitor keys (set it in production). |
-| `DIA_AGENT_RATE_LIMIT` | `10/60` | Burst guard, calls/seconds per IP (`0` disables). |
+| `ASK_DIA_ENABLED` | off | Kill switch: only `1`/`true`/`yes`/`on` enable Ask DIA. |
+| `GOOGLE_CLIENT_ID` | unset | OAuth Web client ID (public). Unset = nobody can sign in. |
+| `DIA_SESSION_SECRET` | unset | Signs session cookies (≥32 chars, from Secret Manager). |
+| `DIA_SESSION_TTL_SECONDS` | `7200` | Session lifetime (clamped to 5 min–12 h). |
+| `OWNER_EMAILS` | unset | Comma list of owner emails (verified email only). |
+| `DIA_GENERATION_DAILY_LIMIT` | `10` | Generations per user per day. |
+| `DIA_ASK_DAILY_LIMIT` | `5` | Ask DIA questions per user per day. |
+| `DIA_QUOTA_STORE` | `memory` | `firestore` for counts shared across instances. |
+| `DIA_FIRESTORE_PROJECT` / `DIA_FIRESTORE_DATABASE` / `DIA_FIRESTORE_COLLECTION` | ADC project / `(default)` / `dia_agent_quota` | Firestore location (use a Native-mode DB, e.g. `dia-quota`). |
+| `DIA_VISITOR_SALT` | built-in | Secret salt for hashing user ids and IPs (set it in production). |
+| `DIA_BURST_LIMIT` | `3/10` | Per-user burst guard for generations and Ask DIA. |
+| `DIA_UTILITY_BURST_LIMIT` | `10/10` | Per-user burst guard for extract and PDF export. |
+| `DIA_AUTH_RATE_LIMIT` | `10/60` | Sign-in attempts per salted IP hash. |
 | `DIA_TRUST_FORWARDED_FOR` | off | Trust `X-Forwarded-For` off Cloud Run (behind your own proxy). |
+| `DIA_LOCAL_DEV_NO_SIGN_IN` | off | **Local only.** Treat sessionless requests as an uncapped developer. Ignored on Cloud Run; never set it on a public deployment. |
 
 ## Submission hygiene
 
