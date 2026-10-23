@@ -279,7 +279,9 @@ def live_agent(monkeypatch):
     """Server with a fake 'configured' agent that never calls Gemini."""
     import agent_runtime
 
-    monkeypatch.setenv("GEMINI_API_KEY", "fake-key-for-test")
+    # Patch the check itself rather than faking a credential env var, so this
+    # stays independent of how the runtime is configured (API key vs Vertex).
+    monkeypatch.setattr(agent_runtime, "is_configured", lambda: True)
     calls = []
 
     def fake_run(message):
@@ -342,7 +344,9 @@ def test_spoofed_xff_does_not_bypass_cap_on_cloud_run(live_agent, monkeypatch):
 
 
 def test_unconfigured_agent_and_bad_requests_are_not_charged(monkeypatch):
-    monkeypatch.setenv("GEMINI_API_KEY", "")
+    import agent_runtime
+
+    monkeypatch.setattr(agent_runtime, "is_configured", lambda: False)
     monkeypatch.setenv("DIA_AGENT_DAILY_LIMIT", "1")
     server, thread = _serve()
     try:

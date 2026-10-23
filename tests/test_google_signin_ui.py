@@ -111,7 +111,7 @@ def live_server(monkeypatch):
         "ASK_DIA_ENABLED",
     ):
         monkeypatch.delenv(name, raising=False)
-    monkeypatch.setenv("GEMINI_API_KEY", "fake-key-for-test")
+    monkeypatch.setattr(agent_runtime, "is_configured", lambda: True)
     monkeypatch.setenv("DIA_AGENT_DAILY_LIMIT", "1")
     monkeypatch.setattr(agent_runtime, "run_agent", lambda message: "fake agent reply")
     agent_auth.agent_rate_limiter.reset()
