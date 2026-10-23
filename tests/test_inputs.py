@@ -353,7 +353,7 @@ def test_prompt_after_paste_debounce_announce_and_esc(context, base_url):  # §1
     assert page.is_hidden("#inputsPrompt")  # still inside the 800ms debounce
     page.wait_for_selector("#inputsPrompt", state="visible", timeout=2000)
     assert prompt_items(page) == ["hourly_cost"]
-    assert page.text_content("#status") == "1 key input is missing. Tips are below the composer."
+    assert page.text_content("#statusText") == "1 key input is missing. Tips are below the composer."
     assert page.get_attribute("#questionnaire", "aria-describedby") == "intakeNote dropHint inputsPromptTitle"
     assert page.is_visible("#runAgent") and page.is_enabled("#runAgent")
     assert page.evaluate("document.activeElement.id") == "questionnaire"  # never takes focus
@@ -384,14 +384,14 @@ def test_prompt_items_drop_out_live_and_it_removes_itself(context, base_url):  #
     paste(page, NO_COST_NO_METRIC)
     page.wait_for_selector("#inputsPrompt", state="visible", timeout=2000)
     assert prompt_items(page) == ["hourly_cost", "success_metric"]
-    assert page.text_content("#status") == "2 key inputs are missing. Tips are below the composer."
+    assert page.text_content("#statusText") == "2 key inputs are missing. Tips are below the composer."
     page.evaluate("t => { const q = document.querySelector('#questionnaire'); q.value = t; q.dispatchEvent(new Event('input')); }",
                   NO_METRIC)
     assert prompt_items(page) == ["success_metric"]
     page.evaluate("t => { const q = document.querySelector('#questionnaire'); q.value = t; q.dispatchEvent(new Event('input')); }",
                   SAMPLE)
     assert page.is_hidden("#inputsPrompt")
-    assert page.text_content("#status") == "2 key inputs are missing. Tips are below the composer."  # no new announcement
+    assert page.text_content("#statusText") == "2 key inputs are missing. Tips are below the composer."  # no new announcement
 
 
 def test_prompt_dismiss_button_and_hides_on_run(context, base_url):
@@ -412,7 +412,7 @@ def test_prompt_dismiss_button_and_hides_on_run(context, base_url):
 def test_prompt_on_load_sample_shows_nothing_for_the_complete_sample(context, base_url):
     page = open_page(context, base_url)
     page.click("#loadSample")
-    page.wait_for_function("document.querySelector('#status').textContent === 'Sample loaded'")
+    page.wait_for_function("document.querySelector('#statusText').textContent === 'Sample loaded'")
     page.wait_for_timeout(1100)
     assert page.is_hidden("#inputsPrompt")
 
@@ -553,7 +553,7 @@ def test_rerun_keeps_prior_answers_and_files_a_linked_card(browser, base_url):  
         page.click("#rerunUpdated")
         assert page.input_value("#questionnaire") == original["questionnaire"]
         assert page.is_visible("#questionnaire") and page.evaluate("!document.querySelector('#questionnaire').readOnly")
-        assert page.text_content("#status") == f"Editing a copy of {original['title']}. The original stays in the cabinet."
+        assert page.text_content("#statusText") == f"Editing a copy of {original['title']}. The original stays in the cabinet."
         caret = page.evaluate("document.querySelector('#questionnaire').selectionStart")
         assert original["questionnaire"][caret:].startswith("## 6")
         # The pre-run prompt can show once in the new session.

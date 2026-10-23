@@ -1,7 +1,17 @@
 const questionnaire = document.querySelector("#questionnaire");
 const loadSample = document.querySelector("#loadSample");
 const runAgent = document.querySelector("#runAgent");
-const statusText = document.querySelector("#status");
+// Run status line (landing polish): #status is the polite live region; #statusState holds the state word and
+// #statusText the optional detail that every message writes to (so `statusText.textContent = ...` keeps working).
+const statusLine = document.querySelector("#status");
+const statusState = document.querySelector("#statusState");
+const statusText = document.querySelector("#statusText");
+const RUN_STATES = { ready: "Ready", processing: "Processing", complete: "Complete", error: "Error" };
+function setRunState(state, detail = "") {
+  statusLine.dataset.state = state;
+  statusState.textContent = RUN_STATES[state];
+  statusText.textContent = detail;
+}
 const tier = document.querySelector("#tier");
 const score = document.querySelector("#score");
 const issues = document.querySelector("#issues");
@@ -105,13 +115,13 @@ loadSample.addEventListener("click", async () => {
   questionnaire.value = payload.questionnaire;
   if (intakeBody.hidden) setIntakeCollapsed(false);
   autosizeComposer(questionnaire);
-  statusText.textContent = "Sample loaded";
+  setRunState("ready", "Sample loaded");
   InputsPrompt.schedule();
 });
 
 runAgent.addEventListener("click", async () => {
   InputsPrompt.endSession();  // hides on Run and does not come back for this intake (addendum §3.2)
-  statusText.textContent = "Processing...";
+  setRunState("processing");
   setBusy(runAgent, true);
   setExportAvailability(false);
   try {
@@ -126,11 +136,11 @@ runAgent.addEventListener("click", async () => {
     }
     const previousId = rerunOf;
     showResults(payload, questionnaire.value);
-    statusText.textContent = "Complete - intake collapsed, ready to work";
+    setRunState("complete", "Intake collapsed, ready to work");
     saveToCabinet(payload, questionnaire.value);
     if (previousId) renderBeforeAfter(payload, previousId);
   } catch (error) {
-    statusText.textContent = error.message;
+    setRunState("error", error.message);
     setExportAvailability(latestPayload !== null);
   } finally {
     setBusy(runAgent, false);
@@ -1379,6 +1389,15 @@ function createVoiceFan(prefix, { conversationRun, conversationNote = null }) {
   entries.forEach(({ source }) => observer.observe(source, { attributes: true, attributeFilter: ["aria-pressed"] }));
   sync();
 
+  // Closed = inert + visibility:hidden (CSS), so nothing in the fan can be hit, focused or painted after it closes.
+  fan.inert = true;
+  // Root cause of the "faint shadow" after closing (landing polish): the notch is still hovered or focused when the fan
+  // closes, so its "Voice options" tooltip (a bordered, shadowed box in the fan's spot) faded straight back in. Keep the
+  // tip muted after a close until the pointer leaves the notch or focus moves off it.
+  const muteTip = () => { notch.dataset.tipMuted = "true"; };
+  const unmuteTip = () => { delete notch.dataset.tipMuted; };
+  notch.addEventListener("pointerleave", unmuteTip);
+  notch.addEventListener("blur", unmuteTip);
   let open = false;
   let openedByHover = false;
   let hoverTimer = 0;
@@ -1395,6 +1414,7 @@ function createVoiceFan(prefix, { conversationRun, conversationNote = null }) {
         Popovers.closeOthers(api);
         open = true;
         openedByHover = viaHover;
+        fan.inert = false;
         notch.setAttribute("aria-expanded", "true");
         sync();
       }
@@ -1407,7 +1427,9 @@ function createVoiceFan(prefix, { conversationRun, conversationNote = null }) {
       clearTimers();
       if (open) {
         open = false;
+        muteTip();
         notch.setAttribute("aria-expanded", "false");
+        fan.inert = true;
       }
       if (returnFocus) notch.focus();
     },
@@ -1479,6 +1501,19 @@ document.addEventListener("keydown", (event) => {
 // --- Composer state: Run (enter) appears beside the mic only when the input has text ---
 // Programmatic writes (dictation, Load sample, uploads, New intake, cabinet reopen) go through the value setter,
 // so the textarea's value property is wrapped once per composer instead of patching every call site.
+// Narrow screens (landing polish): textarea placeholders can't ellipsize, so at <=600px each composer swaps to its
+// shorter data-placeholder-short copy and never cuts off mid-word.
+(() => {
+  const narrow = matchMedia("(max-width: 600px)");
+  const fields = [...document.querySelectorAll("textarea[data-placeholder-short]")];
+  fields.forEach((field) => { field.dataset.placeholderLong = field.placeholder; });
+  const apply = () => fields.forEach((field) => {
+    field.placeholder = narrow.matches ? field.dataset.placeholderShort : field.dataset.placeholderLong;
+  });
+  narrow.addEventListener("change", apply);
+  apply();
+})();
+
 function watchComposer(textarea) {
   const bar = textarea.closest(".prompt-bar");
   if (!bar) return;
@@ -1607,7 +1642,7 @@ function newIntake() {
   setStage("landing");
   if (intakeBody.hidden) setIntakeCollapsed(false);
   autosizeComposer(questionnaire);
-  statusText.textContent = "Ready for a new intake";
+  setRunState("ready", "New intake");
   questionnaire.focus();
 }
 
@@ -2037,17 +2072,34 @@ function createPlusMenu(prefix) {
     });
     return [labelRow, seg];
   }
+  // Layout (landing polish, Glyph): every group but the last scrolls in .pm-scroll; the last group (All commands) is a
+  // sticky .pm-foot row, so it stays visible when the capped menu has to scroll. DOM order (and so keyboard order) is
+  // unchanged.
+  const scroller = document.createElement("div");
+  scroller.className = "pm-scroll";
+  scroller.setAttribute("role", "none");
+  const syncFade = () => {
+    const more = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight > 2;   // Tia's updatePlusScrollCue threshold
+    if (more) scroller.dataset.more = "true"; else delete scroller.dataset.more;
+  };
+  scroller.addEventListener("scroll", syncFade, { passive: true });
+  // Rows rise 4px as they fade in (a transform counts toward scroll overflow), so re-check once they settle.
+  menu.addEventListener("transitionend", syncFade);
   function render() {
     menu.replaceChildren();
+    scroller.replaceChildren();
     const rows = [];
-    PLUS_GROUPS.forEach((group) => {
-      const visible = group.rows.filter((row) => !(row.hideIn === prefix) && !(row.kind === "link" && !donateUrl) && !(row.id === "ask" && assistantMode !== "guided"));
-      if (!visible.length) return;
-      if (menu.childElementCount) {
+    const groups = PLUS_GROUPS.map((group) => ({ group, visible: group.rows.filter((row) => !(row.hideIn === prefix) && !(row.kind === "link" && !donateUrl) && !(row.id === "ask" && assistantMode !== "guided")) }))
+      .filter(({ visible }) => visible.length);
+    groups.forEach(({ group, visible }, groupIndex) => {
+      const isFoot = groups.length > 1 && groupIndex === groups.length - 1;
+      const target = isFoot ? menu : scroller;
+      if (groupIndex === 0) menu.append(scroller);
+      if (groupIndex > 0) {
         const sep = document.createElement("div");
         sep.className = "pm-sep";
         sep.setAttribute("role", "separator");
-        menu.append(sep);
+        target.append(sep);
       }
       const box = document.createElement("div");
       box.setAttribute("role", "group");
@@ -2062,7 +2114,8 @@ function createPlusMenu(prefix) {
           rows.push(wrap);
         });
       });
-      menu.append(box);
+      if (isFoot) box.classList.add("pm-foot");
+      target.append(box);
     });
     // 15ms stagger, the bottom row (nearest the plus) first.
     rows.forEach((wrap, index) => wrap.style.setProperty("--r", String(rows.length - 1 - index)));
@@ -2072,10 +2125,37 @@ function createPlusMenu(prefix) {
     const list = items();
     if (list.length) list[(index + list.length) % list.length].focus();
   }
+  // Viewport guard (landing polish, Glyph review): open upward by default, never over the 52px letterhead band (top
+  // clamped 8px below it); flip below the bar only when there's more room there. If it still doesn't fit, cap the
+  // height at the space left: the middle (.pm-scroll) scrolls with a bottom-edge fade, All commands stays as a footer.
+  // Phones (<=600px) use the fixed bottom sheet, so no guard there.
+  const MENU_GAP = 10;
+  const MENU_MARGIN = 8;
+  const HEADER_BAND = 52;
+  const BAR_LIFT = 2;   // the bar rises 2px on hover/focus (style.css), carrying the menu with it
+  function placeMenu() {
+    delete menu.dataset.drop;
+    menu.style.removeProperty("max-height");
+    if (!matchMedia("(max-width: 600px)").matches) {
+      const anchor = (menu.offsetParent || button).getBoundingClientRect();
+      const header = document.querySelector("header.lh");
+      const band = Math.max(HEADER_BAND, header ? header.getBoundingClientRect().bottom : 0);
+      const height = menu.offsetHeight;
+      const above = anchor.top - MENU_GAP - (band + MENU_MARGIN) - BAR_LIFT;
+      const below = window.innerHeight - anchor.bottom - MENU_GAP - MENU_MARGIN;
+      if (height > above) {
+        if (height <= below || below > above) menu.dataset.drop = "down";
+        const room = Math.max(above, below);
+        if (height > room) menu.style.maxHeight = `${Math.max(room, 120)}px`;
+      }
+    }
+    syncFade();
+  }
   function show({ focus = null } = {}) {
     if (!open) {
       Popovers.closeOthers(api);
       render();
+      placeMenu();
       open = true;
       button.setAttribute("aria-expanded", "true");
     }
@@ -2087,6 +2167,7 @@ function createPlusMenu(prefix) {
     button.setAttribute("aria-expanded", "false");
     if (returnFocus) button.focus();
   }
+  window.addEventListener("resize", () => { if (open) placeMenu(); });
   const api = { isOpen: () => open, show, hide };
   button.addEventListener("click", (event) => { open ? hide() : show({ focus: event.detail === 0 ? 0 : null }); });
   button.addEventListener("keydown", (event) => {
@@ -2411,6 +2492,8 @@ function clearIntakeError() {
   intakeError.innerHTML = "";
 }
 questionnaire.addEventListener("input", clearIntakeError);
+// Editing after a run (or a failed one) means the intake is idle again: back to a green Ready.
+questionnaire.addEventListener("input", () => { if (statusLine.dataset.state !== "ready" && statusLine.dataset.state !== "processing") setRunState("ready"); });
 
 function renderChips(files) {
   fileChips.innerHTML = "";
@@ -2493,7 +2576,7 @@ async function loadIntakeFiles(fileList) {
   const parts = [];
   let networkFailure = false;
   try {
-    statusText.textContent = accepted.length === 1 ? `Reading ${accepted[0].name}…` : `Reading 1 of ${accepted.length}…`;
+    setRunState("processing", accepted.length === 1 ? `Reading ${accepted[0].name}…` : `Reading 1 of ${accepted.length}…`);
     for (const [index, file] of accepted.entries()) {
       if (accepted.length > 1) statusText.textContent = `Reading ${index + 1} of ${accepted.length}…`;
       try {
@@ -2508,7 +2591,7 @@ async function loadIntakeFiles(fileList) {
   } catch (error) {
     if (error.name === "AbortError") {
       if (!parts.length) questionnaire.value = before;
-      statusText.textContent = "Upload cancelled";
+      setRunState("ready", "Upload cancelled");
     }
   } finally {
     setTrayBusy(false);
@@ -2525,10 +2608,11 @@ async function loadIntakeFiles(fileList) {
     questionnaire.scrollTop = 0;
     const first = parts[0];
     const appended = before.trim() ? " Added to your existing text." : "";
-    statusText.textContent = parts.length === 1
+    setRunState("complete", parts.length === 1
       ? `File read: ${first.filename}, ${first.characters.toLocaleString()} characters. Review it, then press Run.${appended}`
-      : `${parts.length} files read. Review them, then press Run.${appended}`;
+      : `${parts.length} files read. Review them, then press Run.${appended}`);
   }
+  if (!parts.length && statusLine.dataset.state === "processing") setRunState(failures.length ? "error" : "ready", failures.length ? "File not read" : "");
   if (failures.length) {
     const summary = parts.length ? [`${parts.length} of ${parts.length + failures.length} files read. ${failures.length} couldn't be read:`, ...failures.map((f) => `• ${f}`)] : failures.length === 1 ? [failures[0].replace(/^[^:]+: /, "")] : failures.map((f) => `• ${f}`);
     showIntakeError([...summary, ...notes], networkFailure ? { retry: () => loadIntakeFiles(accepted) } : {});

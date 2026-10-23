@@ -116,7 +116,9 @@
 
       <div class="prompt-wrapper intake-stage">
         <div class="intake-bar">
-          <p class="prompt-callout" id="intakeNote"><span class="trust-on">Scoring is deterministic. Only Ask DIA and its suggestions send text to Gemini.</span><span class="trust-off">Nothing leaves this browser except the deterministic run.</span></p>
+          <!-- Run status (landing polish): dot + state word + optional detail. #statusText is the detail slot every
+               message writes to; setRunState() sets data-state ready | processing | complete | error. -->
+          <p id="status" class="run-status" role="status" aria-live="polite" aria-atomic="true" data-state="ready"><span class="status-dot" aria-hidden="true"></span><span id="statusState" class="status-state">Ready</span><span id="statusText" class="status-detail"></span></p>
           <button id="intakeToggle" class="text-link" type="button" aria-expanded="true" aria-controls="intakeBody" hidden>Collapse intake</button>
         </div>
         <!-- Intake tray (upload) and filing cabinet (this session's intakes). Icons by Glyph. -->
@@ -141,12 +143,11 @@
         <div id="fileChips" class="file-chips" hidden></div>
         <div id="intakeBody">
           <div class="prompt-bar composer has-mic has-cmp" id="intakeComposer" data-empty="true">
-            <!-- Composer v2 (glyph/composer-icons.md, flows v8.8 2.5-2.8): [+] textarea [mic] [Run], and a notch on the top edge.
-                 Notch: hover opens the voice fan after 120ms (pointer), tap toggles (touch), Enter/Space/ArrowDown open it on Listen,
+            <!-- Composer v2 (glyph/composer-icons.md, flows v8.8 2.5-2.8): [+] textarea [mic] [Run], and a floating notch
+                 (a small handle bar just above the bar; landing polish). Notch: hover opens the voice fan after 120ms (pointer), tap toggles (touch), Enter/Space/ArrowDown open it on Listen,
                  ArrowUp on Auto-speak, Esc closes. Fan items proxy #conversationMode / #listenAgent / #autoSpeak. -->
-            <button id="intakeVoiceNotch" class="cmp-notch" type="button" aria-label="Voice options" aria-haspopup="menu" aria-expanded="false" aria-controls="intakeVoiceFan">
-              <span class="icon icon-idle" data-icon="notch" aria-hidden="true"></span>
-              <span class="icon icon-open" data-icon="notch-open" aria-hidden="true"></span>
+            <button id="intakeVoiceNotch" class="cmp-notch cmp-notch--float" type="button" aria-label="Voice options" aria-haspopup="menu" aria-expanded="false" aria-controls="intakeVoiceFan">
+              <span class="notch-handle" aria-hidden="true"></span>
             </button>
             <span class="cmp-tip cmp-tip-notch" role="tooltip" id="intakeNotchTip">Voice options</span>
             <div class="voice-fan" role="menu" id="intakeVoiceFan" aria-label="Voice options" aria-orientation="horizontal">
@@ -168,7 +169,7 @@
               <span class="icon icon-open" data-icon="plus-open" aria-hidden="true"></span>
             </button>
             <div class="plus-menu" role="menu" id="intakePlusMenu" aria-label="Actions"></div>
-            <textarea id="questionnaire" class="prompt-input" rows="1" aria-label="Questionnaire Markdown" aria-describedby="intakeNote dropHint" spellcheck="false" placeholder="Paste a questionnaire, or drop a file here…"></textarea>
+            <textarea id="questionnaire" class="prompt-input" rows="1" aria-label="Questionnaire Markdown" aria-describedby="intakeNote dropHint" spellcheck="false" placeholder="Paste a questionnaire, or drop a file here…" data-placeholder-short="Paste a questionnaire…"></textarea>
             <button id="intakeMic" class="action-btn cmp-circle cmp-mic dictate-btn px-btn" type="button" aria-pressed="false" aria-label="Start voice input" data-label-off="Start voice input" data-label-on="Stop voice input" aria-keyshortcuts="Control+Shift+Space Meta+Shift+Space">
               <span class="icon" data-icon="mic" data-icon-off="mic" data-icon-on="mic-listening" data-icon-disabled="mic-disabled" aria-hidden="true"></span>
             </button>
@@ -200,20 +201,19 @@
           <button id="loadSample" class="text-link" type="button">Load sample</button>
           <span class="dot-sep" aria-hidden="true">·</span>
           <button type="button" class="text-link help-link" data-command="help" aria-haspopup="dialog" aria-controls="diaHelpDialog">Learn how to use DIA</button>
-          <span id="status" role="status" aria-live="polite">Ready</span>
         </div>
+          <p class="prompt-callout" id="intakeNote"><span class="trust-on">Scoring is deterministic. Only Ask DIA and its suggestions send text to Gemini.</span><span class="trust-off">Nothing leaves this browser except the deterministic run.</span></p>
       </div>
 
       <!-- Ask DIA: the live Gemini agent, in the same pill composer. -->
       <div class="prompt-wrapper agent" id="agentStage">
         <h2>Ask DIA <small id="agentStatus" class="agent-badge">checking...</small></h2>
         <div class="prompt-bar composer has-mic has-cmp" id="agentComposer" data-empty="true">
-            <!-- Composer v2 (glyph/composer-icons.md, flows v8.8 2.5-2.8): [+] textarea [mic] [Run], and a notch on the top edge.
-                 Notch: hover opens the voice fan after 120ms (pointer), tap toggles (touch), Enter/Space/ArrowDown open it on Listen,
+            <!-- Composer v2 (glyph/composer-icons.md, flows v8.8 2.5-2.8): [+] textarea [mic] [Run], and a floating notch
+                 (a small handle bar just above the bar; landing polish). Notch: hover opens the voice fan after 120ms (pointer), tap toggles (touch), Enter/Space/ArrowDown open it on Listen,
                  ArrowUp on Auto-speak, Esc closes. Fan items proxy #conversationMode / #listenAgent / #autoSpeak. -->
-            <button id="agentVoiceNotch" class="cmp-notch" type="button" aria-label="Voice options" aria-haspopup="menu" aria-expanded="false" aria-controls="agentVoiceFan">
-              <span class="icon icon-idle" data-icon="notch" aria-hidden="true"></span>
-              <span class="icon icon-open" data-icon="notch-open" aria-hidden="true"></span>
+            <button id="agentVoiceNotch" class="cmp-notch cmp-notch--float" type="button" aria-label="Voice options" aria-haspopup="menu" aria-expanded="false" aria-controls="agentVoiceFan">
+              <span class="notch-handle" aria-hidden="true"></span>
             </button>
             <span class="cmp-tip cmp-tip-notch" role="tooltip" id="agentNotchTip">Voice options</span>
             <div class="voice-fan" role="menu" id="agentVoiceFan" aria-label="Voice options" aria-orientation="horizontal">
@@ -235,7 +235,7 @@
               <span class="icon icon-open" data-icon="plus-open" aria-hidden="true"></span>
             </button>
             <div class="plus-menu" role="menu" id="agentPlusMenu" aria-label="Actions"></div>
-            <textarea id="agentMessage" class="prompt-input" rows="1" spellcheck="false" aria-label="Message for the Gemini agent" placeholder="Ask DIA, e.g. 'Score this intake and list missing fields.'"></textarea>
+            <textarea id="agentMessage" class="prompt-input" rows="1" spellcheck="false" aria-label="Message for the Gemini agent" placeholder="Ask DIA, e.g. 'Score this intake and list missing fields.'" data-placeholder-short="Ask DIA a question…"></textarea>
             <button id="micButton" class="action-btn cmp-circle cmp-mic px-btn" type="button" aria-pressed="false" aria-label="Start voice input" data-label-off="Start voice input" data-label-on="Stop voice input" aria-keyshortcuts="Control+Shift+Space Meta+Shift+Space">
               <span class="icon" data-icon="mic" data-icon-off="mic" data-icon-on="mic-listening" data-icon-disabled="mic-disabled" aria-hidden="true"></span>
             </button>
