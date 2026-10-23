@@ -52,3 +52,94 @@ a.dropdown-item { text-decoration: none; cursor: pointer; }
 
 /* The composer sits in a centred hero; menu text stays start-aligned (Glyph's "Icon style" label row). */
 .plus-menu { text-align: start; }
+
+/* ==========================================================================
+   Landing polish (feat/landing-polish). Overrides on top of glyph/composer-icons.css, existing tokens only.
+   Glyph to review: every value below is listed in the PR notes.
+   ========================================================================== */
+
+/* 1. Mic in the corner. The Run slot used to be reserved even while the bar was empty, which left a 54px gap
+      between the mic and the bar's right edge. Empty bar: no slot, so the mic sits in the corner, mirroring the plus
+      (12px in, 8px on phones). With text, Run takes the corner and the mic steps left by one circle + gap. */
+.prompt-bar.has-cmp[data-empty="true"] .cmp-run-slot { display: none; }
+
+/* 2. Floating notch: a small handle bar floating just above the prompt bar (replaces the 36x12 tab on the top edge).
+      Button box 48x20 (hit area 48x28 desktop, 48x44 touch); the visible handle is a 32x4 rounded bar. */
+.cmp-notch.cmp-notch--float {
+  top: -26px; width: 48px; height: 20px; border-radius: 10px; display: grid; place-items: center;
+  color: inherit; background: none;
+}
+.cmp-notch--float::before { inset: -4px 0; }
+@media (pointer: coarse) { .cmp-notch--float::before { inset: -12px -2px; } }
+.notch-handle {
+  display: block; width: 32px; height: 4px; border-radius: 2px; background: var(--notch-chev);
+  transition: width var(--dia-dur-lift, 160ms) var(--dia-ease-out, cubic-bezier(0.16, 1, 0.3, 1)), background-color 140ms linear;
+}
+.cmp-notch--float:is(:hover, :focus-visible) .notch-handle { background: var(--muted); }
+.cmp-notch--float[aria-expanded="true"] .notch-handle { width: 40px; background: var(--text); }
+:root:is([data-icon-style="zelda"], [data-icon-style="dia-pixel"]) .notch-handle { border-radius: 0; transition: none; }
+/* The fan and tip float above the handle instead of the bar's edge. */
+.has-cmp .voice-fan { bottom: calc(100% + 34px); }
+.has-cmp .cmp-tip-notch { bottom: calc(100% + 34px); }
+
+/* Clean close (no faint "shadow" left behind): the fan goes hidden in one short 120ms fade, then visibility,
+   box-shadow and pointer events all drop at the same instant. Items no longer sink and stagger out on close. JS
+   also sets `inert` while closed. The tooltip stays muted after a close (see createVoiceFan muteTip). */
+.has-cmp .voice-fan {
+  transition: opacity 120ms linear, visibility 0s linear 120ms, box-shadow 0s linear 120ms;
+}
+.has-cmp .voice-fan:not(.cmp-notch[aria-expanded="true"] ~ .voice-fan) { box-shadow: none; pointer-events: none; }
+.has-cmp .voice-fan .voice-item { transition-delay: 0s; transition-duration: 120ms; transition-timing-function: linear; }
+.has-cmp .cmp-notch[aria-expanded="true"] ~ .voice-fan { box-shadow: var(--shadow-subtle); transition: opacity calc(var(--dia-dur-stack-open, 280ms) * 0.6) var(--dia-ease-out, cubic-bezier(0.16, 1, 0.3, 1)), visibility 0s, box-shadow 0s; }
+.has-cmp .cmp-notch[aria-expanded="true"] ~ .voice-fan .voice-item { transition-duration: var(--dia-dur-stack-open, 280ms), calc(var(--dia-dur-stack-open, 280ms) * 0.6); transition-timing-function: var(--dia-ease-out, cubic-bezier(0.16, 1, 0.3, 1)); transition-delay: calc(var(--d, 0) * var(--dia-stagger-open, 30ms)); }
+.cmp-notch[data-tip-muted] + .cmp-tip { opacity: 0; visibility: hidden; transition: none; }
+
+/* 3. Line order: status above the bar (in .intake-bar, where the scoring note was), the note below the links. */
+.intake-stage > .prompt-callout { margin-top: 14px; text-align: center; }
+
+/* 4. Run status: dot + state word (+ optional detail). Green = --good (dark #8bd39c on #0c0c0e ≈ 11:1;
+      light #1a5f33 on #f3f1ec ≈ 7.3:1). Processing pulses the silver focus tone; reduced motion: no pulse. */
+.run-status {
+  margin: 0; display: inline-flex; align-items: center; gap: 7px; min-height: 18px;
+  color: var(--muted); font: 500 12px/1.4 var(--mono);
+}
+#status.run-status { flex-basis: auto; justify-content: center; }   /* style.css #status was a full-width row under the links */
+.status-dot { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--muted); }
+.status-detail:not(:empty)::before { content: "·"; margin: 0 7px 0 0; color: var(--muted); }
+.status-detail { color: var(--muted); }
+.run-status[data-state="ready"] .status-state { color: var(--good); }
+.run-status[data-state="ready"] .status-dot { background: var(--good); }
+.run-status[data-state="processing"] .status-state { color: var(--text); }
+.run-status[data-state="processing"] .status-dot { background: var(--control-focus, var(--focus-ring)); }
+.run-status[data-state="complete"] .status-state { color: var(--text); }
+.run-status[data-state="complete"] .status-dot { background: var(--good); box-shadow: 0 0 0 2px var(--bg), 0 0 0 3px var(--good); }
+.run-status[data-state="error"] .status-state { color: var(--text); }
+.run-status[data-state="error"] .status-dot { background: #c2410c; }   /* = .intake-error border */
+@media (prefers-reduced-motion: no-preference) {
+  .run-status[data-state="processing"] .status-dot { animation: cmp-pulse var(--dia-dur-pulse, 1.6s) var(--dia-ease-pulse, ease-in-out) infinite; }
+}
+
+/* 5. Smaller icons, same buttons: line icons 24 -> 18px in the 46px circles (16px in 38px on phones), 20 -> 18px in
+      the 44px dock tiles and the 40px fan circles. Pixel sprites stay at 2x (32px) so they keep crisp integer scaling. */
+.cmp-circle .icon svg { width: 18px; height: 18px; }
+.voice-item .icon svg { width: 18px; height: 18px; }
+.dock-icon .icon svg { width: 18px; height: 18px; }
+@media (max-width: 600px) { .cmp-circle .icon svg { width: 16px; height: 16px; } }
+/* Dark buttons match light's proportions: the dark drop shadow was a wider silver glow (0 6px 16px at .35) that made
+   the circles read larger than in light. Same geometry as light (0 4px 12px), dark-theme ink. Light is untouched. */
+html:not([data-theme="light"]) .action-btn.cmp-circle:not(:hover, :focus-visible, [aria-disabled="true"]) { box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45), inset 0 2px 2px rgba(255, 255, 255, 0.6), inset 0 -2px 3px rgba(0, 0, 0, 0.3); }
+/* Ask DIA: the floating handle needs clear air under the heading's badge. */
+.agent > h2 + .prompt-bar.has-cmp { margin-top: 34px; }
+
+/* Plus menu viewport guard (createPlusMenu placeMenu): flipped below the bar when there's no room above, and a
+   capped height scrolls. Same look; only the side changes. */
+@media (min-width: 601px) {
+  .plus-menu[data-drop="down"] { bottom: auto; top: calc(100% + 10px); transform: translateY(calc(-1 * var(--dia-fan-rise))); }
+  .plus-menu[style*="max-height"] { overflow-y: auto; overscroll-behavior: contain; }
+}
+
+/* Phones: the intake placeholder gets a shorter line so it never cuts off mid-word (set by JS at <=600px),
+   and any overflow ends in a clean ellipsis. */
+@media (max-width: 600px) {
+  .prompt-input::placeholder { text-overflow: ellipsis; }
+}

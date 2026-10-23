@@ -55,14 +55,15 @@ def test_composer_order_plus_input_mic_enter(prefix, composer_id, textarea, mic,
     assert f'id="{prefix}MicTip"' in bar and 'role="tooltip"' in bar
     run_tag = _tag(bar, run)
     assert "cmp-circle cmp-enter" in run_tag and " hidden" in run_tag and "disabled" not in run_tag  # hidden when empty
-    assert bar.index('class="cmp-run-slot"') < bar.index(f'id="{run}"')  # its 46px slot is always reserved
+    assert bar.index('class="cmp-run-slot"') < bar.index(f'id="{run}"')  # slot collapses while empty (mic in the corner)
 
 
 @pytest.mark.parametrize("prefix,composer_id,textarea,mic,run", COMPOSERS)
 def test_voice_notch_fan(prefix, composer_id, textarea, mic, run):
     dock = _block(composer_id)
-    assert 'class="cmp-notch"' in _tag(dock, f"{prefix}VoiceNotch")
-    assert 'data-icon="notch"' in dock and 'data-icon="notch-open"' in dock
+    # Floating notch (landing polish): a handle bar above the bar replaces the 36x12 notch/notch-open tab icons.
+    assert 'class="cmp-notch cmp-notch--float"' in _tag(dock, f"{prefix}VoiceNotch")
+    assert 'class="notch-handle"' in dock and 'data-icon="notch"' not in dock
     notch = _tag(dock, f"{prefix}VoiceNotch")
     assert 'aria-haspopup="menu"' in notch and 'aria-expanded="false"' in notch
     assert f'aria-controls="{prefix}VoiceFan"' in notch
