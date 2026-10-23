@@ -177,14 +177,21 @@ def parse_hourly_rate(text: str) -> float | None:
     return found[0] if found[0] > 0 else None
 
 
+def _workflow_parts(text: str) -> list[str]:
+    """Q1 split into its task entries (semicolons or new lines), blanks and placeholders dropped, at most three."""
+    parts = []
+    for part in re.split(r";|<br\s*/?>|\n", text or ""):
+        part = part.strip()
+        if part and part.lower() not in {"n/a", "none", "your answer"}:
+            parts.append(part)
+    return parts[:3]
+
+
 def parse_workflows(text: str) -> list[dict]:
     """Q1: up to three tasks separated by semicolons or new lines: 'Task - who, 6 hours a week, 2 people'.
     The hours are the task's total hours a week (the people count is informational)."""
     rows = []
-    for part in re.split(r";|<br\s*/?>|\n", text or ""):
-        part = part.strip()
-        if not part or part.lower() in {"n/a", "none", "your answer"}:
-            continue
+    for part in _workflow_parts(text):
         task = re.split(r"\s+[-–—]\s+|:|\(|,", part, maxsplit=1)[0].strip() or part
         hours = re.search(rf"({_NUMBER})\s*(?:h\b|hrs?\b|hours?\b)", part.lower())
         people = re.search(r"(\d+)\s*(?:people|persons?|staff)\b", part.lower())
@@ -193,7 +200,7 @@ def parse_workflows(text: str) -> list[dict]:
             "hours": _to_number(hours.group(1)) if hours else None,
             "people": int(people.group(1)) if people else None,
         })
-    return rows[:3]
+    return rows
 
 
 TIME_SINK_KEYWORDS = {  # §2.1 categories; lead intake and follow-up (Low confidence) is left out on purpose
@@ -207,6 +214,25 @@ TIME_SINK_KEYWORDS = {  # §2.1 categories; lead intake and follow-up (Low confi
 def time_sink_matches(text: str) -> list[str]:
     lowered = (text or "").lower()
     return [name for name, words in TIME_SINK_KEYWORDS.items() if any(word in lowered for word in words)]
+
+
+def top_time_sink(text: str, values: list[float | None]) -> str | None:
+    """The time sink to name in the urgency reason: the category of the highest-value Q1 task that matches one.
+    `values` is the per-task value at stake, in Q1 order (as parse_workflows returns the tasks). Only the task text
+    before " - " is matched, so the person named after it never picks the category. A task that matches
+    more than one category is named by the first in keyword order, and tied values fall back to keyword order.
+    When no matching task has a value, this is the first category matched anywhere in Q1 (the keyword-order rule)."""
+    sinks = time_sink_matches(text)
+    if not sinks:
+        return None
+    order = list(TIME_SINK_KEYWORDS)
+    candidates = []
+    for part, value in zip(_workflow_parts(text), values):
+        # Match the task itself, not the "who" after " - ": a "sales coordinator" doing lead triage is not coordination.
+        matched = time_sink_matches(re.split(r"\s+[-–—]\s+", part, maxsplit=1)[0])
+        if matched and value is not None:
+            candidates.append((-value, order.index(matched[0]), matched[0]))
+    return min(candidates)[2] if candidates else sinks[0]
 
 
 def _has_number(text: str) -> bool:
@@ -287,12 +313,9 @@ def score_opportunity(intake: ClientIntake) -> OpportunityScore:
     quick_wins: list[str] = []
 
     # Urgency: pain points, +1 when the manual work matches a known time sink (capped at 5).
+    # The named sink is the highest-value matching task's category (see top_time_sink), set once values are known.
     urgency = min(5, max(1, pain_count))
-    sinks = time_sink_matches(intake.workflow_tasks)
     urgency_reason = f"{_plural(pain_count, 'pain point')} listed"
-    if sinks:
-        urgency = min(5, urgency + 1)
-        urgency_reason += f", and the manual work matches a known time sink ({sinks[0]})"
 
     budget_fit = _score_budget_fit(intake.budget, tier)
     tech_readiness = _score_tech_readiness(intake.tech_person, intake.tools)
@@ -310,6 +333,10 @@ def score_opportunity(intake: ClientIntake) -> OpportunityScore:
         value = round(row["hours"] * rate * weeks) if (row["hours"] is not None and rate) else None
         gaps = [gap for gap, missing in (("Weekly hours missing", row["hours"] is None), ("Hourly cost missing", not rate)) if missing]
         workflows.append({**row, "value": value, "gaps": gaps})
+    sink = top_time_sink(intake.workflow_tasks, [row["value"] for row in workflows])
+    if sink:
+        urgency = min(5, urgency + 1)
+        urgency_reason += f", and the manual work matches a known time sink ({sink})"
     workflows.sort(key=lambda row: (-(row["value"] or 0), len(row["gaps"])))
     valued = [row["value"] for row in workflows if row["value"] is not None]
     value_at_stake = sum(valued) if valued else None

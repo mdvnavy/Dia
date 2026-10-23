@@ -184,6 +184,61 @@ def test_time_sink_adds_one_urgency_capped_at_5():
     assert sink.urgency == plain.urgency + 1
 
 
+def _urgency_reason(**answers: str) -> str:
+    return score_of(questionnaire(**answers)).signal_reasons["urgency"]
+
+
+def test_time_sink_named_is_the_highest_value_matching_task():
+    # Scheduling (coordination) is worth more than bookkeeping (finance admin), so keyword order no longer wins.
+    reason = _urgency_reason(q1="Bookkeeping - founder, 2 hours a week, 1 person; "
+                                "Scheduling - office manager, 8 hours a week, 1 person", q2="$50 an hour")
+    assert reason.endswith("matches a known time sink (coordination)")
+    # Order in Q1 does not matter either.
+    reason = _urgency_reason(q1="Scheduling - office manager, 1 hour a week, 1 person; "
+                                "Bookkeeping - founder, 9 hours a week, 1 person", q2="$50 an hour")
+    assert reason.endswith("(finance admin)")
+
+
+def test_time_sink_ignores_the_person_named_after_the_task():
+    # "sales coordinator" is who does it, not coordination work; lead intake is not a scored category (§2.1).
+    reason = _urgency_reason(q1="Lead triage - sales coordinator, 9 hours a week, 1 person; "
+                                "Invoice chasing - founder, 2 hours a week, 1 person", q2="$50 an hour")
+    assert reason.endswith("(finance admin)")
+
+
+def test_sample_urgency_names_its_highest_value_known_time_sink():
+    # Lead triage ($15,840) and CRM updates ($13,200) match no category; invoice chasing ($7,920) is finance admin.
+    assert score_of(SAMPLE).signal_reasons["urgency"] == (
+        "2 pain points listed, and the manual work matches a known time sink (finance admin)")
+
+
+def test_time_sink_tie_falls_back_to_keyword_order():
+    for q1 in ("Scheduling - office manager, 4 hours a week, 1 person; Bookkeeping - founder, 4 hours a week, 1 person",
+               "Bookkeeping - founder, 4 hours a week, 1 person; Scheduling - office manager, 4 hours a week, 1 person"):
+        assert _urgency_reason(q1=q1, q2="$50 an hour").endswith("(finance admin)")
+    # One task in two categories is named by the first in keyword order.
+    assert _urgency_reason(q1="Invoice chasing - founder, 4 hours a week, 1 person",
+                           q2="$50 an hour").endswith("(finance admin)")
+
+
+@pytest.mark.parametrize("answers", [
+    {"q1": "Scheduling - office manager, 8 hours a week, 1 person; Bookkeeping - founder, 2 hours a week, 1 person",
+     "q2": ""},                                                                       # no hourly cost
+    {"q1": "Scheduling - office manager; Bookkeeping - founder", "q2": "$50 an hour"},  # no hours
+])
+def test_time_sink_without_values_falls_back_to_keyword_order(answers):
+    s = score_of(questionnaire(**answers))
+    assert all(w["value"] is None for w in s.workflows)
+    assert s.signal_reasons["urgency"].endswith("(finance admin)")
+
+
+def test_time_sink_unvalued_match_falls_back_even_when_other_tasks_have_values():
+    # The only valued task matches no category, so the keyword-order rule names the sink.
+    reason = _urgency_reason(q1="Lead triage - sales rep, 8 hours a week, 1 person; Scheduling - founder; "
+                                "Bookkeeping - founder", q2="$50 an hour")
+    assert reason.endswith("(finance admin)")
+
+
 def test_budget_against_value():
     covered = score_of(questionnaire(q1=ONE_TASK.format(h=10), q2="$50 an hour"))  # $24,000 > $10,000 top
     weak = score_of(questionnaire(q1=ONE_TASK.format(h=1), q2="$50 an hour"))      # $2,400; ratio 4.2
