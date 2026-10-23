@@ -758,46 +758,159 @@ let recognition = null;
 let recognizing = false;
 let conversationActive = false;
 
-function listenOnce({ onTranscript, onError }) {
+// Shared Web Speech helper (Ask DIA mic, conversation mode, home-composer dictation).
+// One recognizer at a time across the app: starting a new one cancels the previous.
+let activeRecognizer = null;
+
+function startRecognizer({ button, continuous = false, interimResults = false, onResult, onError, onEnd }) {
+  if (activeRecognizer) {
+    activeRecognizer.cancelled = true;
+    activeRecognizer.abort();
+  }
   const rec = new SpeechRecognitionImpl();
   rec.lang = navigator.language || "en-US";
-  rec.interimResults = false;
+  rec.continuous = continuous;
+  rec.interimResults = interimResults;
   rec.maxAlternatives = 1;
   let settled = false;
+  const setPressed = (on) => {
+    if (!button) return;
+    button.setAttribute("aria-pressed", String(on));
+    button.classList.toggle("listening", on);
+  };
   rec.onstart = () => {
     recognizing = true;
-    micButton.setAttribute("aria-pressed", "true");
+    setPressed(true);
   };
   rec.onresult = (event) => {
     settled = true;
-    if (!rec.cancelled) {
-      onTranscript(event.results[0][0].transcript.trim());
-    }
+    if (!rec.cancelled) onResult?.(event);
   };
   rec.onerror = (event) => {
     settled = true;
-    if (!rec.cancelled) {
-      onError(event.error);
-    }
+    if (!rec.cancelled) onError?.(event.error);
   };
   rec.onend = () => {
-    recognizing = false;
-    micButton.setAttribute("aria-pressed", "false");
-    if (!settled && !rec.cancelled) {
-      onError("no-speech");
+    if (activeRecognizer === rec) {
+      activeRecognizer = null;
+      recognizing = false;
     }
+    setPressed(false);
+    if (!settled && !rec.cancelled) onError?.("no-speech");
+    onEnd?.(rec);
   };
+  activeRecognizer = rec;
+  recognition = rec;
   rec.start();
   return rec;
+}
+
+// One-shot final transcript (conversation mode turns).
+function listenOnce({ onTranscript, onError, button = micButton }) {
+  return startRecognizer({
+    button,
+    onResult: (event) => onTranscript(event.results[0][0].transcript.trim()),
+    onError,
+  });
+}
+
+// Dictation into a textarea: interim words show live and are appended after whatever was
+// already typed (never replacing it). Click again or press Esc to stop; stop() keeps the words.
+// Without speech recognition the button stays focusable but aria-disabled, with a tooltip.
+function attachDictation(button, textarea, { continuous = true, intercept, label = "Dictation" } = {}) {
+  if (!button || !textarea) return null;
+  const unsupported = "Dictation needs speech recognition, which this browser doesn't support. Try Chrome, Edge or Safari.";
+  if (!SpeechRecognitionImpl) {
+    if (!button.disabled) {
+      button.setAttribute("aria-disabled", "true");
+      button.title = unsupported;
+      button.addEventListener("click", () => { statusText.textContent = unsupported; });
+    }
+    return null;
+  }
+  let rec = null;
+  let base = "";
+  let finals = "";
+  let lastWritten = "";
+  const joiner = (text) => (text && !/\s$/.test(text) ? " " : "");
+  function write(interim) {
+    const tail = [finals, interim].filter(Boolean).join(" ").trim();
+    const value = tail ? base + joiner(base) + tail : base;
+    textarea.value = value;
+    lastWritten = value;
+    autosizeComposer(textarea);
+  }
+  function start() {
+    base = textarea.value.replace(/\s+$/, "");
+    finals = "";
+    lastWritten = textarea.value;
+    statusText.textContent = "Listening… press Esc or the mic to stop";
+    const mine = startRecognizer({
+      button,
+      continuous,
+      interimResults: true,
+      onResult: (event) => {
+        // The user typed while dictating: keep their edit as the new base.
+        if (textarea.value !== lastWritten) {
+          base = textarea.value.replace(/\s+$/, "");
+          finals = "";
+        }
+        let interim = "";
+        for (let i = event.resultIndex; i < event.results.length; i += 1) {
+          const words = event.results[i][0].transcript.trim();
+          if (!words) continue;
+          if (event.results[i].isFinal) finals = finals ? `${finals} ${words}` : words;
+          else interim = interim ? `${interim} ${words}` : words;
+        }
+        write(interim);
+      },
+      onError: (error) => {
+        if (error === "aborted") return;
+        statusText.textContent =
+          error === "not-allowed" || error === "service-not-allowed"
+            ? "Microphone permission denied"
+            : error === "no-speech"
+              ? "No speech detected"
+              : `${label} failed (${error})`;
+      },
+      onEnd: (ended) => {
+        if (ended !== rec) return;
+        rec = null;
+        if (textarea.value === lastWritten) write(""); // drop any unfinished interim words
+        if (!ended.cancelled && finals) statusText.textContent = `${label} added`;
+        if (!ended.cancelled) textarea.focus();
+      },
+    });
+    rec = mine;
+  }
+  function stop(message = `${label} stopped`) {
+    if (!rec) return;
+    statusText.textContent = message;
+    rec.stop();
+  }
+  button.addEventListener("click", () => {
+    if (intercept?.()) return;
+    if (rec) stop();
+    else start();
+  });
+  // Esc stops dictation first (capture phase, before other Esc handlers).
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && rec) {
+      event.preventDefault();
+      event.stopPropagation();
+      stop();
+    }
+  }, true);
+  return { start, stop, isListening: () => Boolean(rec) };
 }
 
 // Aborting a recognizer still fires its error/end events asynchronously;
 // the cancelled flag keeps those late events from overwriting whatever
 // status message the cancelling code just set.
 function cancelRecognition() {
-  if (recognition && recognizing) {
-    recognition.cancelled = true;
-    recognition.abort();
+  if (activeRecognizer) {
+    activeRecognizer.cancelled = true;
+    activeRecognizer.abort();
   }
 }
 
@@ -862,39 +975,20 @@ function conversationTurn() {
   });
 }
 
-if (SpeechRecognitionImpl) {
-  micButton.addEventListener("click", () => {
-    if (conversationActive) {
-      stopConversation("Conversation ended");
-      return;
-    }
-    if (recognizing) {
-      cancelRecognition();
-      statusText.textContent = "Dictation cancelled";
-      return;
-    }
-    statusText.textContent = "Listening...";
-    recognition = listenOnce({
-      onTranscript: (text) => {
-        if (text) {
-          const existing = agentMessage.value.trim();
-          agentMessage.value = existing ? `${existing} ${text}` : text;
-          autosizeComposer(agentMessage);
-          statusText.textContent = "Dictation added";
-          agentMessage.focus();
-        }
-      },
-      onError: (error) => {
-        statusText.textContent =
-          error === "not-allowed"
-            ? "Microphone permission denied"
-            : error === "no-speech"
-              ? "No speech detected"
-              : `Dictation failed (${error})`;
-      },
-    });
-  });
+// Ask DIA mic: the shared dictation helper (one-shot), ending conversation mode first if it's on.
+attachDictation(micButton, agentMessage, {
+  continuous: false,
+  intercept: () => {
+    if (!conversationActive) return false;
+    stopConversation("Conversation ended");
+    return true;
+  },
+});
+// Home composer mic: continuous dictation into the questionnaire.
+const intakeMic = document.querySelector("#intakeMic");
+const intakeDictation = attachDictation(intakeMic, questionnaire, { continuous: true });
 
+if (SpeechRecognitionImpl) {
   conversationMode.addEventListener("click", () => {
     if (conversationActive) {
       stopConversation("Conversation ended");
@@ -907,6 +1001,164 @@ if (SpeechRecognitionImpl) {
     conversationTurn();
   });
 }
+
+// --- Composer voice cluster (#intakeMic) ---
+// Click = dictate (attachDictation above). Hover (120ms intent), keyboard focus, ArrowUp or a
+// 400ms long-press fans out the existing voice features. The fan items hold no state of their own:
+// each one clicks the Ask DIA control it mirrors (#conversationMode, #listenAgent, #autoSpeak) and
+// reflects that control's aria-pressed, so the panel and the composer share one source of truth.
+const VoiceCluster = (() => {
+  const cluster = document.querySelector("#voiceCluster");
+  const fan = document.querySelector("#voiceFan");
+  if (!cluster || !fan || !intakeMic) return null;
+  const HOVER_INTENT_MS = 120;
+  const HOVER_LEAVE_MS = 260;
+  const LONG_PRESS_MS = 400;
+  const entries = [
+    { item: fan.querySelector("#fanConversation"), source: conversationMode, supported: Boolean(SpeechRecognitionImpl),
+      missing: "Conversation mode needs speech recognition",
+      run: () => { if (!conversationActive) openAgent(); conversationMode.click(); } },
+    { item: fan.querySelector("#fanListen"), source: listenAgent, supported: ttsSupported,
+      missing: "Listen needs speech synthesis", run: () => listenAgent.click() },
+    { item: fan.querySelector("#fanAutoSpeak"), source: autoSpeak, supported: ttsSupported,
+      missing: "Auto-speak needs speech synthesis", run: () => autoSpeak.click() },
+  ];
+  // Unsupported features are hidden; the mic's tooltip says what is missing.
+  const missing = [];
+  entries.forEach((entry) => {
+    entry.item.hidden = !entry.supported;
+    if (!entry.supported) missing.push(entry.missing);
+  });
+  const live = entries.filter((entry) => entry.supported);
+  live.forEach((entry, index) => entry.item.style.setProperty("--i", String(index)));
+  if (missing.length) intakeMic.title = `${intakeMic.title.replace(/\.$/, "")}. ${missing.join("; ")}, which this browser doesn't support.`;
+  if (!live.length) {
+    ["aria-haspopup", "aria-expanded", "aria-controls"].forEach((name) => intakeMic.removeAttribute(name));
+    fan.remove();
+    return null;
+  }
+
+  const sync = () => live.forEach(({ item, source }) => {
+    item.setAttribute("aria-checked", source.getAttribute("aria-pressed") === "true" ? "true" : "false");
+  });
+  const observer = new MutationObserver(sync);
+  live.forEach(({ source }) => observer.observe(source, { attributes: true, attributeFilter: ["aria-pressed"] }));
+  sync();
+
+  let open = false;
+  let hoverTimer = 0;
+  let leaveTimer = 0;
+  let pressTimer = 0;
+  let swallowClick = false;
+  let quietFocus = false;
+  const items = () => live.map((entry) => entry.item);
+  const clearTimers = () => { clearTimeout(hoverTimer); clearTimeout(leaveTimer); };
+
+  function show({ focus = null } = {}) {
+    clearTimers();
+    if (!open) {
+      open = true;
+      fan.classList.add("open");
+      intakeMic.setAttribute("aria-expanded", "true");
+      sync();
+    }
+    if (focus !== null) {
+      const list = items();
+      list[(focus + list.length) % list.length].focus();
+    }
+  }
+  function hide({ returnFocus = false } = {}) {
+    clearTimers();
+    clearTimeout(pressTimer);
+    if (open) {
+      open = false;
+      fan.classList.remove("open");
+      intakeMic.setAttribute("aria-expanded", "false");
+    }
+    if (returnFocus) {
+      quietFocus = true; // returning focus must not re-open the fan
+      intakeMic.focus();
+      quietFocus = false;
+    }
+  }
+
+  // Hover intent (mouse only; touch uses long-press).
+  cluster.addEventListener("pointerenter", (event) => {
+    if (event.pointerType !== "mouse") return;
+    clearTimeout(leaveTimer);
+    if (!open) hoverTimer = setTimeout(() => show(), HOVER_INTENT_MS);
+  });
+  cluster.addEventListener("pointerleave", (event) => {
+    if (event.pointerType !== "mouse") return;
+    clearTimeout(hoverTimer);
+    if (fan.querySelector(":focus-visible")) return; // a keyboard user is inside the fan
+    leaveTimer = setTimeout(() => hide(), HOVER_LEAVE_MS);
+  });
+
+  // Keyboard focus opens it; pointer focus (a mouse click) does not.
+  intakeMic.addEventListener("focus", () => {
+    if (!quietFocus && intakeMic.matches(":focus-visible")) show();
+  });
+  cluster.addEventListener("focusout", (event) => {
+    if (!cluster.contains(event.relatedTarget)) hide();
+  });
+
+  // Long-press on touch/pen opens the fan and swallows the click that follows (no dictation).
+  intakeMic.addEventListener("pointerdown", (event) => {
+    if (event.pointerType === "mouse") return;
+    clearTimeout(pressTimer);
+    pressTimer = setTimeout(() => { swallowClick = true; show(); }, LONG_PRESS_MS);
+  });
+  ["pointerup", "pointercancel", "pointerleave"].forEach((type) =>
+    intakeMic.addEventListener(type, () => clearTimeout(pressTimer)));
+  intakeMic.addEventListener("contextmenu", (event) => { if (swallowClick || open) event.preventDefault(); });
+  cluster.addEventListener("click", (event) => {
+    if (swallowClick && intakeMic.contains(event.target)) {
+      swallowClick = false;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }
+  }, true);
+  // Tap (or click) outside closes.
+  document.addEventListener("pointerdown", (event) => {
+    if (open && !cluster.contains(event.target)) hide();
+  });
+
+  intakeMic.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowUp" || (open && event.key === "ArrowRight")) {
+      event.preventDefault();
+      show({ focus: 0 });
+    } else if (event.key === "Escape" && open) {
+      event.preventDefault();
+      hide({ returnFocus: true });
+    }
+  });
+  fan.addEventListener("keydown", (event) => {
+    const list = items();
+    const index = list.indexOf(document.activeElement);
+    const step = { ArrowRight: 1, ArrowUp: 1, ArrowLeft: -1, ArrowDown: -1 }[event.key];
+    if (step) {
+      event.preventDefault();
+      if (step < 0 && index === 0) { hide({ returnFocus: true }); return; }
+      show({ focus: index + step });
+    } else if (event.key === "Home" || event.key === "End") {
+      event.preventDefault();
+      show({ focus: event.key === "Home" ? 0 : list.length - 1 });
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      hide({ returnFocus: true });
+    } else if (event.key === "Tab") {
+      hide();
+    }
+  });
+  live.forEach((entry) => entry.item.addEventListener("click", () => {
+    entry.run();
+    sync();
+  }));
+
+  return { show, hide, isOpen: () => open };
+})();
 
 // --- Share on X ---
 
@@ -1393,7 +1645,9 @@ async function renderIcons() {
     if (slot.dataset.src === url) continue;
     slot.dataset.src = url;
     if (set.inline) {
-      slot.innerHTML = await iconMarkup(url);
+      const markup = await iconMarkup(url);
+      if (slot.dataset.src !== url) continue; // a newer render (state change) already won
+      slot.innerHTML = markup;
       slot.querySelector("svg")?.setAttribute("focusable", "false");
     } else {
       slot.innerHTML = `<img class="px" src="${url}" width="32" height="32" alt="" decoding="async">`;
@@ -1411,6 +1665,29 @@ function setIconStyle(style) {
   iconStyle = style;
   try { localStorage.setItem(ICON_STYLE_KEY, style); } catch (error) { /* session only */ }
   renderIcons(); // aria-checked announces the change; no extra live region (flows.md 7a.3)
+}
+
+// Stateful icon slots (Glyph's composer/voice set): data-icon-on / -off / -disabled pick the glyph
+// from the owning button's aria-pressed / aria-checked / aria-disabled, in every Icon style.
+function syncStateIcons(slots = document.querySelectorAll("[data-icon-on]")) {
+  let changed = false;
+  slots.forEach((slot) => {
+    const button = slot.closest("button");
+    if (!button) return;
+    const on = button.getAttribute("aria-pressed") === "true" || button.getAttribute("aria-checked") === "true";
+    const disabled = button.getAttribute("aria-disabled") === "true" && slot.dataset.iconDisabled;
+    const name = disabled ? slot.dataset.iconDisabled : on ? slot.dataset.iconOn : slot.dataset.iconOff;
+    if (name && slot.dataset.icon !== name) { slot.dataset.icon = name; changed = true; }
+  });
+  if (changed) renderIcons();
+}
+{
+  const stateObserver = new MutationObserver(() => syncStateIcons());
+  document.querySelectorAll("[data-icon-on]").forEach((slot) => {
+    const button = slot.closest("button");
+    if (button) stateObserver.observe(button, { attributes: true, attributeFilter: ["aria-pressed", "aria-checked", "aria-disabled"] });
+  });
+  syncStateIcons();
 }
 
 // Help & settings: segmented radiogroup (roving tabindex; arrows move and select).

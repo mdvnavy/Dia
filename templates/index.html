@@ -126,10 +126,30 @@
         <input id="trayInput" type="file" multiple accept=".txt,.md,.markdown,.text,.csv,.tsv,.json,.rtf,.docx,.doc" hidden>
         <div id="fileChips" class="file-chips" hidden></div>
         <div id="intakeBody">
-          <div class="prompt-bar composer" id="intakeComposer">
+          <div class="prompt-bar composer has-mic" id="intakeComposer">
+            <!-- Dictation mirrors the send circle (same size, silver accent, hover). Icon follows the Icon style setting. -->
+            <!-- Voice cluster: click = dictate; hover (120ms intent), focus, ArrowUp or long-press fans out the
+                 existing voice features. Fan items proxy #conversationMode / #listenAgent / #autoSpeak (one source of truth). -->
+            <div class="voice-cluster" id="voiceCluster">
+              <button id="intakeMic" class="action-btn dictate-btn" type="button" aria-label="Dictate" aria-pressed="false" aria-haspopup="menu" aria-expanded="false" aria-controls="voiceFan" aria-describedby="intakeMicHint" title="Dictate (click). Hover, focus or press ↑ for voice options">
+                <span class="icon" data-icon="mic" data-icon-off="mic" data-icon-on="mic-listening" data-icon-disabled="mic-disabled" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"> <rect x="9" y="2.5" width="6" height="11.5" rx="3"/> <path class="accent" style="stroke:var(--accent, #A3A9B1)" d="M10.75 6.75h2.5M10.75 9.75h2.5"/> <path d="M6 11a6 6 0 0 0 12 0"/> <path d="M12 17v3.5M9 20.5h6"/> </svg></span>
+              </button>
+              <div id="voiceFan" class="voice-fan" role="menu" aria-label="Voice options" aria-orientation="horizontal">
+                <button id="fanConversation" class="voice-item" type="button" role="menuitemcheckbox" aria-checked="false" aria-label="Conversation mode" title="Conversation mode" tabindex="-1">
+                  <span class="icon" data-icon="conversation" aria-hidden="true"></span>
+                </button>
+                <button id="fanListen" class="voice-item" type="button" role="menuitemcheckbox" aria-checked="false" aria-label="Listen to the latest answer" title="Listen to the latest answer" tabindex="-1">
+                  <span class="icon" data-icon="listen" data-icon-off="listen" data-icon-on="listen-stop" aria-hidden="true"></span>
+                </button>
+                <button id="fanAutoSpeak" class="voice-item" type="button" role="menuitemcheckbox" aria-checked="false" aria-label="Auto-speak replies" title="Auto-speak replies" tabindex="-1">
+                  <span class="icon" data-icon="autospeak-off" data-icon-off="autospeak-off" data-icon-on="autospeak-on" aria-hidden="true"></span>
+                </button>
+              </div>
+            </div>
+            <span id="intakeMicHint" class="visually-hidden">Speaks into the questionnaire box. Press again or Escape to stop. Arrow up opens voice options.</span>
             <textarea id="questionnaire" class="prompt-input" rows="1" aria-label="Questionnaire Markdown" aria-describedby="intakeNote dropHint" spellcheck="false" placeholder="Paste a questionnaire, or drop a file here…"></textarea>
             <button id="runAgent" class="action-btn" type="button" aria-label="Run intake" title="Run intake (Ctrl/⌘ + Enter)">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+              <span class="icon" data-icon="enter" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"> <path d="M18.5 4.5v7.5a3 3 0 0 1-3 3H6"/> <path d="M10 10.5 5.5 15l4.5 4.5"/> </svg></span>
             </button>
           </div>
         </div>
@@ -154,7 +174,7 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 11a7 7 0 0 1-14 0M12 18v4M8 22h8"/></svg>
           </button>
           <button id="runChat" class="action-btn" type="button" aria-label="Send to Gemini" title="Send to Gemini (Enter)">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+            <span class="icon" data-icon="enter" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"> <path d="M18.5 4.5v7.5a3 3 0 0 1-3 3H6"/> <path d="M10 10.5 5.5 15l4.5 4.5"/> </svg></span>
           </button>
         </div>
         <div class="actions under-prompt">

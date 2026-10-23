@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+  <path style="fill:currentColor" d="M3.5 9.5h3l4.5-4v13l-4.5-4h-3z"/>
+  <path d="M14 17l3-8.5 3 8.5M15.1 14h3.8"/>
+  <path class="accent" style="stroke:var(--accent, #A3A9B1)" d="M14.5 5.5h5"/>
+</svg>
