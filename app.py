@@ -106,17 +106,17 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path
-        if path == "/api/process":
-            self.handle_process()
-            return
-        if path == "/api/agent":
-            self.handle_agent()
-            return
         if path == "/api/auth/session":
             self.handle_auth_session()
             return
         if path == "/api/auth/logout":
             self.handle_auth_logout()
+            return
+        if path == "/api/process":
+            self.handle_process()
+            return
+        if path == "/api/agent":
+            self.handle_agent()
             return
         self.send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
 
