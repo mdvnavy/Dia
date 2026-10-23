@@ -72,16 +72,50 @@
   signOut.type = "button";
   signOut.id = "diaSignOut";
   signOut.hidden = true;
+  signOut.style.whiteSpace = "nowrap";
   account.style.display = "none";
 
   const themeToggle = document.querySelector("#themeToggle");
   const band = themeToggle ? themeToggle.closest("header") : null;
-  // Letterhead band (feature/tia-ui and later): match the corner controls.
-  signOut.className = band && band.classList.contains("lh") ? "lh-control" : "ghost";
+  const letterhead = Boolean(band && band.classList.contains("lh"));
+  const helpDialog = document.querySelector("#diaHelpDialog");
+  // Letterhead mobile breakpoint: the band has no room for another control,
+  // so on narrow screens the account moves into Help & settings.
+  const narrow = window.matchMedia ? window.matchMedia("(max-width: 600px)") : { matches: false };
+
+  let settingsSection = null;
+  function settings() {
+    if (!settingsSection) {
+      settingsSection = document.createElement("section");
+      settingsSection.className = "help-settings dia-account-settings";
+      const title = document.createElement("h3");
+      title.textContent = "Account";
+      settingsSection.append(title);
+      const closeForm = helpDialog.querySelector('form[method="dialog"]');
+      helpDialog.insertBefore(settingsSection, closeForm || null);
+    }
+    return settingsSection;
+  }
+
+  function place() {
+    if (letterhead && narrow.matches && helpDialog) {
+      signOut.className = "";
+      settings().append(account);
+    } else if (themeToggle) {
+      // Top bar's right corner, just before the theme toggle.
+      signOut.className = letterhead ? "lh-control" : "ghost";
+      themeToggle.insertAdjacentElement("beforebegin", account);
+    } else if (agentStatus) {
+      agentStatus.insertAdjacentElement("afterend", account);
+    } else {
+      document.body.prepend(account);
+    }
+    if (settingsSection) settingsSection.hidden = !settingsSection.contains(account);
+  }
+
   account.append(gisSlot, signOut);
-  if (themeToggle) themeToggle.insertAdjacentElement("beforebegin", account);
-  else if (agentStatus) agentStatus.insertAdjacentElement("afterend", account);
-  else document.body.prepend(account);
+  place();
+  if (narrow.addEventListener) narrow.addEventListener("change", place);
 
   let config = null;
 
@@ -94,9 +128,11 @@
   function renderAccount() {
     if (!config || !config.enabled) {
       show(account, false);
+      if (settingsSection) settingsSection.hidden = true;
       return;
     }
     show(account, true, "inline-flex");
+    if (settingsSection) settingsSection.hidden = !settingsSection.contains(account);
     const status = lastStatus || config;
     const signedIn = Boolean(status && status.signed_in);
     show(gisSlot, !signedIn, "inline-block");
