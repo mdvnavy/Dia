@@ -53,3 +53,12 @@ class OpportunityScore:
     total_score: int
     max_score: int
     reasons: list[str]
+    # Scorer v2 (dia-savant v1.0 §2.3). Defaults keep older callers and stored results working.
+    value_at_stake: int | None = None          # $/yr: hours a week x loaded hourly rate x weeks, from the client's answers
+    strategic_value_default: bool = False      # True when value at stake is missing and strategic value stays 3
+    flags: list[str] = field(default_factory=list)
+    workflows: list[dict] = field(default_factory=list)   # up to 3: task, hours, value, gaps (sorted by value)
+    scope_notes: list[str] = field(default_factory=list)  # lines the flags add to scope
+    quick_wins: list[str] = field(default_factory=list)
+    signal_reasons: dict = field(default_factory=dict)    # urgency, budget_fit, tech_readiness, strategic_value
+    rules_version: str = "2"
