@@ -173,10 +173,35 @@ document.querySelector(".tabs").addEventListener("keydown", (event) => {
   }
 });
 
+const ASK_DIA_UNAVAILABLE = "Ask DIA is temporarily unavailable.";
+
+// Kill switch (ASK_DIA_ENABLED unset on the server): keep the section in
+// place but make the composer inert and say so calmly.
+function disableAskDia() {
+  agentStatus.textContent = "temporarily unavailable";
+  agentStatus.classList.remove("ok");
+  agentMessage.disabled = true;
+  agentMessage.placeholder = ASK_DIA_UNAVAILABLE;
+  runChat.disabled = true;
+  runChat.hidden = true;
+  const stage = document.querySelector("#agentStage");
+  if (stage) {
+    stage.dataset.disabled = "true";
+    stage.querySelectorAll("#agentComposer button").forEach((button) => {
+      button.disabled = true;
+    });
+  }
+  agentOutput.textContent = ASK_DIA_UNAVAILABLE;
+}
+
 async function refreshAgentStatus() {
   try {
     const response = await fetch("/api/agent/status");
     const payload = await response.json();
+    if (payload.enabled === false) {
+      disableAskDia();
+      return;
+    }
     if (payload.configured) {
       agentStatus.textContent = "Gemini connected";
       agentStatus.classList.add("ok");
@@ -237,6 +262,10 @@ async function sendAgentMessage() {
       body: JSON.stringify({ message: message + context }),
     });
     const payload = await response.json();
+    if (payload.enabled === false) {
+      disableAskDia();
+      return null;
+    }
     if (!response.ok) {
       throw new Error(payload.error || "Agent run failed");
     }
@@ -246,7 +275,7 @@ async function sendAgentMessage() {
     agentOutput.textContent = error.message;
     return null;
   } finally {
-    setBusy(runChat, false);
+    setBusy(runChat, agentMessage.disabled);
   }
 }
 
