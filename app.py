@@ -57,6 +57,14 @@ ICON_PATH = re.compile(r"^/static/icons/((?:[a-z0-9-]{1,32}/)?[a-z0-9][a-z0-9@-]
 DEFAULT_DONATE_URL = "https://www.paypal.com/ncp/payment/5UFVJBMWWKRBY"
 
 
+def ask_dia_enabled() -> bool:
+    """Kill switch for Ask DIA (POST /api/agent). OFF unless explicitly enabled."""
+    return os.environ.get("ASK_DIA_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+ASK_DIA_DISABLED_REPLY = "Ask DIA is temporarily unavailable."
+
+
 def donate_url() -> str | None:
     """Single source for the Donate link: DIA_DONATE_URL (https only), defaulting to DEFAULT_DONATE_URL.
     Empty or invalid = the item is hidden."""
@@ -126,9 +134,12 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
             self.send_json(public_config())
             return
         if path == "/api/agent/status":
+            if not ask_dia_enabled():
+                self.send_json({"configured": False, "enabled": False})
+                return
             from agent_runtime import is_configured
 
-            self.send_json({"configured": is_configured()})
+            self.send_json({"configured": is_configured(), "enabled": True})
             return
 
         file_path = PUBLIC_FILES.get(path)
@@ -274,6 +285,16 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
             logger.warning("OBS capture skipped: %s", error)
 
     def handle_agent(self) -> None:
+        # Kill switch first: no body parsing, no model call, no quota when off.
+        if not ask_dia_enabled():
+            self.close_connection = True
+            self.send_json(
+                {"enabled": False, "reply": ASK_DIA_DISABLED_REPLY},
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                headers={"Retry-After": "3600"},
+            )
+            return
+
         from agent_runtime import AgentNotConfigured, is_configured, run_agent
 
         try:
@@ -335,12 +356,17 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
         return payload
 
     def send_json(
-        self, payload: dict[str, object], status: HTTPStatus = HTTPStatus.OK
+        self,
+        payload: dict[str, object],
+        status: HTTPStatus = HTTPStatus.OK,
+        headers: dict[str, str] | None = None,
     ) -> None:
         body = json.dumps(payload, indent=2).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        for name, value in (headers or {}).items():
+            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(body)
 
