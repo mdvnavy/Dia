@@ -113,9 +113,16 @@ def gate_env(monkeypatch):
     agent_auth.reset_limiters()
 
 
+class _TestHTTPServer(ThreadingHTTPServer):
+    # socketserver's default listen backlog is 5; the 20-way race tests open
+    # 20 connections at once, which would overflow it (a harness artefact).
+    request_queue_size = 64
+    daemon_threads = True
+
+
 class Server:
     def __init__(self) -> None:
-        self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), app.ClientDiscoveryHandler)
+        self.httpd = _TestHTTPServer(("127.0.0.1", 0), app.ClientDiscoveryHandler)
         self.port = self.httpd.server_address[1]
         self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
         self.thread.start()
