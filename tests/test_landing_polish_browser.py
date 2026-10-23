@@ -148,7 +148,9 @@ def test_run_with_text_is_a_full_enabled_button_silver_in_light_graphite_in_dark
 
 
 @pytest.mark.parametrize("width,height", WIDTHS)
-def test_composer_order_is_plus_text_run_mic_with_the_mic_12px_in(open_page, width, height):
+def test_composer_order_is_plus_text_run_mic_and_the_mic_mirrors_the_plus(open_page, width, height):
+    """Glyph: order [+] text [Run] [mic]; the rule is that the mic's inset mirrors the plus's
+    (12px inside the border on desktop and tablet, 8px on phones, where the bar padding is 8px)."""
     p = open_page(width=width, height=height)
     p.fill("#questionnaire", "Client: Gearhead")
     p.wait_for_selector("#runAgent:not([hidden])")
@@ -157,9 +159,47 @@ def test_composer_order_is_plus_text_run_mic_with_the_mic_12px_in(open_page, wid
     text_end = text["r"] - float(p.eval_on_selector("#questionnaire", "e => getComputedStyle(e).paddingRight").rstrip("px"))
     assert plus["r"] <= text["x"] + 1 and text_end <= run["x"] + 1 and run["r"] <= mic["x"], (plus, text, run, mic)
     border = float(p.eval_on_selector("#intakeComposer", "e => getComputedStyle(e).borderRightWidth").rstrip("px"))
-    inset = 12 if width > 600 else 8   # phones keep the bar's 8px padding, mirroring the plus (unchanged)
-    assert abs((bar["r"] - border) - mic["r"] - inset) <= 0.5, (bar, mic, border)
-    assert abs((plus["x"] - bar["x"] - border) - inset) <= 0.5
+    plus_inset, mic_inset = plus["x"] - bar["x"] - border, (bar["r"] - border) - mic["r"]
+    assert abs(mic_inset - plus_inset) <= 0.5, ("mic must mirror the plus", plus_inset, mic_inset)
+    assert abs(mic_inset - (12 if width > 600 else 8)) <= 0.5, mic_inset
+
+
+BAR_LOOK = """() => { const c = getComputedStyle(document.querySelector('#intakeComposer'));
+  return {outline: c.outlineColor + ' ' + c.outlineStyle, shadow: c.boxShadow}; }"""
+GOLD = ("200, 169, 110", "223, 168, 28")
+
+
+@pytest.mark.parametrize("state", ["focus", "hover"])
+def test_dark_bar_glow_is_neutral_silver_never_gold(open_page, state):
+    """Glyph: in dark the bar's glow is #7C828A at 0.22 with the same 0 0 40px blur/spread as the old gold one."""
+    p = open_page(theme="dark")
+    p.mouse.move(2, 2)
+    p.focus("#questionnaire") if state == "focus" else p.hover("#intakeComposer", position={"x": 300, "y": 10})
+    p.wait_for_timeout(400)
+    look = p.evaluate(BAR_LOOK)
+    assert "rgba(124, 130, 138, 0.22) 0px 0px 40px 0px" in look["shadow"], look
+    assert not any(g in look["outline"] + look["shadow"] for g in GOLD), look
+    if state == "focus":
+        assert look["outline"] == "rgb(124, 130, 138) solid"
+
+
+def test_light_bar_focus_is_unchanged(open_page):
+    p = open_page(theme="light")
+    p.mouse.move(2, 2)
+    p.focus("#questionnaire")
+    p.wait_for_timeout(400)
+    assert p.evaluate(BAR_LOOK) == {"outline": "rgb(95, 102, 112) solid",
+        "shadow": "rgba(28, 20, 8, 0.22) 0px 30px 72px 0px, rgba(163, 169, 177, 0.22) 0px 0px 40px 0px, "
+                  "rgba(255, 255, 255, 0.9) 0px 2px 3px 0px inset, rgba(255, 255, 255, 0.22) 0px -2px 4px 0px inset"}
+
+
+@pytest.mark.parametrize("theme", ["light", "dark"])
+def test_drag_over_keeps_its_mustard(open_page, theme):
+    p = open_page(theme=theme)
+    p.evaluate("document.body.classList.add('file-dragging')")
+    p.wait_for_timeout(300)
+    assert p.eval_on_selector(".tray-icon", "e => getComputedStyle(e).borderColor") == "rgb(223, 168, 28)"
+    assert p.eval_on_selector("#intakeComposer", "e => getComputedStyle(e).outlineStyle") == "dashed"
 
 
 def _sample_mic_and_run(p, action):
