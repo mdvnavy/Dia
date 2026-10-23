@@ -255,6 +255,37 @@ MCP toolsets are attached only via `DIA_AGENT_MCP_MODE` (`none` by default, or
 | `DIA_TRUST_FORWARDED_FOR` | off | Trust `X-Forwarded-For` off Cloud Run (behind your own proxy). |
 | `DIA_LOCAL_DEV_NO_SIGN_IN` | off | **Local only.** Treat sessionless requests as an uncapped developer. Ignored on Cloud Run; never set it on a public deployment. |
 
+### Sign-in: same scheme as Tia
+
+Token verification is ported from Tia (`mdvnavy/tia-sia`, `packages/auth/tokens.py`
+`GoogleTokenVerifier`): `google.oauth2.id_token.verify_oauth2_token` checks the
+RS256 signature against Google's published keys, `aud` = `GOOGLE_CLIENT_ID` and
+`exp`; then `iss` must be `accounts.google.com`, and `email`, `email_verified=true`
+and `sub` must all be present. The same error classes are used (expired, audience,
+issuer, tampered, unverified). The frontend wiring matches Tia: the GIS script,
+`initialize({client_id, callback})`, the outline/large/"Sign in with"/pill button at
+fitted width, and the credential sent as `Authorization: Bearer <id token>` to
+`POST /api/auth/session`. The response carries Tia's `status`, `authorized`,
+`message` and `user` (sub, email, name), plus DIA's `signed_in`, `email` and `owner`.
+
+Deliberate differences:
+
+- **Cookie session instead of a Bearer token on every call.** Tia keeps the ID token
+  in `sessionStorage` and verifies it on each request. DIA swaps it once for a signed
+  HttpOnly `dia_session` cookie (HMAC, bound to `sub`, `aud` and `email_verified`,
+  2 h by default). That way scripts on the page can't read it, a raw ID token can't
+  unlock functional routes, and quota stays keyed on `sub`.
+- **10 s clock skew** (Tia: 0), so a fresh token isn't rejected over a small clock drift.
+- **No invites, profiles or waitlist.** Every verified Google account gets the free
+  tier, and `OWNER_EMAILS` (verified email only) is uncapped.
+- **Fails closed.** A missing `GOOGLE_CLIENT_ID` or a missing or short
+  `DIA_SESSION_SECRET` disables sign-in (404). Every functional route then returns
+  401, including requests carrying a previously valid cookie.
+
+`tests/test_sign_in_flow.py` exercises the real verifier with a locally generated RSA
+key. A stub transport serves its public key at Google's certs URL, in both x509 and
+JWKS form, so no network is used.
+
 ## Submission hygiene
 
 Do not commit `.env`, real client data, support tickets, private prompts, or
