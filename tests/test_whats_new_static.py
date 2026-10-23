@@ -29,23 +29,46 @@ def _tokens(block: str) -> dict[str, str]:
     return dict(re.findall(r"(--wn-[\w-]+):\s*([^;]+);", block))
 
 
-@pytest.mark.skipif(not MOCK.exists(), reason="Glyph mock folder not on this machine")
-def test_non_tag_tokens_match_glyph_mock():
-    """Every --wn-* token except the held NEW-tag ones matches Glyph's CSS exactly (tag tokens: pending v0.4.2)."""
-    for ours, theirs in zip(_blocks(CSS)[:2], _blocks(MOCK.read_text())[:2]):
-        a = {k: v for k, v in _tokens(ours).items() if not k.startswith("--wn-tag")}
-        b = {k: v for k, v in _tokens(theirs).items() if not k.startswith("--wn-tag")}
-        assert a == b
+# Spec v0.5 tokens (Proto's mock CSS, Glyph's 2:33 PM ET glow and clay NEW image).
+TOKENS = {
+    "dark": {"--wn-target": "44px", "--wn-size": "22px", "--wn-radius": "5px", "--wn-gap": "12px", "--wn-rest-ring": "var(--border)",
+             "--wn-fade": "1200ms", "--wn-glow-ring": "rgba(217, 220, 224, 0.90)", "--wn-glow-rgb": "217, 220, 224",
+             "--wn-glow-alpha": "0.55", "--wn-glow-blur": "13px", "--wn-glow-spread": "1.3px", "--wn-tag-text-dark": "#FF5C77",
+             "--wn-tag-text-light": "#C1102D", "--wn-tag-text": "var(--wn-tag-text-dark)", "--wn-tag-offset-y": "1px",
+             "--wn-tag-img-w": "22px", "--wn-tag-img-h": "8px"},
+    "light": {"--wn-glow-ring": "rgba(124, 130, 138, 1.0)", "--wn-glow-rgb": "163, 169, 177", "--wn-glow-alpha": "0.72",
+              "--wn-glow-blur": "12px", "--wn-glow-spread": "1.3px", "--wn-tag-text": "var(--wn-tag-text-light)"},
+}
 
 
-def test_tag_held_tokens_shape():
+def test_token_blocks_are_exactly_the_given_values():
+    dark, light = _blocks(CSS)[:2]
+    assert _tokens(dark) == TOKENS["dark"] and _tokens(light) == TOKENS["light"]
+    mock = Path("/workspace/design/2026-10-23_whats-new-indicator_mock/whats-new-indicator.css")
+    if mock.exists() and "spec v0.5" in mock.read_text():       # verbatim copy of Proto's v0.5 blocks
+        assert _blocks(mock.read_text())[:2] == [dark, light]
+
+
+def test_tokens_no_pill_and_clay_image_box():
     dark, light = _blocks(CSS)[:2]
     d, l = _tokens(dark), _tokens(light)
-    assert d["--wn-gap"] == "12px"
-    for k in ("--wn-tag-text-dark", "--wn-tag-text-light", "--wn-tag-offset-y"):
-        assert k in d, k
-    assert d["--wn-tag-text"] == "var(--wn-tag-text-dark)" and l["--wn-tag-text"] == "var(--wn-tag-text-light)"
-    assert not any(k in d or k in l for k in ("--wn-tag-bg", "--wn-tag-hairline", "--wn-tag-pad", "--wn-tag-radius"))
+    assert d["--wn-gap"] == "12px" and d["--wn-tag-offset-y"] == "1px"
+    assert (d["--wn-tag-img-w"], d["--wn-tag-img-h"]) == ("22px", "8px")
+    assert not any(k in d or k in l for k in ("--wn-tag-bg", "--wn-tag-hairline", "--wn-tag-pad", "--wn-tag-radius",
+                                              "--wn-tag-size", "--wn-tag-weight", "--wn-tag-track"))
+
+
+def test_mode_offsets_and_new_state_focus_ring():
+    flat = re.sub(r"\s+", " ", CSS)
+    for media in ("@media (prefers-contrast: more)", "@media (forced-colors: active)"):
+        block = flat.split(media, 1)[1].split("} }", 1)[0]
+        assert '.wn-btn[data-state="new"] { --wn-tag-offset-y: 2px; }' in block, media
+    forced = flat.split("@media (forced-colors: active) { .wn-mark", 1)[1]
+    assert '.wn-btn[data-state="new"] .wn-tag-img { display: none !important; }' in forced
+    assert '.wn-btn[data-state="new"] .wn-tag-text { display: block; color: CanvasText; font: 700 9px/1' in forced
+    assert ".wn-tag-text { display: none; }" in flat
+    assert "inset: 4px 4px -2px 4px" in flat
+    assert "outline: 2px solid Highlight; outline-offset: 0;" in flat
 
 
 def _strip_token_blocks(css: str) -> str:
@@ -56,8 +79,8 @@ def _strip_token_blocks(css: str) -> str:
 
 def test_no_red_or_mustard_outside_token_definitions():
     body = _strip_token_blocks(CSS) + JS
-    assert not re.search(r"#ff4d6a|255,\s*77,\s*106|#dfa81c", body, re.I)
-    assert "wn-glow-rgb" in CSS and "var(--wn-tag-text)" in CSS
+    assert not re.search(r"#ff4d6a|#ff5c77|#c1102d|255,\s*92,\s*119|193,\s*16,\s*45|#dfa81c", body, re.I)
+    assert "wn-glow-rgb" in CSS and "--wn-tag-text:" in CSS     # v0.5: the reds live in Glyph's asset; tokens document them
 
 
 def test_glow_is_on_the_img_with_no_overlay():
@@ -65,12 +88,22 @@ def test_glow_is_on_the_img_with_no_overlay():
     assert "::after" not in _strip_token_blocks(CSS).split("/* panel")[0]
 
 
-def test_tag_markup_own_class_and_aria_hidden():
-    assert '<span class="wn-tag" id="whatsNewTag" aria-hidden="true">New</span>' in HTML
+def test_tag_markup_clay_images_and_aria_hidden():
+    tag = re.search(r'<span class="wn-tag" id="whatsNewTag" aria-hidden="true">(.*?)\n            </span>', HTML, re.S).group(1)
+    for t in ("light", "dark"):
+        b = "/static/brand/clay-new-" + t
+        img = re.search(r'<img class="wn-tag-img wn-tag-img--%s"[^>]*>' % t, tag).group(0)
+        assert f'src="{b}-22.png"' in img and f'srcset="{b}-22.png 1x, {b}-44.png 2x, {b}-66.png 3x"' in img
+        assert 'width="22" height="8"' in img and 'alt=""' in img
+        for n in (22, 44, 66):   # Glyph's files, unmodified
+            ours, glyph = ROOT / "static" / "brand" / f"clay-new-{t}-{n}.png", Path(f"/workspace/dia-tia/glyph/brand/clay-new-{t}-{n}.png")
+            assert ours.exists() and (not glyph.exists() or ours.read_bytes() == glyph.read_bytes())
+    assert '<span class="wn-tag-text">New</span>' in tag      # forced-colours text
     assert 'class="wn-new"' not in HTML                     # .wn-new stays the in-panel pill only
     main = re.search(r'\.wn-btn\[data-state="new"\] \.wn-tag\s*\{([^}]*)\}', CSS).group(1)
     assert not re.search(r"(?<![-\w])border(-width)?\s*:", main)
-    assert "background: none" in main and "padding: 0" in main         # bare text, no pill (held, v0.4.2)
+    assert not re.search(r"background(-color)?\s*:", main) and "padding: 0" in main   # no pill (transparent by default)
+    assert "transform: translateX(-50%)" in main
 
 
 def test_real_notes_file_passes_checker():

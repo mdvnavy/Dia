@@ -1,31 +1,32 @@
-/* What's new indicator + release-notes panel (Dia). Spec: proto/whats-new-indicator.md v0.4 (layout A approved
- * 2026-10-23 1:28 PM ET; silver glow + NEW tag 1:57/1:58 PM ET) with Glyph's v0.4.1 tag polish (2:04 PM ET).
- * Tokens below are copied verbatim from design/2026-10-23_whats-new-indicator_mock/whats-new-indicator.css.
- * Red appears ONLY as the NEW tag's text inside its dark pill: never loose red text, borders, dots or badges. */
+/* What's new indicator + release-notes panel (Dia). Spec: proto/whats-new-indicator.md v0.5 (layout A approved
+ * 2026-10-23 1:28 PM ET; silver glow + red NEW 1:57/1:58 PM ET; no pill 2:14 PM ET; Glyph's clay NEW asset and
+ * stronger glow 2:33 PM ET). Tokens and tag rules are copied verbatim from
+ * design/2026-10-23_whats-new-indicator_mock/whats-new-indicator.css (v0.5).
+ * Red appears ONLY in the NEW tag (Glyph's clay image): never other red text, borders, dots or badges. */
 
 /* ---- Tokens ---- */
 :root {
   --wn-target: 44px;                 /* hit area, every breakpoint */
   --wn-size: 22px;                   /* visible mark (Glyph clay-mark-22/44/66/88) */
   --wn-radius: 5px;                  /* matches the clay tile's corner at 22px */
-  --wn-gap: 12px;                    /* clock -> mark (v0.4: 10 -> 12px so the 30px NEW tag keeps >= 8px from the clock text at 1280) */
+  --wn-gap: 12px;                    /* clock -> mark */
   --wn-rest-ring: var(--border);     /* 1px hairline at rest (off state) */
   --wn-fade: 1200ms;                 /* one-time fade-in (glow + tag), no loop; off under reduced motion */
-  /* SILVER glow, DARK (on #0c0c0e), Glyph final */
-  --wn-glow-ring: rgba(217, 220, 224, 0.80);                 /* 1px, #D9DCE0 @ .80 -> 9.20:1 */
-  --wn-glow-rgb: 217, 220, 224;  --wn-glow-alpha: 0.42;  --wn-glow-blur: 10px;  --wn-glow-spread: 1px;
-  /* NEW tag: HELD (Ikenna 2:14 PM ET). Bare red text, no pill, sitting just UNDER the mark.
-     PLACEHOLDER values until spec v0.4.2; the text colours below are the v0.4.1 red, not final. */
-  --wn-tag-text-dark: #FF4D6A;                               /* PLACEHOLDER pending v0.4.2 */
-  --wn-tag-text-light: #FF4D6A;                              /* PLACEHOLDER pending v0.4.2 (a deeper red, >=4.5:1 on cream) */
+  /* SILVER glow, DARK (on #0c0c0e). Glyph final v0.5 (2:33 PM ET); was ring .80, alpha .42, blur 10, spread 1 */
+  --wn-glow-ring: rgba(217, 220, 224, 0.90);                 /* 1px, #D9DCE0 @ .90 */
+  --wn-glow-rgb: 217, 220, 224;  --wn-glow-alpha: 0.55;  --wn-glow-blur: 13px;  --wn-glow-spread: 1.3px;
+  /* NEW tag (v0.5): Glyph's clay NEW asset, centred under the mark. The reds live in the asset; these tokens document them
+     and drive the forced-colours / no-image text fallback. */
+  --wn-tag-text-dark: #FF5C77;                               /* base red, dark (in clay-new-dark-*) */
+  --wn-tag-text-light: #C1102D;                              /* base red, light (in clay-new-light-*) */
   --wn-tag-text: var(--wn-tag-text-dark);
-  --wn-tag-offset-y: 2px;                                    /* PLACEHOLDER pending v0.4.2: gap from the mark's bottom edge to the text */
-  --wn-tag-size: 9px;  --wn-tag-weight: 700;  --wn-tag-track: 0.04em;
+  --wn-tag-img-w: 22px;  --wn-tag-img-h: 8px;                /* clay-new-{theme}-22/44/66.png, 1x/2x/3x */
+  --wn-tag-offset-y: 1px;                                    /* mark bottom edge -> tag box (clears the 1px ring) */
 }
 html[data-theme="light"] {
-  /* SILVER glow, LIGHT (on #f3f1ec), Glyph final */
+  /* SILVER glow, LIGHT (on #f3f1ec). Glyph final v0.5; ring unchanged; was alpha .55, blur 9, spread 1 */
   --wn-glow-ring: rgba(124, 130, 138, 1.0);                  /* 1px, #7C828A @ 1.0 -> 3.43:1 */
-  --wn-glow-rgb: 163, 169, 177;  --wn-glow-alpha: 0.55;  --wn-glow-blur: 9px;  --wn-glow-spread: 1px;
+  --wn-glow-rgb: 163, 169, 177;  --wn-glow-alpha: 0.72;  --wn-glow-blur: 12px;  --wn-glow-spread: 1.3px;
   --wn-tag-text: var(--wn-tag-text-light);
 }
 
@@ -55,6 +56,13 @@ html[data-theme="light"] {
 /* Nothing on the indicator animates except the one-time fade (the app's global button transitions are off here). */
 .wn-btn, .wn-btn * { transition: none; }
 .wn-btn:focus-visible { outline: 2px solid var(--lh-ring, var(--focus-ring)); outline-offset: -4px; }
+/* v0.4.2: with NEW under the mark, the inset ring's bottom edge would cross the text. When new, draw the ring as a
+   ::before with the same 4px side/top inset but its bottom 2px below the button, so it clears the text by 2px. */
+.wn-btn[data-state="new"]:focus-visible { outline: none; }
+.wn-btn[data-state="new"]:focus-visible::before {
+  content: ""; position: absolute; inset: 4px 4px -2px 4px; border: 2px solid var(--lh-ring, var(--focus-ring));
+  border-radius: 8px; pointer-events: none;
+}
 /* The mark image never changes (same src in every state); only its box-shadow does. */
 .wn-mark {
   width: var(--wn-size); height: var(--wn-size); display: block;
@@ -70,10 +78,13 @@ html[data-theme="light"] {
 .wn-tag { display: none; }
 .wn-btn[data-state="new"] .wn-tag {
   display: block; position: absolute; left: 50%; top: calc(50% + var(--wn-size) / 2 + var(--wn-tag-offset-y)); transform: translateX(-50%);
-  padding: 0; background: none; color: var(--wn-tag-text);
-  font: var(--wn-tag-weight) var(--wn-tag-size)/1 var(--sans, Inter, ui-sans-serif, system-ui, sans-serif); letter-spacing: var(--wn-tag-track);
-  text-transform: uppercase; white-space: nowrap; pointer-events: none;
+  width: var(--wn-tag-img-w); height: var(--wn-tag-img-h); padding: 0; line-height: 0; pointer-events: none;
 }
+.wn-tag-img { display: block; width: var(--wn-tag-img-w); height: var(--wn-tag-img-h); }
+.wn-tag-img--light { display: none; }
+html[data-theme="light"] .wn-tag-img--light { display: block; }
+html[data-theme="light"] .wn-tag-img--dark { display: none; }
+.wn-tag-text { display: none; }   /* forced colours only (below) */
 /* One 1.2s fade-in (glow and tag together), once; under reduced motion both simply appear. No pulse, no flicker. */
 @media (prefers-reduced-motion: no-preference) {
   .wn-btn[data-state="new"][data-fade-once] .wn-mark { animation: wn-fade-in var(--wn-fade) ease-out 1 both; }
@@ -83,12 +94,18 @@ html[data-theme="light"] {
 @keyframes wn-tag-in { from { opacity: 0; } }
 @media (prefers-contrast: more) {
   .wn-btn[data-state="new"] .wn-mark { box-shadow: 0 0 0 2px var(--text), 0 0 var(--wn-glow-blur) var(--wn-glow-spread) rgba(var(--wn-glow-rgb), var(--wn-glow-alpha)); }
+  .wn-btn[data-state="new"] { --wn-tag-offset-y: 2px; }  /* clear the 2px ring; the asset is unchanged (already >= 4.5:1) */
 }
-/* Forced colours: shadows drop; Highlight outline on the mark; the bare tag text uses CanvasText (held with the tag, v0.4.2). */
+/* Forced colours: shadows drop; 2px Highlight outline hugging the mark; the tag becomes CanvasText, moved 1px lower to clear the outline. */
 @media (forced-colors: active) {
   .wn-mark { box-shadow: none; }
-  .wn-btn[data-state="new"] .wn-mark { outline: 2px solid Highlight; outline-offset: 2px; }
-  .wn-btn[data-state="new"] .wn-tag { color: CanvasText; }
+  .wn-btn[data-state="new"] { --wn-tag-offset-y: 2px; }
+  .wn-btn[data-state="new"] .wn-mark { outline: 2px solid Highlight; outline-offset: 0; }
+  .wn-btn[data-state="new"] .wn-tag { width: auto; height: auto; line-height: 1; }
+  .wn-btn[data-state="new"] .wn-tag-img { display: none !important; }
+  .wn-btn[data-state="new"] .wn-tag-text { display: block; color: CanvasText; font: 700 9px/1 var(--sans, Inter, ui-sans-serif, system-ui, sans-serif);
+    letter-spacing: 0.04em; text-transform: uppercase; white-space: nowrap; }
+  .wn-btn[data-state="new"]:focus-visible::before { border-color: Highlight; }
 }
 
 /* ---- Tooltip (same bubble family as .tip-bubble, but a --border edge: the bubble's gold accent edge is out here) ---- */

@@ -102,8 +102,17 @@
             <img class="wn-mark" src="/static/brand/clay-mark-44.png"
                  srcset="/static/brand/clay-mark-22.png 1x, /static/brand/clay-mark-44.png 2x, /static/brand/clay-mark-66.png 3x, /static/brand/clay-mark-88.png 4x"
                  alt="" width="22" height="22">
-            <!-- NEW tag (spec v0.4 §3a): straddles the mark's bottom edge; shown only with the glow (data-state="new"). -->
-            <span class="wn-tag" id="whatsNewTag" aria-hidden="true">New</span>
+            <!-- NEW tag (spec v0.5 §4): Glyph's clay NEW image, one per theme (CSS picks), just under the mark; shown only with
+                 the glow (data-state="new"). The text shows in forced colours only. -->
+            <span class="wn-tag" id="whatsNewTag" aria-hidden="true">
+              <img class="wn-tag-img wn-tag-img--light" src="/static/brand/clay-new-light-22.png"
+                   srcset="/static/brand/clay-new-light-22.png 1x, /static/brand/clay-new-light-44.png 2x, /static/brand/clay-new-light-66.png 3x"
+                   alt="" width="22" height="8">
+              <img class="wn-tag-img wn-tag-img--dark" src="/static/brand/clay-new-dark-22.png"
+                   srcset="/static/brand/clay-new-dark-22.png 1x, /static/brand/clay-new-dark-44.png 2x, /static/brand/clay-new-dark-66.png 3x"
+                   alt="" width="22" height="8">
+              <span class="wn-tag-text">New</span>
+            </span>
             <span class="visually-hidden" id="whatsNewCount"></span>
           </button>
           <span class="wn-tip" role="tooltip" id="whatsNewTip">What's new</span>

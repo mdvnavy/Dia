@@ -56,7 +56,9 @@ SAMPLE_PATHS = (
 ICON_DIR = BASE_DIR / "static" / "icons"
 # Glyph's clay mark exports (What's new indicator + favicon set): fixed names only, no traversal.
 BRAND_DIR = BASE_DIR / "static" / "brand"
-BRAND_PATH = re.compile(r"^/static/brand/((?:clay-mark-(?:22|44|66|88|180)|favicon-(?:16|32))\.png|favicon\.ico)$")
+BRAND_PATH = re.compile(
+    r"^/static/brand/((?:clay-mark-(?:22|44|66|88|180)|clay-new-(?:light|dark)-(?:22|44|66)|favicon-(?:16|32))\.png|favicon\.ico)$"
+)
 ICON_PATH = re.compile(r"^/static/icons/((?:[a-z0-9-]{1,32}/)?[a-z0-9][a-z0-9@-]{0,63}\.(?:svg|png|webp|gif))$")
 
 

@@ -1,4 +1,4 @@
-// What's new indicator + release-notes panel (spec proto/whats-new-indicator.md v0.3, layout A).
+// What's new indicator + release-notes panel (spec proto/whats-new-indicator.md v0.5, layout A).
 // - Notes: static/whats-new.json, fetched once AFTER first paint (low priority, no-cache); never blocks intake or chat.
 // - Seen: localStorage["dia-whats-new-seen"] = latest live note id, written the moment the panel opens.
 // - No glow on a first visit, on any load error, when storage throws, or when the stored id is no longer listed.
@@ -21,6 +21,7 @@
   const closeBtn = document.querySelector("#whatsNewClose");
   const backdrop = document.querySelector("#whatsNewBackdrop");
   if (!wrap || !button || !panel || !body) return;
+
 
   const state = { status: "idle", notes: [], latestId: null, newCount: 0, pills: 0, storageOk: true, fetching: null };
 

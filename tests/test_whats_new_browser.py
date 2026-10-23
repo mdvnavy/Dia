@@ -9,6 +9,7 @@ import colorsys
 import json
 import os
 import re
+from pathlib import Path
 import threading
 from http.server import ThreadingHTTPServer
 
@@ -18,8 +19,10 @@ sync_api = pytest.importorskip("playwright.sync_api")
 
 from app import ClientDiscoveryHandler  # noqa: E402
 
+ROOT = Path(__file__).resolve().parents[1]
 KEY = "dia-whats-new-seen"
-PENDING_TAG = pytest.mark.skip(reason="pending spec v0.4.2: NEW tag styling held (Ikenna 2:14 PM ET; bare red text under the mark)")
+TAG_DARK, TAG_LIGHT = (255, 92, 119), (193, 16, 45)   # base reds of Glyph's clay NEW image (= --wn-tag-text-dark/-light)
+GLYPH_CLAY_NEW = Path("/workspace/dia-tia/glyph/clay-new")   # Glyph's working files (halo-only renders), read only
 NOTES = {
     "version": 1,
     "notes": [
@@ -70,11 +73,11 @@ def browser():
 class Session:
     def __init__(self, browser, base_url, *, theme="dark", width=1280, height=800, seen="__unset__", notes=NOTES,
                  status=200, raw=None, reduced_motion="reduce", forced_colors="none", dsf=1, storage_throws=False,
-                 hold_json=False):
+                 hold_json=False, contrast="no-preference"):
         self.base_url = base_url
         self.context = browser.new_context(
             viewport={"width": width, "height": height}, device_scale_factor=dsf, reduced_motion=reduced_motion,
-            forced_colors=forced_colors, color_scheme=theme, user_agent="Mozilla/5.0 (X11; Linux x86_64) Chrome/130")
+            forced_colors=forced_colors, contrast=contrast, color_scheme=theme, user_agent="Mozilla/5.0 (X11; Linux x86_64) Chrome/130")
         init = f"try {{ localStorage.setItem('dia-theme', {json.dumps(theme)}); }} catch (e) {{}}\n"
         if seen != "__unset__":
             init += f"if (!sessionStorage.getItem('wn-init')) {{ sessionStorage.setItem('wn-init', '1'); " \
@@ -328,9 +331,11 @@ def test_10_fade_runs_once_then_nothing_animates(session):
 FORCED = """() => { const b = document.querySelector('#whatsNew'), img = b.querySelector('.wn-mark'), tag = b.querySelector('.wn-tag');
   const sys = (v) => { const p = document.createElement('span'); p.style.color = v; document.body.append(p);
     const out = getComputedStyle(p).color; p.remove(); return out; };
-  const c = getComputedStyle(img), t = getComputedStyle(tag);
+  const c = getComputedStyle(img), t = getComputedStyle(tag), tt = getComputedStyle(b.querySelector('.wn-tag-text'));
+  const imgs = [...b.querySelectorAll('.wn-tag-img')].map((i) => getComputedStyle(i).display);
   return { style: c.outlineStyle, width: c.outlineWidth, offset: c.outlineOffset, color: c.outlineColor, hl: sys('Highlight'),
-           shadow: c.boxShadow, tagDisplay: t.display, tagBg: t.backgroundColor, tagFg: t.color, tagBorder: [t.borderTopStyle, t.borderTopWidth, t.borderTopColor],
+           shadow: c.boxShadow, tagDisplay: t.display, tagBg: t.backgroundColor, tagFg: tt.color, textDisplay: tt.display, imgs,
+           textFont: [tt.fontSize, tt.fontWeight, tt.textTransform, tt.letterSpacing, tt.lineHeight], tagBorder: [t.borderTopStyle, t.borderTopWidth, t.borderTopColor],
            canvas: sys('Canvas'), canvasText: sys('CanvasText') }; }"""
 
 
@@ -340,9 +345,14 @@ def test_11_24_forced_colors_highlight_outline_and_system_tag(session, theme, wi
     s = session(seen=OLDEST, theme=theme, width=width, forced_colors="active")
     assert s.state == "new"
     f = s.ev(FORCED)
-    assert f["style"] == "solid" and f["width"] == "2px" and f["offset"] == "2px" and f["color"] == f["hl"]
+    assert f["style"] == "solid" and f["width"] == "2px" and f["offset"] == "0px" and f["color"] == f["hl"]
     assert f["shadow"] == "none"
-    assert f["tagDisplay"] == "block" and f["tagFg"] == f["canvasText"]   # tag box/border held for v0.4.2
+    assert f["tagDisplay"] == "block" and f["textDisplay"] == "block" and f["tagFg"] == f["canvasText"]
+    assert f["imgs"] == ["none", "none"]          # the fixed-colour clay image gives way to CanvasText text
+    assert f["textFont"] == ["9px", "700", "uppercase", "0.36px", "9px"]
+    # the tag text box clears the 2px outline (offset-y becomes 2px in forced colours)
+    gap = s.ev("document.querySelector('#whatsNew .wn-tag').getBoundingClientRect().top - document.querySelector('.wn-mark').getBoundingClientRect().bottom")
+    assert abs(gap - 2) < 0.01
     rest = session(theme=theme, width=width, forced_colors="active")
     assert rest.state == "none"
     r = rest.ev(FORCED)
@@ -372,7 +382,8 @@ def _hex(text):
 @pytest.mark.parametrize("theme", ["dark", "light"])
 @pytest.mark.parametrize("width", [1280, 390])
 def test_12_hit_area_and_focus_ring_contrast(session, theme, width):
-    s = session(seen=OLDEST, theme=theme, width=width)
+    s = session(seen=LATEST, theme=theme, width=width)   # rest state: the inset outline ring
+    assert s.state == "none"
     box = s.page.locator("#whatsNew").bounding_box()
     assert box["width"] >= 44 and box["height"] >= 44
     s.page.focus("#navBrandMenu")
@@ -386,6 +397,53 @@ def test_12_hit_area_and_focus_ring_contrast(session, theme, width):
     assert ring[0] == "solid" and ring[1] == "2px"
     bg = _hex(s.ev("getComputedStyle(document.documentElement).getPropertyValue('--bg')"))
     l1, l2 = sorted([_lum(_rgb(ring[2])), _lum(bg)], reverse=True)
+    assert (l1 + 0.05) / (l2 + 0.05) >= 3.0
+
+
+def ink(s):
+    """Ink box (CSS px, viewport coords) of the NEW tag: the bbox of its red pixels (the clay letters) in a DPR-scaled
+    shot of the button. Nothing else in the indicator is red (test 20), and the image's bg-coloured seat isn't ink."""
+    from io import BytesIO
+    from PIL import Image
+    s.page.wait_for_function("[...document.querySelectorAll('#whatsNewTag img')].every((i) => i.complete)")
+    dsf = s.ev("devicePixelRatio")
+    b = s.page.locator("#whatsNew").bounding_box()
+    clip = {"x": b["x"], "y": b["y"], "width": b["width"], "height": b["height"]}   # the ink sits inside the button
+    shot = Image.open(BytesIO(s.page.screenshot(clip=clip, scale="device"))).convert("RGB")
+    px, (w, h) = shot.load(), shot.size
+    pts = [(x, y) for y in range(h) for x in range(w) if px[x, y][0] > px[x, y][1] + 60 and px[x, y][0] > px[x, y][2] + 30]
+    assert pts, "no NEW ink found"
+    xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+    return [clip["x"] + min(xs) / dsf, clip["y"] + min(ys) / dsf, clip["x"] + (max(xs) + 1) / dsf, clip["y"] + (max(ys) + 1) / dsf], pts
+
+
+FOCUS_NEW = """() => { const b = document.querySelector('#whatsNew'), r = b.getBoundingClientRect(), c = getComputedStyle(b, '::before');
+  return { outline: getComputedStyle(b).outlineStyle, content: c.content, border: [c.borderTopStyle, c.borderTopWidth, c.borderTopColor],
+           top: r.top + parseFloat(c.top), bottom: r.bottom - parseFloat(c.bottom), left: r.left + parseFloat(c.left), right: r.right - parseFloat(c.right),
+           band: document.querySelector('header.top-nav').getBoundingClientRect().bottom }; }"""
+
+
+@pytest.mark.parametrize("theme", ["dark", "light"])
+@pytest.mark.parametrize("width", [1280, 390])
+def test_12_new_state_focus_ring_clears_new_text_and_stays_in_band(session, theme, width):
+    s = session(seen=OLDEST, theme=theme, width=width, height=844, dsf=4)
+    box, _ = ink(s)
+    s.page.focus("#navBrandMenu")
+    for _ in range(4):
+        if s.ev("document.activeElement.id") == "whatsNew":
+            break
+        s.page.keyboard.press("Tab")
+    f = s.ev(FOCUS_NEW)
+    assert f["outline"] == "none" and f["content"] == '""' and f["border"][:2] == ["solid", "2px"]
+    btn = s.page.locator("#whatsNew").bounding_box()
+    assert abs(f["bottom"] - (btn["y"] + btn["height"] + 2)) < 0.01      # bottom edge 2px below the button
+    inner_bottom = f["bottom"] - 2
+    tag = s.page.locator("#whatsNew .wn-tag").bounding_box()
+    assert inner_bottom - (tag["y"] + tag["height"]) >= 1, (inner_bottom, tag)   # >= 1px clear of the tag box (spec 2px)
+    assert inner_bottom - box[3] >= 1, (inner_bottom, box)              # >= 1px clear of the ink (spec measured 2px)
+    assert f["bottom"] <= f["band"]                                       # inside the 52/56px band
+    bg = _hex(s.ev("getComputedStyle(document.documentElement).getPropertyValue('--bg')"))
+    l1, l2 = sorted([_lum(_rgb(f["border"][2])), _lum(bg)], reverse=True)
     assert (l1 + 0.05) / (l2 + 0.05) >= 3.0
 
 
@@ -461,24 +519,113 @@ def test_23_target_ring_clearance_and_no_clipping(session, theme, width):
     assert g["clipped"] == [] and g["band"] == ["visible", "visible"]
 
 
-@PENDING_TAG
+CLOCK_RIGHT = """() => { let right = -Infinity;
+  for (const id of ['lhTime', 'lhDate']) { const el = document.getElementById(id);
+    if (getComputedStyle(el).display === 'none') continue;
+    const r = document.createRange(); r.selectNodeContents(el);
+    for (const rect of r.getClientRects()) right = Math.max(right, rect.right); }
+  return right; }"""
+MEASURED = {}
+
+
 @pytest.mark.parametrize("theme", ["dark", "light"])
 @pytest.mark.parametrize("width", [1280, 390])
-def test_23_tag_size_position_and_clearance(session, theme, width):
-    """Final numbers come with v0.4.2 (tag sits just under the mark, no pill)."""
-    s = session(seen=OLDEST, theme=theme, width=width, height=844)
+def test_23_new_ink_under_mark_and_clear_of_clock(session, theme, width):
+    s = session(seen=OLDEST, theme=theme, width=width, height=844, dsf=4)
+    s.page.clock.set_fixed_time("2026-10-23T14:59:00-04:00")
+    s.page.wait_for_timeout(50)
+    (il, it, ir, ib), _ = ink(s)
     g = s.ev(GEOM)
     bl, bt, br, bb = g["btn"]
-    il, it, ir, ib = g["img"]
-    tl, tt, tr, tb, tw, th = g["tag"]
-    assert tt >= ib                                                        # under the mark, not overlapping
-    assert tl >= bl and tr <= br and tb <= bb                              # inside the 44x44 button
-    assert g["tagGap"] >= 8, g
+    ml, mt, mr, mb = g["img"]
+    clock = s.ev(CLOCK_RIGHT)
+    MEASURED[(theme, width)] = {"ink_to_clock": round(il - clock, 2), "ring_to_clock": round(ml - 1 - clock, 2),
+                                "mark_to_ink": round(it - mb, 2), "ink_in_button_bottom": round(bb - ib, 2),
+                                "ink": (round(ir - il, 2), round(ib - it, 2))}
+    print(MEASURED[(theme, width)])
+    assert it - (mb + 1) >= 0.75, (it, mb)                 # letters start ~1px below the 1px glow ring: no overlap
+    assert il >= bl and ir <= br and it >= bt and ib <= bb  # ink inside the 44x44 button
+    assert il - clock >= 10, (il, clock)                   # ink -> clock text >= 10px (spec: 12.45 / 13.45)
+    assert ml - 1 - clock >= 8
+    assert abs((ir - il) - 20) <= 1 and abs((ib - it) - 6.67) <= 0.75  # clay letters ~20 x 6.7 inside the 22x8 image
+    t = s.page.locator("#whatsNew .wn-tag").bounding_box()
+    assert abs(t["width"] - 22) < 0.01 and abs(t["height"] - 8) < 0.01
+    assert abs(t["y"] - (mb + 1)) < 0.01                                 # image box 1px under the mark (--wn-tag-offset-y)
+    assert abs((t["x"] + 11) - (ml + mr) / 2) <= 0.5                     # centred under the mark
+
+
+CLOCK_RECTS = """() => { const out = [];
+  for (const id of ['lhTime', 'lhDate']) { const el = document.getElementById(id);
+    if (getComputedStyle(el).display === 'none') continue;
+    const r = document.createRange(); r.selectNodeContents(el);
+    for (const b of r.getClientRects()) out.push([b.left, b.top, b.right, b.bottom]); }
+  return out; }"""
+
+
+def _shot(s, clip):
+    from io import BytesIO
+    from PIL import Image
+    return Image.open(BytesIO(s.page.screenshot(clip=clip, scale="device"))).convert("RGB")
+
+
+@pytest.mark.parametrize("theme", ["dark", "light"])
+@pytest.mark.parametrize("width", [1280, 390])
+@pytest.mark.parametrize("dsf", [1, 2, 3])
+def test_23_bloom_at_clock_empty_space_le_4_and_never_on_glyphs(session, theme, width, dsf, strict=False):
+    """Spec v0.5 (Glyph 2:40 PM ET): inside the clock's text box the visible bloom (glow on vs off, per channel) may reach
+    <= 4/255 in empty space but must never raise a clock glyph pixel; clock text keeps >= 6.82:1 light / 7.95:1 dark."""
+    s = session(seen=OLDEST, theme=theme, width=width, height=844, dsf=dsf)
+    s.page.clock.set_fixed_time("2026-10-23T14:59:00-04:00")
+    s.page.wait_for_timeout(50)
+    rects = s.ev(CLOCK_RECTS)
+    l, t = min(r[0] for r in rects), min(r[1] for r in rects)
+    clip = {"x": l, "y": t, "width": max(r[2] for r in rects) - l, "height": max(r[3] for r in rects) - t}
+    state = "document.querySelector('#whatsNew').dataset.state = %s"
+    on = _shot(s, clip)
+    s.ev(state % "'none'"); off = _shot(s, clip)
+    s.ev(state % "'new'"); again = _shot(s, clip)
+    assert list(again.getdata()) == list(on.getdata())                 # renders are deterministic: diffs are the glow
+    s.ev(state % "'none'")
+    s.ev("document.getElementById('lhClock').style.color = 'transparent';"
+         "for (const id of ['lhTime','lhDate']) document.getElementById(id).style.color = 'transparent'")
+    bare = _shot(s, clip)
+    s.ev(state % "'new'")
+    a, b, c = on.load(), off.load(), bare.load()
+    w, h = on.size
+    d = lambda p, q: max(abs(p[i] - q[i]) for i in range(3))
+    ink = {(x, y): d(b[x, y], c[x, y]) for y in range(h) for x in range(w)}
+    glyph = {p for p, v in ink.items() if v > 0}                      # any pixel the clock text paints
+    empty = [d(a[x, y], b[x, y]) for (x, y) in ink if (x, y) not in glyph]
+    raised = {}
+    for thr in (1, 8, 32):
+        vals = [d(a[p], b[p]) for p in glyph if ink[p] >= thr]
+        raised[thr] = max(vals or [0])
+    top = max(ink.values())
+    core = [p for p in glyph if ink[p] >= 0.9 * top]                    # fully inked glyph pixels
+    worst = min(_contrast(a[p], c[p]) for p in core)
+    MEASURED[("bloom", theme, width, dsf)] = {"empty_max": max(empty or [0]), "glyph_raise_by_ink>=1/8/32": raised,
+                                              "clock_min_contrast": round(worst, 2)}
+    print(MEASURED[("bloom", theme, width, dsf)])
+    assert glyph and core
+    assert max(empty or [0]) <= 4                                       # empty space inside the clock's text box
+    # Spec v0.5 §3 says "never on a glyph (... glyph pixels measure 1/255)": the measured 1/255 is the accepted floor.
+    # A strict 0/255 is tracked separately below (xfail) so the gap stays visible.
+    assert raised[1] <= 1, raised
+    assert worst >= (6.82 if theme == "light" else 7.95), worst
+    if strict:
+        assert raised[1] == 0, f"glow raises clock glyph pixels by {raised[1]}/255"
+
+
+@pytest.mark.xfail(strict=True, reason="spread 1.3px raises clock glyph pixels nearest the mark by 1/255 (spec measures "
+                   "the same 1/255); a strict 0/255 needs Glyph's call. Flips to XPASS (and fails) if that ever changes")
+@pytest.mark.parametrize("theme", ["dark"])
+def test_23_bloom_strict_zero_on_glyphs(session, theme):
+    test_23_bloom_at_clock_empty_space_le_4_and_never_on_glyphs(session, theme, 1280, 2, strict=True)
 
 
 @pytest.mark.parametrize("theme", ["dark", "light"])
 def test_23_cursor_underscore_pixels_visible_with_tag(session, theme):
-    """Pixel check: the green underscore still renders above the tag (DPR 4 crop of the mark)."""
+    """Pixel check: the green underscore is fully visible with NEW lit (DPR 4 crop of the mark)."""
     from io import BytesIO
     from PIL import Image
     s = session(seen=OLDEST, theme=theme, dsf=4)
@@ -550,9 +697,9 @@ def test_16_fetch_after_first_paint_and_never_blocks_intake(session):
 
 # --- 20-21: tokens, assets, no red ----------------------------------------------------------------------------------
 
-SILVER = {
-    "dark": "rgba(217, 220, 224, 0.8) 0px 0px 0px 1px, rgba(217, 220, 224, 0.42) 0px 0px 10px 1px",
-    "light": "rgb(124, 130, 138) 0px 0px 0px 1px, rgba(163, 169, 177, 0.55) 0px 0px 9px 1px",
+SILVER = {   # Glyph's stronger glow, 2:33 PM ET
+    "dark": "rgba(217, 220, 224, 0.9) 0px 0px 0px 1px, rgba(217, 220, 224, 0.55) 0px 0px 13px 1.3px",
+    "light": "rgb(124, 130, 138) 0px 0px 0px 1px, rgba(163, 169, 177, 0.72) 0px 0px 12px 1.3px",
 }
 
 
@@ -597,12 +744,25 @@ def test_20_red_only_as_tag_text_and_no_mustard(session, theme, width):
             hue = h * 360
             reddish = sat > 0.35 and 0.15 < l < 0.9 and (hue <= 25 or hue >= 320)
             goldish = sat > 0.35 and 0.15 < l < 0.9 and 35 <= hue <= 50
-            if reddish and "wn-tag" in classes and pseudo is None and prop == "color":
+            if reddish and ("wn-tag" in classes or "wn-tag-text" in classes) and pseudo is None and prop == "color":
                 tag_red.append(m)
             elif reddish or goldish or (round(r), round(g), round(b)) == (223, 168, 28):
                 bad.append((who, pseudo, prop, m))
     assert bad == []
-    assert len(tag_red) == 1   # the tag text; exact per-theme reds come with v0.4.2
+    assert tag_red == []   # with the clay image in use, no CSS red is painted at all (the text fallback is display: none)
+    # and the only red pixels in the band are inside the NEW image box
+    from io import BytesIO
+    from PIL import Image
+    s.page.click("#whatsNewClose") if s.page.locator("#whatsNewPanel").is_visible() else None
+    s.ev("document.querySelector('#whatsNew').dataset.state = 'new'")
+    band = s.page.locator("header.top-nav").bounding_box()
+    tag = s.page.locator("#whatsNew .wn-tag").bounding_box()
+    shot = Image.open(BytesIO(s.page.screenshot(clip=band))).convert("RGB")
+    px = shot.load()
+    stray = [(x, y) for y in range(shot.size[1]) for x in range(shot.size[0])
+             if px[x, y][0] > px[x, y][1] + 60 and px[x, y][0] > px[x, y][2] + 30
+             and not (tag["x"] - 1 <= band["x"] + x <= tag["x"] + tag["width"] + 1 and tag["y"] - 1 <= band["y"] + y <= tag["y"] + tag["height"] + 1)]
+    assert stray == []
 
 
 def _contrast(a, b):
@@ -610,24 +770,69 @@ def _contrast(a, b):
     return (l1 + 0.05) / (l2 + 0.05)
 
 
-@PENDING_TAG
+TAG_IMGS = """() => [...document.querySelectorAll('#whatsNewTag .wn-tag-img')].map((i) => ({ cls: i.className,
+  display: getComputedStyle(i).display, src: i.currentSrc.split('/').pop(), w: i.getBoundingClientRect().width,
+  h: i.getBoundingClientRect().height, alt: i.alt, complete: i.complete && i.naturalWidth > 0 }))"""
+
+
 @pytest.mark.parametrize("theme", ["dark", "light"])
 @pytest.mark.parametrize("width", [1280, 390])
-def test_22_new_tag_tokens_and_hairline(session, theme, width):
-    s = session(seen=OLDEST, theme=theme, width=width)
+@pytest.mark.parametrize("dsf", [1, 2, 3])
+def test_22_clay_new_image_per_theme_and_dpr(session, theme, width, dsf):
+    s = session(seen=OLDEST, theme=theme, width=width, height=844, dsf=dsf)
+    s.page.wait_for_function("[...document.querySelectorAll('#whatsNewTag img')].every((i) => i.complete)")
     t = s.ev(TAG)
-    assert t["display"] == "block" and t["hidden"] == "true"
-    assert t["color"] == "rgb(255, 77, 106)" and t["bg"] == "rgb(26, 26, 28)"
-    assert round(_contrast(_rgb(t["color"]), _rgb(t["bg"])), 2) >= 5.39
-    if theme == "dark":
-        assert t["shadow"] == "rgba(217, 220, 224, 0.3) 0px 0px 0px 1px"
-    else:
-        assert t["shadow"] in ("rgba(0, 0, 0, 0) 0px 0px 0px 1px", "none")
-    assert t["border"].startswith("none")         # size comes from padding, not a border
-    font = s.ev("(() => { const c = getComputedStyle(document.querySelector('#whatsNew .wn-tag')); return [c.fontSize, c.fontWeight, c.textTransform, c.letterSpacing, c.paddingTop, c.paddingLeft, c.borderRadius]; })()")
-    assert font[:3] == ["9px", "700", "uppercase"] and abs(float(font[3][:-2]) - 0.36) < 0.01
-    assert font[4:] == ["2px", "4px", "3px"]
-    assert s.ev("document.querySelector('#whatsNew .wn-tag').textContent") == "New"
+    assert t["display"] == "block" and t["hidden"] == "true" and t["anim"] == "none"   # static under reduced motion
+    assert t["bg"] == "rgba(0, 0, 0, 0)" and t["shadow"] == "none" and t["border"].startswith("none")   # no pill
+    imgs = {i["cls"].split("--")[-1]: i for i in s.ev(TAG_IMGS)}
+    shown, other = imgs[theme], imgs["light" if theme == "dark" else "dark"]
+    assert shown["display"] == "block" and other["display"] == "none"
+    assert shown["src"] == f"clay-new-{theme}-{22 * dsf}.png" and shown["complete"]
+    assert (shown["w"], shown["h"]) == (22, 8) and shown["alt"] == "" and other["alt"] == ""
+    assert s.ev("getComputedStyle(document.querySelector('#whatsNew .wn-tag-text')).display") == "none"
+
+
+def test_22_theme_toggle_swaps_clay_new_variant(session):
+    s = session(seen=OLDEST, theme="dark")
+    s.page.click("#themeToggle")
+    assert s.ev("document.documentElement.dataset.theme") == "light"
+    imgs = {i["cls"].split("--")[-1]: i["display"] for i in s.ev(TAG_IMGS)}
+    assert imgs == {"light": "block", "dark": "none"}
+
+
+@pytest.mark.skipif(not GLYPH_CLAY_NEW.exists(), reason="Glyph's halo-only renders not on this machine")
+@pytest.mark.parametrize("theme", ["dark", "light"])
+@pytest.mark.parametrize("width", [1280, 390])
+def test_22_new_letters_contrast_over_glow(session, theme, width):
+    """Glyph's method: base red vs what sits behind each letter pixel (alpha >= 50%), with the image's bg-coloured
+    seat in place (a halo-only render of the same asset) and the stronger glow on. Must be >= 4.5:1."""
+    import base64
+    from io import BytesIO
+    from PIL import Image
+    s = session(seen=OLDEST, theme=theme, width=width, height=844, dsf=2)
+    halo = "data:image/png;base64," + base64.b64encode((GLYPH_CLAY_NEW / f"clay-new-{theme}-22-haloonly.png").read_bytes()).decode()
+    s.ev("""(src) => new Promise((ok) => { const i = [...document.querySelectorAll('#whatsNewTag img')].find((x) => getComputedStyle(x).display !== 'none');
+      i.onload = () => ok(); i.removeAttribute('srcset'); i.src = src; })""", halo)
+    t = s.page.locator("#whatsNew .wn-tag").bounding_box()
+    under = Image.open(BytesIO(s.page.screenshot(clip=t, scale="device"))).convert("RGB")
+    mask = Image.open(ROOT / "static" / "brand" / f"clay-new-{theme}-44.png").getchannel("A").resize(under.size)
+    base = TAG_DARK if theme == "dark" else TAG_LIGHT
+    u, m = under.load(), mask.load()
+    ratios = [_contrast(base, u[x, y]) for y in range(under.size[1]) for x in range(under.size[0]) if m[x, y] >= 128]
+    MEASURED[("contrast", theme, width)] = round(min(ratios), 2)
+    print({"theme": theme, "width": width, "min": round(min(ratios), 2), "median": round(sorted(ratios)[len(ratios) // 2], 2)})
+    assert len(ratios) > 100 and min(ratios) >= 4.5
+
+
+@pytest.mark.parametrize("mode", ["contrast-more", "forced-colors"])
+def test_22_tag_drops_1px_in_contrast_and_forced_modes(session, mode):
+    kw = {"contrast": "more"} if mode == "contrast-more" else {"forced_colors": "active"}
+    s = session(seen=OLDEST, **kw)
+    assert s.ev("getComputedStyle(document.querySelector('#whatsNew')).getPropertyValue('--wn-tag-offset-y').trim()") == "2px"
+    gap = s.ev("document.querySelector('#whatsNew .wn-tag').getBoundingClientRect().top - document.querySelector('.wn-mark').getBoundingClientRect().bottom")
+    assert abs(gap - 2) < 0.01
+    if mode == "contrast-more":
+        assert s.ev(MARK_SHADOW).startswith(s.ev("(() => { const d = document.createElement('div'); d.style.color = 'var(--text)'; document.body.append(d); const v = getComputedStyle(d).color; d.remove(); return v; })()") + " 0px 0px 0px 2px")
 
 
 @pytest.mark.parametrize("case", ["first-visit", "error", "storage-blocked", "opened"])
