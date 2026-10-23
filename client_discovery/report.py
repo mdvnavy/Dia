@@ -73,6 +73,9 @@ def _safe_fetcher() -> Any:
 
 
 def build_context(result: dict[str, Any], *, report_date: str | None = None) -> dict[str, Any]:
+    from client_discovery.core import scrub_for_export
+
+    result = scrub_for_export(result)  # no AI text in client exports (persona v1.2 rule 1)
     intake = result.get("intake") or {}
     score = result.get("score") or {}
     documents = result.get("documents") or {}
