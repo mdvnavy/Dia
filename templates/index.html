@@ -182,6 +182,17 @@
           </div>
         </div>
         <div id="intakeError" class="intake-error" role="alert" hidden></div>
+        <!-- dia-savant inputs addendum §3: pre-run inputs prompt. Client-side and deterministic; never blocks Run. -->
+        <section id="inputsPrompt" class="inputs-prompt" aria-labelledby="inputsPromptTitle" hidden>
+          <div class="inputs-prompt-head">
+            <h3 id="inputsPromptTitle">Before you run: a few inputs would sharpen this</h3>
+            <button id="inputsPromptDismiss" class="icon-button" type="button" aria-label="Dismiss input tips">×</button>
+          </div>
+          <p id="inputsPromptOld" class="inputs-prompt-old" hidden>This questionnaire has no "Workflows and value" section.</p>
+          <ul id="inputsPromptList"></ul>
+          <p class="inputs-prompt-foot">Work these out your way, add them to section 6, then run again. Your text stays here.</p>
+          <p class="inputs-prompt-foot">Prefer a hand? <span id="inputsPromptName">Bash Systems &amp; Services</span> offers business consulting.<span id="inputsPromptServices" hidden> <a id="inputsPromptLink" href="#" target="_blank" rel="noopener noreferrer">See services</a></span></p>
+        </section>
         <div class="actions under-prompt">
           <button id="uploadLink" class="text-link" type="button">Upload a file</button>
           <button id="uploadCancel" class="text-link" type="button" hidden>Cancel</button>
@@ -260,6 +271,11 @@
 
       <!-- Results workspace: appears below the composer after a run, like Tia's response card. -->
       <section class="results" id="resultsStage" aria-label="Intake results">
+        <!-- Addendum §7.3: on screen only, never exported. -->
+        <section id="beforeAfter" class="before-after" aria-labelledby="beforeAfterTitle" hidden>
+          <h3 id="beforeAfterTitle">Scored before / after</h3>
+          <dl></dl>
+        </section>
         <div class="results-summary">
           <div class="score-card">
             <span>Recommended Tier</span>
@@ -298,6 +314,7 @@
             <button id="downloadPdf" type="button" disabled>Download PDF</button>
             <button id="downloadJson" type="button" disabled>Download JSON</button>
             <button id="copySection" type="button" disabled>Copy section</button>
+            <button id="rerunUpdated" class="text-link quiet" type="button" disabled>Re-run with updated answers</button>
             <button id="listenDocument" class="icon-button speech-only" type="button" aria-pressed="false" disabled>
               <svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
               <span class="speech-label">Listen</span>
@@ -351,7 +368,7 @@
     <footer class="footer-note">Press <kbd class="kbd-hint">⌘K</kbd> for actions</footer>
   </main>
 
-  <!-- Filing cabinet drawer: everything filed this session (max 15). -->
+  <!-- Filing cabinet drawer: intakes saved on this device (localStorage dia-cabinet-v2, max 15). -->
   <dialog id="cabinetDrawer" class="drawer cabinet-drawer" aria-labelledby="cabinetTitle">
     <div class="drawer-head">
       <div>
@@ -359,7 +376,14 @@
         <p id="cabinetSummary" class="drawer-sub"></p>
       </div>
       <button id="cabinetSelectMode" class="text-link" type="button">Select</button>
+      <button id="cabinetClear" class="text-link" type="button" hidden>Clear cabinet</button>
       <button id="cabinetClose" class="drawer-x" type="button" aria-label="Close filing cabinet">×</button>
+    </div>
+    <div id="cabinetClearConfirm" class="drawer-note drawer-confirm" role="alertdialog" aria-labelledby="cabinetClearTitle" aria-describedby="cabinetClearNote" hidden>
+      <p><strong id="cabinetClearTitle">Clear all saved intakes on this device?</strong></p>
+      <p id="cabinetClearNote">Export the ones you want to keep first.</p>
+      <button id="cabinetClearYes" type="button">Clear</button>
+      <button id="cabinetClearKeep" class="text-link" type="button">Keep</button>
     </div>
     <div id="cabinetSelectBar" class="drawer-select-bar" hidden>
       <label><input id="cabinetSelectAll" type="checkbox"> <span id="cabinetSelectAllLabel">Select all</span></label>

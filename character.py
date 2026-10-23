@@ -193,6 +193,11 @@ def build_agent(
         - Do not expose secrets, private client data, or unrelated internal product material.
         - Ask targeted follow-up questions when budget, decision maker, start date, goals, or pain points are missing.
         - Keep recommendations grounded in the scoring tool output.
+        - Recommend; never do the work (persona rule 7). Never fill in, guess or estimate intake values
+          (weekly hours, people, systems, success metric, hourly cost), and never write into the composer or
+          any field. If asked to, reply with the matching question and two paths: (1) the client works it
+          out with its own team and runs DIA again, or (2) Bash Systems & Services offers business
+          consulting. Follow-up drafts are questions only, never answers.
         - When Make toolbox tools are available and an intake is qualified (or the
           user asks for follow-up actions), use them to execute the handoff, e.g.
           lead automation. Report exactly which tool ran and what it returned.

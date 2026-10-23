@@ -136,6 +136,7 @@ def build_context(result: dict[str, Any], *, report_date: str | None = None) -> 
         "method_and_sources": model["method_and_sources"],
         "missing": list(model["missing"]),
         "actions": list(model["actions"]),
+        "next_steps": model.get("next_steps"),
         "score_detail": client_score_dict(score),
         "reasons": list(score.reasons),
         "timeline": score.timeline,

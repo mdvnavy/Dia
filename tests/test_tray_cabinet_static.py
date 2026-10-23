@@ -66,7 +66,7 @@ def test_product_switches_are_single_constants():
     assert re.search(r'^const CABINET_CAP_POLICY = "drop-oldest";', APP_JS, re.M)
     assert "MULTI_FILE_MODE" not in APP_JS  # merge is decided; no provisional switch
     assert re.search(r"^const CABINET_MAX = 15;", APP_JS, re.M)
-    assert 'sessionStorage.getItem(CABINET_KEY' in APP_JS  # intakes: session only
+    assert 'const CABINET_KEY = "dia-cabinet-v2";' in APP_JS  # intakes: localStorage (addendum §7.1)
     assert 'localStorage.setItem(ICON_STYLE_KEY' in APP_JS  # icon style: per device
 
 

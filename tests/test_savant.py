@@ -359,7 +359,8 @@ def test_summary_follows_the_answer_first_template():  # §3.2, §9 item 1
     assert lines[1] == "Today Northstar Studio runs lead triage across three forms by hand: about 6 hours a week, roughly $15,840 a year."
     assert lines[2].startswith('2 pain points slow the team, led by "Leads arrive from three forms')
     assert "Why this tier:\n\n- Urgency 3/5:" in summary and "\n- Budget fit 4/5:" in summary and "\n- Readiness 4/5:" in summary
-    assert summary.endswith("Next step: Propose a paid pilot on a single workflow, measured against one agreed metric (question 9).")
+    assert summary.endswith("Next step: The engagement should start with a paid pilot on a single workflow, measured against "
+                            "one agreed metric (question 9).")  # formal third person (code review on #39)
     assert "needs a reliable way to turn discovery intake" not in markdown_export(SAMPLE)  # §9 item 1
 
 
@@ -828,12 +829,16 @@ def test_some_tasks_without_hours_give_a_lower_bound_shown_as_at_least():
                                                   "(tasks without weekly hours are excluded)")
     assert [w["value"] for w in s.workflows] == [PARTIAL_VALUE, None]  # each row keeps its own figure
     assert value_at_stake_text(s) == "at least $14,400"
-    assert inputs_confidence(s, validate_intake(intake)) == "thin"
+    assert inputs_confidence(s, validate_intake(intake)) == "partial"  # approved spec: a lower bound is partial
     assert report["sections"][4]["title"] == "Northstar Studio loses at least $14,400 a year to 1 of 2 manual workflows"
     summary = report["sections"][0]["body"]
     assert summary.startswith("Northstar Studio fits a Custom AI Agent, pending weekly hours for every listed task.")
     assert "The value at stake is at least $14,400 a year; tasks without weekly hours are excluded" in summary
-    assert "Ask for the weekly hours of each manual task that has none" in " ".join(report["actions"])
+    # Inputs addendum §4.3: the partial-value flag action is replaced by the "Recommended next steps" hours item.
+    from client_discovery.inputs import HOURS_PARTIAL_QUESTION
+
+    assert not any("weekly hours" in action for action in report["actions"])
+    assert f"**Hours per task.** {HOURS_PARTIAL_QUESTION}" in "\n".join(sec["body"] for sec in report["sections"])
     method = report["method_and_sources"]
     assert "excluded from the value at stake, so the figure\nis a lower bound" in method
     assert "hourly rate × 48 weeks" in method  # the approved §5 text stays, with the note added after it
@@ -871,7 +876,7 @@ def test_partial_value_reaches_the_json_html_and_pdf():
 
     result = app_build(questionnaire(q1=PARTIAL_Q1, q2="$50 an hour"))
     assert result["value_at_stake"] == 14400 and result["value_at_stake_partial"] is True
-    assert result["value_at_stake_text"] == "at least $14,400" and result["inputs_confidence"] == "thin"
+    assert result["value_at_stake_text"] == "at least $14,400" and result["inputs_confidence"] == "partial"
     from client_discovery.service import _savant_extras
 
     intake = parse_questionnaire_markdown(questionnaire(q1=PARTIAL_Q1, q2="$50 an hour"))

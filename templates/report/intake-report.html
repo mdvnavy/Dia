@@ -73,6 +73,21 @@
       {% else %}
       <p class="none">The questionnaire answers every required question.</p>
       {% endif %}
+      {% if next_steps %}
+      <!-- Inputs addendum §4: path 1 (intro + one question per missing input), then path 2 once. Copy comes from
+           client_discovery/inputs.py; the services URL comes from config (DIA_CONSULTING_INTAKE_URL). -->
+      <h4 class="block-title next-steps-title">{{ next_steps.title }}</h4>
+      <p class="next-steps-intro">{{ next_steps.intro }}</p>
+      <ol class="issue-list next-steps">
+        {% for item in next_steps["items"] %}
+        <li><span class="issue-index">{{ "%02d"|format(loop.index) }}</span><span class="issue-text"><strong>{{ item.label }}.</strong> {{ item.question }}</span></li>
+        {% endfor %}
+      </ol>
+      {% if next_steps.path2 %}
+      <p class="next-steps-path2">{{ next_steps.path2 }}{% if next_steps.services_url %}
+        <span class="services-line">Its services are listed at <a class="services-link" href="{{ next_steps.services_url }}">{{ next_steps.services_url }}</a>.</span>{% endif %}</p>
+      {% endif %}
+      {% endif %}
       {% if actions %}
       <h4 class="block-title flags-title">Flags to clear first</h4>
       <ol class="issue-list">

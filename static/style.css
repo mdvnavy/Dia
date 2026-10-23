@@ -1281,3 +1281,26 @@ html[data-assistant="expert"] body:not([data-agent="open"]) .agent { display: no
 .assistant-option { padding: 6px 14px; }
 /* Glyph §5.4: silver only inside Ask DIA, in both themes (same pin as the icon-style control). */
 .agent { --accent: #A3A9B1; --accent-ink: var(--text); }
+
+/* dia-savant inputs addendum: pre-run inputs prompt (§3), quiet surface with silver accents; Glyph owns the final look. */
+.inputs-prompt { text-align: left; margin: 10px 4px 0; padding: 12px 14px; border: 1px solid #A3A9B1; border-radius: 10px; background: var(--surface); color: var(--text); font-size: 14px; }
+.inputs-prompt[hidden], .before-after[hidden] { display: none !important; }
+.inputs-prompt-head { display: flex; align-items: flex-start; gap: 8px; }
+.inputs-prompt-head h3 { flex: 1; margin: 0 0 6px; font: 600 15px/1.35 var(--sans); text-transform: none; }
+.inputs-prompt-head .icon-button { width: 28px; height: 28px; font-size: 18px; line-height: 1; }
+.inputs-prompt ul { margin: 4px 0 8px; padding-left: 20px; }
+.inputs-prompt li + li { margin-top: 6px; }
+.inputs-prompt-why { color: var(--muted); font-size: 12.5px; }
+.inputs-prompt-old { margin: 0 0 4px; color: var(--muted); }
+.inputs-prompt-foot { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+.inputs-prompt-foot a { color: inherit; text-decoration: underline; }
+/* §7.3 Scored before / after: on screen only. */
+.before-after { text-align: left; margin: 0 0 14px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; font-size: 14px; }
+.before-after h3 { margin: 0 0 8px; font: 600 15px var(--sans); text-transform: none; }
+.before-after dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; }
+.before-after dt { color: var(--muted); }
+.before-after dd { margin: 0; }
+.drawer-confirm button + button { margin-left: 8px; }
+.card-rerun { margin-left: auto; }
+.card-rerun + .card-remove { margin-left: 0; }
+#cabinetClear { white-space: nowrap; }

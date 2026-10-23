@@ -390,3 +390,10 @@ body { margin: 0; padding: 0 10mm; }
 /* Keep short lists with their lead-in heading rather than stranding the last item. */
 .prose h3 + ul, .prose h3 + ol, .prose h4 + ul, .prose h4 + ol { break-inside: avoid; }
 
+/* Inputs addendum §4: Recommended next steps inside What is missing, before the flags. The services URL is long
+   (Apps Script), so it sits on its own line and may break anywhere: it never overflows the margin. */
+.next-steps-title { margin-top: 3.5mm; }
+.next-steps-intro, .next-steps-path2 { margin: 0 0 2.5mm; }
+.next-steps-path2 { margin-top: 2.5mm; }
+.services-line { display: block; margin-top: 1mm; }
+.services-link { color: var(--ink); text-decoration: underline; overflow-wrap: anywhere; word-break: break-all; }

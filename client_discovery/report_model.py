@@ -11,6 +11,7 @@ import re
 from dataclasses import replace
 from datetime import date as _date
 
+from .inputs import next_step_from_gap, next_steps, next_steps_markdown
 from .models import ClientIntake, OpportunityScore, ValidationIssue
 
 CLIENT_PRICING_TEXT = "Contact for pricing"  # matches the site; tier price bands never reach client output
@@ -95,20 +96,23 @@ ISSUE_LABELS = {
     "missing_hourly_cost": "hourly cost",
     "missing_success_metric": "success metric",
 }
-FLAG_ACTIONS = {  # §2.4: every flag is written as the action that clears it
-    "VALUE_AT_STAKE_MISSING": "Ask for the weekly hours of each manual task and the loaded hourly cost (questions 1 and 2).",
-    "VALUE_AT_STAKE_PARTIAL": "Ask for the weekly hours of each manual task that has none, to complete the value at stake (question 1).",
-    "NO_SUCCESS_METRIC": "Agree on one success metric and its value today (question 3).",
-    "NO_OWNER": "Name the process owner and the person who signs off on the project (question 4).",
-    "DATA_CLEANUP_FIRST": "Plan data clean-up before the build starts (question 6).",
-    "SCOPE_RISK_SYSTEMS": ("Confirm login or application programming interface (API) access to every system "
-                           "before fixing the timeline (question 5)."),
-    "COMPLIANCE_REVIEW": "Have a person review every output before it is sent (question 8).",
-    "TRUST_REPAIR": "Propose a paid pilot on a single workflow, measured against one agreed metric (question 9).",
-    "HUMAN_IN_LOOP": "Write hand-off rules that route each listed exception to a named person (question 7).",
-    "SUPPORT_TERMS_NEEDED": "Agree on who maintains the system and what support follows launch (question 10).",
-    "ROI_WEAK": "Check the budget against the value at stake: the top of the budget exceeds twice the yearly value.",
+FLAG_ACTIONS = {  # §2.4: every flag is written as the action that clears it. Formal third person ({client}),
+    # because these lines reach the client PDF (code review on #39: no operator voice such as "Ask for...").
+    "VALUE_AT_STAKE_MISSING": "{client} should provide the weekly hours of each manual task and the loaded hourly cost (questions 1 and 2).",
+    "VALUE_AT_STAKE_PARTIAL": "{client} should provide the weekly hours of each manual task that has none, to complete the value at stake (question 1).",
+    "NO_SUCCESS_METRIC": "{client} should agree on one success metric and its value today (question 3).",
+    "NO_OWNER": "{client} should name the process owner and the person who signs off on the project (question 4).",
+    "DATA_CLEANUP_FIRST": "{client} should plan data clean-up before the build starts (question 6).",
+    "SCOPE_RISK_SYSTEMS": ("{client} should confirm login or application programming interface (API) access to every "
+                           "system before the timeline is fixed (question 5)."),
+    "COMPLIANCE_REVIEW": "A person should review every output before it is sent (question 8).",
+    "TRUST_REPAIR": "The engagement should start with a paid pilot on a single workflow, measured against one agreed metric (question 9).",
+    "HUMAN_IN_LOOP": "{client} should write hand-off rules that route each listed exception to a named person (question 7).",
+    "SUPPORT_TERMS_NEEDED": "{client} should agree on who maintains the system and what support follows launch (question 10).",
+    "ROI_WEAK": "The budget should be checked against the value at stake: the top of the budget exceeds twice the yearly value.",
 }
+# Addendum §4.3: when Recommended next steps are shown, they replace these flag actions in "Flags to clear first".
+INPUT_GAP_FLAGS = ("VALUE_AT_STAKE_MISSING", "VALUE_AT_STAKE_PARTIAL", "NO_SUCCESS_METRIC")
 SIGNALS = (  # fixed Exhibit 1 order
     ("urgency", "Urgency"),
     ("budget_fit", "Budget fit"),
@@ -188,9 +192,9 @@ def missing_answers(issues: list[ValidationIssue], flags: list[str]) -> list[tup
 
 
 def inputs_confidence(score: OpportunityScore, issues: list[ValidationIssue]) -> str:
-    """§3.5: thin = value missing or a lower bound, or 3+ required answers missing; partial = any flag or gap;
-    complete otherwise."""
-    if score.value_at_stake is None or score.value_at_stake_partial or len(issues) >= 3:
+    """§3.5: thin = value missing or 3+ required answers missing; partial = any flag or gap (a partial value at
+    stake, the "at least $X" lower bound, is partial per the approved spec); complete otherwise."""
+    if score.value_at_stake is None or len(issues) >= 3:
         return "thin"
     if score.flags or issues:
         return "partial"
@@ -245,7 +249,9 @@ def build_report(intake: ClientIntake, score: OpportunityScore, issues: list[Val
     client = intake.company_name.strip() or "The client"
     flags = list(score.flags)
     missing = missing_answers(issues, flags)
-    actions = [FLAG_ACTIONS[flag] for flag in flags if flag in FLAG_ACTIONS]
+    steps = next_steps(client, intake, score)  # addendum §4: None when no key input is missing
+    actions = [FLAG_ACTIONS[flag].format(client=client) for flag in flags
+               if flag in FLAG_ACTIONS and not (steps and flag in INPUT_GAP_FLAGS)]
     top = score.workflows[0] if score.workflows else None
     pending = _pending(intake, score)
     reasons = score.signal_reasons or {}
@@ -270,7 +276,10 @@ def build_report(intake: ClientIntake, score: OpportunityScore, issues: list[Val
     why = ["Why this tier:", ""] + [
         f"- {label} {getattr(score, key)}/5: {reasons.get(key, '')}." for key, label in SIGNALS[:3]
     ]
-    next_step = actions[0] if actions else "Confirm scope on a kickoff call."
+    if steps:
+        next_step = next_step_from_gap(client, steps["gaps"])
+    else:
+        next_step = actions[0] if actions else "Confirm scope on a kickoff call."
     summary = "\n\n".join(lines) + "\n\n" + "\n".join(why) + f"\n\nNext step: {next_step}"
 
     # 02 What is missing
@@ -283,6 +292,8 @@ def build_report(intake: ClientIntake, score: OpportunityScore, issues: list[Val
         missing_title = f"{_plural(len(missing), 'missing answer')} {verb} a firm quote: {_join(named)}"
     missing_body = ("\n".join(f"{i}. {sentence}" for i, (_, sentence) in enumerate(missing, 1))
                     if missing else "The questionnaire answers every required question.")
+    if steps:  # path 1 first, then the single path 2 sentence; before the flags (§4.1)
+        missing_body += "\n\n" + next_steps_markdown(steps)
     if actions:
         missing_body += "\n\n**Flags to clear first**\n\n" + "\n".join(f"- {action}" for action in actions)
 
@@ -433,6 +444,8 @@ def build_report(intake: ClientIntake, score: OpportunityScore, issues: list[Val
         "missing": [sentence for _, sentence in missing],
         "missing_labels": labels,
         "actions": actions,
+        "next_steps": steps,
+        "input_gaps": steps["gaps"] if steps else [],
         "action_titles": [s["title"] for s in sections if s["title"]],
         "inputs_confidence": inputs_confidence(score, issues),
         "sources": sources(client, date),

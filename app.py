@@ -12,6 +12,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
 from client_discovery.report_model import build_report, value_at_stake_text
+from client_discovery.inputs import CONSULTING_NAME, consulting_url
 from client_discovery.core import (
     client_score_dict,
     generate_documents,
@@ -75,6 +76,12 @@ def donate_url() -> str | None:
 def public_config() -> dict[str, object]:
     """Client-visible settings (no secrets)."""
     return {"donateUrl": donate_url()}
+
+
+def consulting_config() -> dict[str, object]:
+    """Inputs addendum §3.6/§5.3: the path 2 name and the optional services link for the pre-run prompt.
+    Served apart from /api/config so the Donate config stays untouched."""
+    return {"consultingName": CONSULTING_NAME, "consultingUrl": consulting_url()}
 
 
 def icon_file(path: str) -> Path | None:
@@ -155,6 +162,9 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/config":
             self.send_json(public_config())
+            return
+        if path == "/api/consulting":
+            self.send_json(consulting_config())
             return
         if path == "/api/agent/status":
             from agent_runtime import is_configured
