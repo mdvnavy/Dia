@@ -340,6 +340,12 @@ body[data-agent="open"] .viewport { justify-content: flex-start; }
 .app-tip:focus-within .tip-bubble,
 .app-tip.open .tip-bubble { opacity: 1; visibility: visible; }
 
+/* Phones: centre the bubble under its "i" and let it wrap, so the hidden bubble can't widen the page (on mobile
+ * browsers that overflow grows the layout viewport, which also broke the plus menu's fixed bottom sheet). */
+@media (max-width: 600px) {
+  .tip-bubble { left: 50%; translate: -50% 0; white-space: normal; width: max-content; max-width: min(240px, calc(100vw - 24px)); }
+}
+
 .nav-actions { display: flex; align-items: center; gap: 10px; margin-left: auto; }
 
 /* Takes the slot Tia uses for the signed-in email. */
@@ -530,23 +536,6 @@ body[data-stage="results"] .subtitle { font-size: 15px; margin-bottom: 1.75rem; 
 .action-btn.busy::after { width: 18px; height: 18px; margin: 0; }
 .action-btn:disabled:hover { transform: none; }
 
-.mic-btn {
-  flex: none;
-  width: 40px;
-  height: 40px;
-  padding: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--muted);
-}
-
-.mic-btn:hover { border-color: var(--border); color: var(--text); }
-.mic-btn[aria-pressed="true"] { border-color: var(--good); color: var(--good); }
-.mic-btn svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 
 .actions {
   display: flex;
@@ -929,3 +918,343 @@ html[data-theme="light"] .tittle::after { opacity: 1; }
 html[data-theme="light"] .action-btn { box-shadow: 0 4px 12px rgba(60, 66, 74, 0.18), inset 0 2px 2px rgba(255, 255, 255, 0.9), inset 0 -2px 3px rgba(60, 66, 74, 0.22); }
 html[data-theme="light"] .action-btn:hover,
 html[data-theme="light"] .action-btn:focus-visible { box-shadow: 0 6px 18px rgba(60, 66, 74, 0.24), 0 0 16px rgba(var(--accent-rgb), 0.45), inset 0 2px 3px #ffffff, inset 0 -2px 4px rgba(60, 66, 74, 0.28); }
+
+
+/* ==========================================================================
+   Intake tray + filing cabinet (feature/intake-tray-cabinet).
+   Motion for the cabinet stack lives in /static/cabinet-fan.css only.
+   ========================================================================== */
+:root { --control-focus: #c3c8cf; }                  /* new controls, dark: >=3:1 on #0c0c0e */
+html[data-theme="light"] { --control-focus: #5f6670; } /* new controls, light: >=3:1 on #f3f1ec */
+
+/* Icon slots: one source file per icon per set. Line icons stay silver-on-ink in
+   BOTH themes via a dedicated token (not the theme --accent). */
+.icon { display: grid; place-items: center; line-height: 0; --accent: var(--icon-accent, #A3A9B1); --mark: var(--icon-mark, #DFA81C); }
+.icon svg { width: 20px; height: 20px; }
+.icon .px { width: 32px; height: 32px; image-rendering: pixelated; image-rendering: crisp-edges; } /* 2x of 16px sprite */
+.icon-active { display: none; }
+.cabinet-btn.open .icon-idle,
+.tray-icon.drop-over .icon-idle { display: none; }
+.cabinet-btn.open .icon-active,
+.tray-icon.drop-over .icon-active { display: grid; }
+.cabinet { --fan-silver: #9EA4AC; }                  /* badge silver in both themes */
+.cabinet-btn { color: var(--text); }
+.cabinet-btn:hover { border-color: var(--fan-silver); }
+.cabinet-badge { position: absolute; top: -4px; right: -4px; box-shadow: 0 0 0 2px var(--bg); }
+
+/* Tray (upload) */
+.dock-row { display: flex; align-items: center; gap: 10px; margin: 0 4px 10px 4px; }
+/* Cabinet: far right of the dock row, mirroring the tray (same 44px box, radius and border). */
+.dock-row .cabinet { margin-left: auto; }
+.dock-row .cabinet-btn { width: 44px; height: 44px; border-radius: 12px; border-color: var(--border); background: var(--surface); }
+.dock-row .cabinet-btn:hover { border-color: #9EA4AC; }
+.dock-row .cabinet-btn:focus-visible { outline: 2px solid var(--control-focus); outline-offset: 2px; }
+/* Stack anchors to the cabinet's right edge (fan right:-6px in cabinet-fan.css) and drops down;
+   when there's no room below, JS sets data-drop="up" and --fan-up-top so it opens upward instead. */
+.cabinet[data-drop="up"] .fan { top: var(--fan-up-top, auto); }
+.dock-icon {
+  width: 44px; height: 44px; display: grid; place-items: center; padding: 0;
+  border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text);
+  cursor: pointer; transition: border-color 140ms linear, background-color 140ms linear;
+}
+.dock-icon:hover { border-color: #9EA4AC; }
+.dock-icon:focus-visible,
+.drawer button:focus-visible, .drawer input:focus-visible,
+.toast button:focus-visible, .file-chip button:focus-visible,
+#uploadLink:focus-visible, #uploadCancel:focus-visible, #downloadPdf:focus-visible { outline: 2px solid var(--control-focus); outline-offset: 2px; }
+.dock-icon.busy { opacity: 0.6; cursor: progress; }
+.dock-hint { color: var(--muted); font: 400 12px var(--mono, "JetBrains Mono", monospace); opacity: 0; transition: opacity 140ms linear; }
+.dock-row:hover .dock-hint, body.file-dragging .dock-hint { opacity: 1; }
+body.file-dragging .dock-hint::after { content: " · release to add"; }
+body.file-dragging .tray-icon { border-color: var(--icon-mark, #DFA81C); }
+/* Drag-over: dashed outline on the composer, no scrim. */
+body.file-dragging #intakeComposer { outline: 2px dashed var(--control-focus); outline-offset: 4px; }
+#intakeComposer.is-reading { opacity: 0.7; }
+.file-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px 4px; }
+.file-chip {
+  display: inline-flex; align-items: center; gap: 6px; padding: 3px 4px 3px 10px;
+  border: 1px solid var(--border); border-radius: 9999px; background: var(--surface);
+  color: var(--muted); font: 400 12px var(--mono, "JetBrains Mono", monospace);
+}
+.chip-x { border: 0; background: transparent; color: var(--muted); cursor: pointer; min-width: 24px; min-height: 24px; border-radius: 50%; }
+.intake-error { margin: 10px 4px 0; padding: 10px 14px; border: 1px solid #c2410c; border-radius: 10px; color: var(--text); background: rgba(194, 65, 12, 0.08); font-size: 14px; }
+.intake-error p { margin: 0; }
+.intake-error p + p { margin-top: 4px; }
+
+
+/* Cabinet drawer: right side, ~380px; bottom sheet on mobile */
+.drawer {
+  position: fixed; inset: 0 0 0 auto; margin: 0; width: min(380px, 100vw); max-width: 100vw; height: 100dvh; max-height: 100dvh;
+  padding: 20px; border: 0; border-left: 1px solid var(--border); background: var(--bg); color: var(--text);
+  box-shadow: -18px 0 48px rgba(0, 0, 0, 0.18); overflow-y: auto;
+}
+/* Drawer open/close motion lives in cabinet-fan.css (Glyph v4, SPRING_PANEL on `translate`). */
+.drawer::backdrop { background: rgba(0, 0, 0, 0.28); }
+.drawer-head { display: flex; align-items: center; gap: 8px; }
+.drawer-head h2 { margin: 0; flex: 1; font: 700 20px/1.3 var(--sans); }
+.drawer-head h2:focus { outline: none; }
+.drawer-sub { margin: 2px 0 14px; color: var(--muted); font: 400 12px var(--mono, monospace); }
+.drawer button { font: 500 13px var(--sans); color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; cursor: pointer; min-height: 32px; }
+.drawer button:hover { border-color: #9EA4AC; }
+.drawer button[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; }
+.drawer-select-bar { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; font-size: 13px; }
+.drawer-select-bar [aria-live] { margin-left: auto; color: var(--muted); font-family: var(--mono, monospace); }
+.drawer-note { margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; font-size: 13px; }
+.drawer-note p { margin: 0 0 8px; color: var(--muted); }
+.drawer-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.drawer-card article { display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.card-check { grid-row: 1 / span 2; align-self: start; padding-top: 2px; }
+.card-check[hidden] { display: none; }
+.card-check input { width: 18px; height: 18px; accent-color: #5f6670; }
+.card-body { grid-column: 2; min-width: 0; }
+.card-title { margin: 0; font: 500 14px/1.3 var(--sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card-meta, .card-exported { margin: 2px 0 0; color: var(--muted); font: 400 11px/1.4 var(--mono, monospace); }
+.card-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; }
+.card-actions[hidden] { display: none; }
+.card-remove { margin-left: auto; }
+.card-status { grid-column: 1 / -1; margin: 0; color: var(--muted); font-size: 12px; min-height: 0; }
+.card-status:empty { display: none; }
+.drawer-more { margin: 12px 0 0; width: 100%; }
+.drawer-foot { position: sticky; bottom: -20px; margin: 14px -20px -20px; padding: 12px 20px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; background: var(--bg); border-top: 1px solid var(--border); }
+.drawer-foot p { margin: 0; width: 100%; color: var(--muted); font-size: 12px; }
+.drawer-foot p[hidden] { display: none; }
+#cabinetAlert:empty { display: none; }
+#cabinetAlert { margin: 12px 0 0; color: var(--text); font-size: 13px; }
+@media (max-width: 600px) {
+  .drawer { inset: auto 0 0 0; width: 100vw; height: auto; max-height: 85dvh; border-left: 0; border-top: 1px solid var(--border); border-radius: 16px 16px 0 0; }
+  .drawer button, .card-check input { min-height: 44px; }
+  .card-check input { min-width: 24px; }
+}
+
+/* Toast */
+.toast {
+  /* Glyph nit: top-centre, 64px below the top (plus the notch inset); centred on `translate` so the toast keyframes (transform) don't fight it. */
+  position: fixed; left: 50%; top: calc(64px + env(safe-area-inset-top, 0px)); bottom: auto; z-index: 60; translate: -50% 0;
+  display: flex; align-items: center; gap: 10px; max-width: min(560px, calc(100vw - 32px));
+  padding: 10px 10px 10px 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22); font-size: 14px;
+}
+.toast[hidden] { display: none; }
+#toastActions { display: flex; gap: 6px; }
+.toast button { border: 1px solid var(--border); border-radius: 8px; background: transparent; color: var(--text); padding: 5px 10px; cursor: pointer; font: 500 13px var(--sans); }
+#toastClose { border: 0; font-size: 16px; }
+
+/* Mobile bottom sheet: same SPRING_PANEL tokens as cabinet-fan.css, but sliding up instead of in from the right. */
+@media (prefers-reduced-motion: no-preference) and (max-width: 600px) {
+  .drawer.cabinet-drawer { translate: 0 100%; }
+  .drawer.cabinet-drawer[open] { translate: 0 0; }
+  @starting-style { .drawer.cabinet-drawer[open] { translate: 0 100%; } }
+}
+.drawer [hidden], .dock-row [hidden], .file-chips[hidden], .intake-error[hidden] { display: none !important; }
+
+/* Help & settings: Icon style segmented control (glyph/icon-setting.md) */
+.help-settings { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); }
+.help-settings h3 { margin: 0 0 10px; font: 600 15px var(--sans); text-transform: none; }
+.setting-note { margin: 8px 0 0 !important; font-size: 12px; }
+.icon-style-control { display: inline-flex; gap: 4px; padding: 4px; border: 1px solid var(--border); border-radius: 12px; background: var(--raised, var(--surface)); --accent: #A3A9B1; }
+.icon-style-option { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px 6px 8px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--muted); font: 500 13px var(--sans); cursor: pointer; }
+.icon-style-option .icon svg { width: 32px; height: 32px; }
+.icon-style-option[aria-checked="true"] { background: var(--surface); border-color: #9EA4AC; color: var(--text); font-weight: 600; }
+html:not([data-theme="light"]) .icon-style-option[aria-checked="true"] { background: #2a2a2e; border-color: #A3A9B1; }
+.icon-style-option:focus-visible { outline: 2px solid #7C828A; outline-offset: 2px; }
+html:not([data-theme="light"]) .icon-style-option:focus-visible { outline-color: #D9DCE0; }
+/* Badge + count stay silver in both themes (dark --accent-deep is gold). */
+.cabinet .cabinet-badge, .cabinet .fan-count { background: #9EA4AC; }
+#cabinetSelectAll { width: 18px; height: 18px; accent-color: #5f6670; }
+@media (max-width: 600px) {
+  .icon-style-control { display: flex; width: 100%; }
+  .icon-style-option { flex: 1; justify-content: center; min-height: 44px; }
+}
+
+
+/* ==========================================================================
+   Web letterhead band. Source: glyph/web-letterhead.css (2026-10-23 04:06), verbatim below,
+   then DIA additions (centred clock + date, send-button silver). Inlined here rather than
+   a new /static file so the running preview picks it up without a server restart.
+   ========================================================================== */
+/* DIA web letterhead band: the PDF's tucked-letterhead system, ported to the top bar.
+ * Plain CSS. Uses the app's own tokens from static/style.css (--bg, --text, --muted,
+ * --border, --raised, --mono, --sans); nothing here adds a new colour.
+ *
+ * PDF  -> web
+ *   10mm corner inset (half the 20mm page margin)  -> --lh-inset, equal to the page's own
+ *        side padding (.viewport: 1rem mobile, 2rem desktop), so the band sits in the page
+ *        margin and the content column (900px nav / 720px composer) stays well inside it.
+ *   7pt mono caps, 0.1em tracking, muted          -> 11px JetBrains Mono 500, caps, 0.1em, --muted
+ *   0.5pt silver hairline spanning the insets     -> 1px --border rule from inset to inset
+ *
+ * The band escapes .viewport's padding with negative margins, so the markup can stay
+ * where it is (first child of <main class="viewport">).
+ */
+
+:root {
+  --lh-inset: clamp(16px, 2.5vw, 32px);   /* 16px at <=640px, 32px at >=1280px */
+  --lh-band: 52px;                        /* band height; hairline sits on its bottom edge */
+  --lh-target: 28px;                      /* desktop hit target (>= 24px) */
+  --lh-gap: 20px;                         /* space between corner items */
+  --lh-type: 500 11px/1 var(--mono);
+  --lh-track: 0.1em;
+  --lh-ink: var(--muted);                 /* corner text */
+  --lh-ink-hover: var(--text);
+  --lh-rule: var(--border);               /* hairline */
+  --lh-ring: #c3c8cf;                     /* dark: app --control-focus, >= 3:1 on #0c0c0e */
+}
+html[data-theme="light"] {
+  --lh-ring: #7C828A;                     /* light: same ring as the cabinet fan-out */
+}
+@media (max-width: 600px) {
+  :root { --lh-band: 56px; --lh-target: 44px; --lh-gap: 4px; }
+}
+
+/* ---- Band ---- */
+.top-nav.lh {
+  align-self: stretch;
+  width: auto;
+  max-width: none;
+  /* .viewport padding is 2.5rem 2rem (1.25rem 1rem on mobile); pull the band up to the
+     top edge and out to the inset. */
+  margin: -2.5rem calc(var(--lh-inset) - 2rem) 0;
+  height: var(--lh-band);
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: nowrap;
+  gap: var(--lh-gap);
+  border-bottom: 1px solid var(--lh-rule);
+  font: var(--lh-type);
+  letter-spacing: var(--lh-track);
+  text-transform: uppercase;
+  color: var(--lh-ink);
+}
+@media (max-width: 600px) {
+  .top-nav.lh { margin: -1.25rem calc(var(--lh-inset) - 1rem) 0; }
+}
+
+.lh-corner { display: flex; align-items: center; gap: var(--lh-gap); min-width: 0; }
+.lh-corner--left { gap: 10px; }
+
+/* Every interactive corner item: same type, quiet by default, ink on hover. */
+.lh-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--lh-target);
+  padding: 0 4px;
+  margin: 0 -4px;                         /* keeps text flush with the inset */
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--lh-ink);
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+.lh-control:hover { color: var(--lh-ink-hover); }
+.lh-control:focus-visible,
+.lh-control.is-focus {                    /* .is-focus: mock only, to show the ring in a still */
+  outline: 2px solid var(--lh-ring);
+  outline-offset: 2px;
+  color: var(--lh-ink-hover);
+}
+.lh-control svg {
+  width: 14px; height: 14px; flex: none;
+  fill: none; stroke: currentColor; stroke-width: 2;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+
+/* Left: menu trigger (was "DIA ▾") reads as the PDF band label. */
+.lh-trigger { color: var(--text); }
+.lh-trigger svg { width: 12px; height: 12px; }
+.lh-trigger[aria-expanded="true"] svg { transform: rotate(180deg); }
+
+/* Left, second item: the stage (was the breadcrumb). Quiet, not interactive. */
+.lh-sep { color: var(--lh-rule); }
+.lh-stage { white-space: nowrap; }
+.lh-tip.info-tip {                        /* existing ? button, now 24px so it meets the target */
+  width: 24px; height: 24px; margin: 0 0 0 -4px; padding: 0;
+  border: 1px solid var(--lh-rule); border-radius: 50%;
+  justify-content: center; font-size: 10px; letter-spacing: 0;
+}
+
+/* Right: date, Search actions, theme. */
+.lh-date { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.lh-search kbd.kbd-hint {
+  padding: 2px 5px;
+  border-bottom-width: 1px;
+  font: 500 10px/1.3 var(--mono);
+  letter-spacing: 0.04em;
+  text-transform: none;
+}
+.lh-search .lh-search-icon { display: none; }
+.lh-theme { width: var(--lh-target); justify-content: center; padding: 0; margin: 0 -6px 0 0; }
+.lh-theme svg { width: 15px; height: 15px; }
+
+/* Menu: anchored to the band, flush with the left inset. */
+.lh .nav-dropdown { top: calc(100% + 1px); margin-top: 8px; text-transform: none; letter-spacing: 0; }
+.lh-menu-context { display: none; }       /* stage + full-name lines, mobile only */
+
+/* ---- Mobile collapse (<= 600px) ---- */
+@media (max-width: 600px) {
+  .lh-sep, .lh-stage, .lh-tip, .lh-date { display: none; }
+  .lh-control { padding: 0 8px; margin: 0 -8px; }
+  .lh-search { width: var(--lh-target); justify-content: center; padding: 0; margin: 0; }
+  .lh-search .lh-search-label, .lh-search kbd { display: none; }
+  .lh-search .lh-search-icon { display: block; width: 18px; height: 18px; }
+  .lh-theme { margin: 0 -10px 0 0; }
+  .lh-theme svg { width: 18px; height: 18px; }
+  .lh .nav-dropdown { width: min(280px, calc(100vw - 2 * var(--lh-inset))); }
+  .lh .dropdown-item { min-height: 44px; }
+  .lh-menu-context {
+    display: block;
+    padding: 8px 14px 10px;
+    margin-bottom: 4px;
+    border-bottom: 1px solid var(--border);
+    color: var(--muted);
+    font: 500 10px/1.6 var(--mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .lh-menu-context .lh-menu-stage { color: var(--text); }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .lh-trigger svg { transition: transform 200ms ease; }
+  .lh-control { transition: color 140ms linear; }
+}
+
+
+/* ---- DIA additions (Ikenna): live clock above the date, centred in the band ---- */
+.top-nav.lh { position: relative; }
+.lh-centre {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  text-align: center; line-height: 1; white-space: nowrap; pointer-events: none;
+}
+.lh-time { color: var(--text); font-variant-numeric: tabular-nums; }
+.lh-centre .lh-date { color: var(--lh-ink); font-size: 10px; }
+.top-nav.lh .lh-tip { opacity: 1; }
+/* The date no longer lives on the right, so the right corner is Search actions + theme only. */
+@media (max-width: 600px) {
+  /* Mobile: keep the time, compact and centred in the space between the corners; the date is hidden (Glyph §5). */
+  .lh-centre { position: static; transform: none; flex: 1 1 auto; min-width: 0; }
+}
+@media (max-width: 374px) { .lh-centre { display: none; } }   /* under 375px there is no clear gap beside the trigger + two 44px icons */
+
+/* Send button: silvery grey in BOTH themes (Ikenna). Light already uses the silver send tokens;
+   dark gets the same silver so its gold accent no longer tints the fill or the glow. */
+html:not([data-theme="light"]) .action-btn {
+  --accent-rgb: 163, 169, 177;
+  --send-from: #E6E8EB;
+  --send-to: #B8BDC4;
+  --send-hover-from: #CDD1D6;
+  --send-hover-to: #9EA4AC;
+  --on-accent: #16150f;
+}
+
+/* Composer mic, Run (enter) and the voice-options notch: glyph/composer-icons.css (static/composer-icons.css)
+   plus the app wiring in static/composer.css, both loaded after this file. */
+.action-btn .icon { --accent: currentColor; }
+.action-btn .icon .px { width: 32px; height: 32px; }
+.action-btn.busy .icon { display: none; }

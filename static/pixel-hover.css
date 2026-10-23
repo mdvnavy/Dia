@@ -1,0 +1,18 @@
+/* DIA pixel sprites: display + tiny hover "pop".
+ * Usage: <button class="px-btn" aria-label="Cabinet"><img class="px" src="b-cabinet.svg" width="32" height="32" alt=""></button>
+ * Only integer scales (16, 32, 48 px) keep pixels square. Never 20/24 px.
+ */
+.px { image-rendering: pixelated; image-rendering: crisp-edges; display: block; }
+.px-btn .px { transition: transform 160ms steps(2, end); }
+.px-btn:hover .px,
+.px-btn:focus-visible .px { transform: translateY(calc(-1px * var(--px-scale, 2))); }  /* one sprite pixel */
+
+/* Optional 2-frame idle bob while a file is dragged over the tray */
+@keyframes px-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(calc(-1px * var(--px-scale, 2))); } }
+.px-btn[data-drag="over"] .px { animation: px-bob 400ms steps(1, end) infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .px-btn .px { transition: none; }
+  .px-btn:hover .px, .px-btn:focus-visible .px { transform: none; }
+  .px-btn[data-drag="over"] .px { animation: none; }
+}
