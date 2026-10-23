@@ -19,6 +19,7 @@
   --accent-deep: #a88a4f;
   --on-accent: #16150f;
   --accent-ink: var(--accent-strong);
+  --mark: var(--accent);
   --send-from: rgba(var(--accent-rgb), 0.95);
   --send-to: var(--accent-deep);
   --send-hover-from: var(--accent-strong);
@@ -47,21 +48,22 @@ html[data-theme="light"] {
   --text: #16150f;
   --soft: #2e2c27;
   --muted: #56524b;
-  /* Mustard accent: clearly yellow, never brown. */
-  --accent: #DFA81C;
-  --accent-strong: #EBB52A;
+  /* Brushed-silver accent. */
+  --accent: #A3A9B1;
+  --accent-strong: #D9DCE0;
   --good: #1a5f33;
 
-  --accent-rgb: 223, 168, 28;
-  --accent-deep: #C9920E;
+  --accent-rgb: 163, 169, 177;
+  --accent-deep: #9EA4AC;
   --on-accent: #16150f;
-  /* Mustard is too light for text on cream, so accent text stays ink-dark
-     and the mustard shows through fills, borders and underlines. */
+  /* Silver is too light for text on cream, so accent text stays ink-dark
+     and the silver shows through fills, borders and underlines. */
   --accent-ink: #16150f;
-  --send-from: #EBB52A;
-  --send-to: #DFA81C;
-  --send-hover-from: #DFA81C;
-  --send-hover-to: #C9920E;
+  --mark: #DFA81C;
+  --send-from: #E6E8EB;
+  --send-to: #B8BDC4;
+  --send-hover-from: #CDD1D6;
+  --send-hover-to: #9EA4AC;
   --glass-top: rgba(255, 255, 255, 0.65);
   --glass-mid: rgba(255, 255, 255, 0.22);
   --glass-bot: rgba(255, 255, 255, 0.45);
@@ -388,7 +390,7 @@ body[data-agent="open"] .center-stage { margin-top: 3rem; }
 .title-brand.liquid-active { filter: url(#liquidFilter); }
 
 /* Tiny BASH mark riding above the I, like Tia's tittle easter egg. */
-.tittle { position: relative; display: inline-block; }
+.tittle { position: relative; display: inline-block; letter-spacing: 0; margin-right: -0.04em; }
 .tittle::after {
   content: 'BASH';
   position: absolute;
@@ -397,7 +399,10 @@ body[data-agent="open"] .center-stage { margin-top: 3rem; }
   transform: translateX(-50%);
   font: 700 4px var(--mono);
   letter-spacing: 0.08em;
-  color: var(--accent);
+  padding-left: 0.08em; /* balance the trailing letter-spacing */
+  white-space: nowrap;
+  line-height: 1;
+  color: var(--mark);
   opacity: 0.9;
   pointer-events: none;
 }
@@ -895,10 +900,13 @@ body[data-stage="results"] .footer-note { margin-top: 2rem; }
   .results-summary { grid-template-columns: 1fr; }
 }
 
-/* Light mode: make the mustard visible where accent text went ink-dark. */
+/* Light mode: make the silver visible where accent text went ink-dark. */
 html[data-theme="light"] .tab.active { background: rgba(var(--accent-rgb), 0.30); border-color: var(--accent); }
 html[data-theme="light"] .palette-item[aria-selected="true"] { background: rgba(var(--accent-rgb), 0.30); box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.6); }
 html[data-theme="light"] .dropdown-item:hover,
 html[data-theme="light"] .dropdown-item:focus-visible { background: rgba(var(--accent-rgb), 0.22); }
 html[data-theme="light"] .text-link:hover { border-bottom: 2px solid var(--accent); }
-html[data-theme="light"] .tittle::after { color: var(--accent-deep); opacity: 1; }
+html[data-theme="light"] .tittle::after { opacity: 1; }
+html[data-theme="light"] .action-btn { box-shadow: 0 4px 12px rgba(60, 66, 74, 0.18), inset 0 2px 2px rgba(255, 255, 255, 0.9), inset 0 -2px 3px rgba(60, 66, 74, 0.22); }
+html[data-theme="light"] .action-btn:hover,
+html[data-theme="light"] .action-btn:focus-visible { box-shadow: 0 6px 18px rgba(60, 66, 74, 0.24), 0 0 16px rgba(var(--accent-rgb), 0.45), inset 0 2px 3px #ffffff, inset 0 -2px 4px rgba(60, 66, 74, 0.28); }
