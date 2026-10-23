@@ -15,7 +15,7 @@ def test_unset_or_unsafe_values_hide_donate(monkeypatch, value):
 
 def test_default_is_the_paypal_payment_link(monkeypatch):
     monkeypatch.delenv("DIA_DONATE_URL", raising=False)
-    assert app.public_config() == {"donateUrl": "https://www.paypal.com/ncp/payment/PQGR9B44BEYLU"}
+    assert app.public_config() == {"donateUrl": "https://www.paypal.com/ncp/payment/5UFVJBMWWKRBY"}
 
 
 def test_env_overrides_the_default(monkeypatch):

@@ -54,7 +54,7 @@ ICON_PATH = re.compile(r"^/static/icons/((?:[a-z0-9-]{1,32}/)?[a-z0-9][a-z0-9@-]
 
 
 # Ikenna's PayPal payment link (a plain GET opens the payment page). DIA_DONATE_URL overrides it; setting DIA_DONATE_URL to an empty value hides Donate.
-DEFAULT_DONATE_URL = "https://www.paypal.com/ncp/payment/PQGR9B44BEYLU"
+DEFAULT_DONATE_URL = "https://www.paypal.com/ncp/payment/5UFVJBMWWKRBY"
 
 
 def donate_url() -> str | None:
