@@ -75,16 +75,19 @@ def check_golden(result: dict, golden: dict) -> tuple[float, list[str]]:
     return sum(ok for _, ok in checks) / len(checks), failures
 
 
+# dia-savant v1.0: the documents follow the answer-first report order (§3.1). Updated with the templates;
+# the experiment loop still treats this file as read-only.
 REQUIRED_SECTIONS = {
     "client-profile.md": [
-        "## Overview", "## Current Tools", "## Decision Context", "## Notes",
+        "## Client profile", "### Overview", "### Current tools", "### Decision context", "### Notes",
+        "## Pain points and goals",
     ],
     "opportunity-analysis.md": [
-        "## Pain Points", "## Goals", "## Recommendation", "## Score Reasons",
+        "## Summary", "## What is missing", "## Recommendation", "## Why this tier",
+        "## Top workflows by value at stake",
     ],
     "proposal-draft.md": [
-        "## Executive Summary", "## Recommended Solution", "## Delivery Plan",
-        "## Investment", "## Next Step",
+        "## Delivery plan and investment", "### Delivery plan", "### Investment", "## Method and sources",
     ],
 }
 PLACEHOLDERS = ("TBD", "Unknown", "None listed", "None provided")
@@ -116,9 +119,9 @@ def check_rubric(result: dict) -> tuple[float, list[str]]:
              intake.pain_points[0] in docs.get("proposal-draft.md", ""))
         )
     if intake.goals:
-        analysis = docs.get("opportunity-analysis.md", "")
+        goals_doc = docs.get("client-profile.md", "")  # "Pain points and goals" (dia-savant §3.1)
         checks.append(
-            ("goal_grounding", all(goal in analysis for goal in intake.goals))
+            ("goal_grounding", all(goal in goals_doc for goal in intake.goals))
         )
     lo, hi = DOC_LENGTH_BOUNDS
     checks.append(

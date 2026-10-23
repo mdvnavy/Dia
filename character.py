@@ -7,12 +7,14 @@ from google.adk.agents.llm_agent import LlmAgent
 from google.genai import types
 
 from client_discovery.core import (
+    client_score_dict,
     generate_documents,
     parse_questionnaire_markdown,
     score_opportunity,
     validate_intake,
 )
 from client_discovery import memory
+from client_discovery.agent_instruction import AGENT_INSTRUCTION
 from vertex_config import is_vertex_configured, vertex_gemini
 
 REPO_ROOT = Path(__file__).resolve().parent
@@ -40,7 +42,7 @@ def validate_intake_fields(questionnaire_markdown: str) -> list[dict]:
 def score_client_opportunity(questionnaire_markdown: str) -> dict:
     """Score a parsed intake and recommend the project tier."""
     intake = parse_questionnaire_markdown(questionnaire_markdown)
-    return score_opportunity(intake).__dict__
+    return client_score_dict(score_opportunity(intake))  # no tier price band: the agent must not quote one
 
 
 def generate_intake_documents(questionnaire_markdown: str) -> dict:
@@ -142,6 +144,18 @@ def _gcp_mcp_toolset() -> list:
     ]
 
 
+# gemini-2.5-flash was retired on Vertex AI on 2026-10-20; gemini-3.8-flash is the
+# listed replacement (https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/model-versions).
+# On Vertex it is served from the "global" location (and the us / eu multi-regions),
+# not us-central1. DIA_MODEL still overrides it without a code change.
+DEFAULT_MODEL = "gemini-3.8-flash"
+
+
+def agent_model() -> str:
+    """The model id for Ask DIA: DIA_MODEL when set (non-blank), else DEFAULT_MODEL."""
+    return os.environ.get("DIA_MODEL", "").strip() or DEFAULT_MODEL
+
+
 def build_agent(
     *, include_make_mcp: bool = False, include_gcp_mcp: bool = False
 ) -> LlmAgent:
@@ -172,33 +186,9 @@ def build_agent(
         # Overridable so deploys can pin a model and local testing can dodge
         # per-model free-tier quotas without a code change.
         # Always a Vertex AI client (house rule): never the API-key endpoint.
-        model=vertex_gemini(os.environ.get("DIA_MODEL", "gemini-2.5-flash")),
+        model=vertex_gemini(agent_model()),
         name="dia_discovery_intake_agent",
-        instruction="""
-        You are DIA, the discovery intake agent for a startup services team.
-
-        Mission:
-        - Convert a founder or prospect questionnaire into a structured discovery profile.
-        - Identify missing fields before a proposal is trusted.
-        - Score the opportunity with transparent reasons.
-        - Generate practical markdown outputs: client profile, opportunity analysis, and proposal draft.
-
-        Operating rules:
-        - Use only fictional or user-provided demo data.
-        - Do not expose secrets, private client data, or unrelated internal product material.
-        - Ask targeted follow-up questions when budget, decision maker, start date, goals, or pain points are missing.
-        - Keep recommendations grounded in the scoring tool output.
-        - When Make toolbox tools are available and an intake is qualified (or the
-          user asks for follow-up actions), use them to execute the handoff, e.g.
-          lead automation. Report exactly which tool ran and what it returned.
-        - When GCP Cloud tools are available (monitoring, logging, etc.), use them
-          for operational questions about the agent itself, e.g. its own request
-          metrics or recent errors. Report exactly which tool ran and what it returned.
-        - When the recall_client_history tool is available and an intake names a
-          company, check for prior history before drafting recommendations. If the
-          client is known, reference the prior engagement context (last tier, prior
-          pain points, proposal status) instead of treating them as brand new.
-    """,
+        instruction=AGENT_INSTRUCTION,
         generate_content_config=types.GenerateContentConfig(
             http_options=types.HttpOptions(
                 retry_options=types.HttpRetryOptions(

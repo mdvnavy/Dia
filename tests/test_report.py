@@ -36,7 +36,7 @@ def test_context_has_the_template_placeholders(result):
     assert context["tier_name"] == "Custom AI Agent"
     assert isinstance(context["missing"], list)
     assert "<h2>" not in context["profile_html"]  # doc headings are nested under the section heading
-    assert "<h3>Overview</h3>" in context["profile_html"]
+    assert "<h4>Overview</h4>" in context["profile_html"]
 
 
 def test_missing_details_come_from_validation_issues():
@@ -47,7 +47,7 @@ def test_missing_details_come_from_validation_issues():
 
 def test_html_contains_sections_and_brand(result):
     html = report.render_html(result, report_date="October 23, 2026")
-    for text in ("Northstar Studio", "October 23, 2026", ">B<", "/20", "Profile", "Analysis", "Proposal"):
+    for text in ("Northstar Studio", "October 23, 2026", ">B<", "/20", "Summary", "Client profile", "Delivery plan and investment"):
         assert text in html
     css = (report.TEMPLATE_DIR / "intake-report.css").read_text(encoding="utf-8")
     assert "Made by BASH" in css
