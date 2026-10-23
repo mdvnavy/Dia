@@ -157,24 +157,54 @@ python app.py   # forwarded port 8080
 
 ## Live agent access
 
-`/api/agent` spends Gemini quota and can reach MCP tools, so it is **secure by
-default** (see `agent_auth.py`):
+Interim policy until DIA has proper accounts (`agent_auth.py`, `agent_quota.py`):
 
-| Config | Who can call `/api/agent` |
-| ------ | ------------------------- |
-| `DIA_AGENT_TOKEN` set | Requests with `Authorization: Bearer <token>` (or `X-DIA-Agent-Token`). Everything else: 401. |
-| `DIA_IAP_AUDIENCE` set | Requests with a valid, verified IAP JWT (`X-Goog-IAP-JWT-Assertion`) for that audience. |
-| Neither (local dev) | Loopback clients only (`127.0.0.1` / `::1`). On Cloud Run (`K_SERVICE` set) every call is refused. |
+| Who | Ask DIA (`/api/agent`) |
+| --- | ---------------------- |
+| Visitors | Open, no sign-in. **10 questions per visitor per calendar day (America/New_York)**, then a friendly 429: "You've used today's 10 questions. Come back tomorrow!" |
+| Owner | Unlimited. Paste the owner key once in **Help & settings → Owner sign-in** (or *Owner sign-in* under Ask DIA on older layouts). It's kept in that browser's localStorage and sent as `Authorization: Bearer <key>`; the server compares it with `DIA_OWNER_TOKEN` in constant time. A wrong key gets a 401, never silent visitor mode. |
 
-Local development needs no setup: run `python app.py` and use the UI on
-`http://127.0.0.1:8080`. Opening the app from another machine (e.g. a LAN IP
-or a Codespaces port forward) requires `DIA_AGENT_TOKEN`.
+**Who is a "visitor"?** Each question is charged to two buckets and allowed only
+if both are under the limit: the client IP (on Cloud Run the right-most
+`X-Forwarded-For` hop, which Google appends; the left-most hops are
+client-supplied and ignored; IPv6 is collapsed to its /64) and a random
+`dia_vid` cookie (HttpOnly, SameSite=Lax, Secure on Cloud Run). Clearing
+cookies doesn't reset the cap (the IP bucket is full), and nor does switching
+networks with the same browser (the cookie bucket is). Keys are stored as
+salted HMAC-SHA256 hashes (`DIA_VISITOR_SALT`), never raw IPs. People sharing
+one IP (an office NAT) share its 10 questions.
 
-`/api/agent` is also rate-limited per client IP (`DIA_AGENT_RATE_LIMIT`,
-default `10/60`; in-memory, per instance). MCP toolsets are attached only via
-`DIA_AGENT_MCP_MODE` (`none` by default, or `make`, `gcp`, `all`); words in a
-prompt never switch tools on. The deterministic `/api/process` path is
-unaffected by all of this.
+**Where counts live.** `DIA_QUOTA_STORE=firestore` keeps counters in
+Firestore (one atomic `commit` with an increment transform per question;
+documents in `dia_agent_quota` carry `expire_at` for a TTL policy), so the cap
+holds across Cloud Run instances. Without it the counters are **in memory, per
+instance, and lost when an instance restarts**: a visitor can get up to
+`10 x instances` questions a day, plus a fresh 10 whenever Cloud Run recycles
+an instance. If you run without Firestore, keep `--max-instances` at 1–2.
+
+**If Firestore is down** the question is counted in the in-memory store
+instead (fail-soft): visitors aren't locked out by an outage, and spend is
+still capped (per instance), never unlimited.
+
+Only questions that actually reach Gemini are charged: empty messages and
+"agent not configured" replies are free. A short per-IP burst guard
+(`DIA_AGENT_RATE_LIMIT`, default `10/60`, in memory) also stays in front, so
+scripted clients and wrong owner keys are throttled before touching the quota
+store. The owner bypasses both.
+
+MCP toolsets are attached only via `DIA_AGENT_MCP_MODE` (`none` by default, or
+`make`, `gcp`, `all`); words in a prompt never switch tools on. The
+deterministic `/api/process` path is unaffected by all of this.
+
+| Variable | Default | Purpose |
+| -------- | ------- | ------- |
+| `DIA_OWNER_TOKEN` | unset | Owner key (≥32 chars, from Secret Manager). Unset = no owner bypass. |
+| `DIA_AGENT_DAILY_LIMIT` | `10` | Questions per visitor per day (`0` = visitors can't use Ask DIA). |
+| `DIA_QUOTA_STORE` | `memory` | `firestore` for a cap shared across instances. |
+| `DIA_FIRESTORE_PROJECT` / `DIA_FIRESTORE_DATABASE` / `DIA_FIRESTORE_COLLECTION` | ADC project / `(default)` / `dia_agent_quota` | Firestore location. |
+| `DIA_VISITOR_SALT` | built-in | Secret salt for hashing visitor keys (set it in production). |
+| `DIA_AGENT_RATE_LIMIT` | `10/60` | Burst guard, calls/seconds per IP (`0` disables). |
+| `DIA_TRUST_FORWARDED_FOR` | off | Trust `X-Forwarded-For` off Cloud Run (behind your own proxy). |
 
 ## Submission hygiene
 
