@@ -248,7 +248,7 @@
           <button id="autoSpeak" class="chip-button speech-only" type="button" aria-pressed="false">Auto-speak: off</button>
         </div>
         <div class="response-area">
-          <div class="response-header"><span class="ai-speaker">DIA</span> <span id="agentAiLabel" class="ai-label" hidden>AI draft · review before sending</span></div>
+          <div class="response-header"><span class="ai-speaker">DIA</span> <span id="agentAiLabel" class="ai-label" title="Drafted by Gemini. Scoring is deterministic and doesn&#39;t use AI." aria-description="Drafted by Gemini. Scoring is deterministic and doesn&#39;t use AI." hidden>AI draft · review before sending</span></div>
           <pre id="agentOutput" class="response-text ai-text" aria-live="polite" aria-label="Agent reply">Run an intake and I'll flag gaps and draft follow-ups.</pre>
           <div class="ai-actions">
             <button id="agentCancel" class="text-link" type="button" hidden>Cancel</button>
@@ -272,7 +272,7 @@
             <!-- Follow-up drafter (persona-ux.md v1.2 §3): Guided mode, Gemini connected, and only when there are issues. -->
             <div class="followup" id="followupRow" hidden>
               <button id="draftFollowups" class="text-link" type="button" aria-describedby="followupLabel">Draft follow-up questions</button>
-              <span id="followupLabel" class="ai-label">AI draft · review before sending</span>
+              <span id="followupLabel" class="ai-label" title="Drafted by Gemini. Scoring is deterministic and doesn&#39;t use AI." aria-description="Drafted by Gemini. Scoring is deterministic and doesn&#39;t use AI.">AI draft · review before sending</span>
             </div>
           </div>
         </div>

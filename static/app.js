@@ -205,6 +205,55 @@ const followupRow = document.querySelector("#followupRow");
 const draftFollowups = document.querySelector("#draftFollowups");
 const assistantOptions = [...document.querySelectorAll(".assistant-option")];
 let agentController = null;
+// Off mode also turns off voice input (speech recognition); Listen and Auto-speak are local speechSynthesis and stay on.
+const VOICE_OFF_NOTE = "Voice input is off in Off mode.";
+let voiceReady = false; // set once the mics and voice fans exist
+
+// Same pattern as an unsupported browser: aria-disabled (still focusable), the note via aria-describedby and the tooltip.
+// If the browser has no speech recognition, the mics are already disabled with their own note, so they're left alone.
+function applyVoiceOff() {
+  if (!voiceReady || !SpeechRecognitionImpl) return;
+  const off = assistantMode === "off";
+  [intakeMic, micButton].forEach((button) => {
+    if (!button || (button.dataset.offMode === "true") === off) return;
+    const wrap = button.closest(".composer");
+    const note = wrap?.querySelector("[id$='MicNote']");
+    const tip = wrap?.querySelector(".cmp-tip-mic");
+    if (off) {
+      if (button.getAttribute("aria-pressed") === "true") cancelRecognition();
+      button.dataset.offMode = "true";
+      button.dataset.describedby = button.getAttribute("aria-describedby") || "";
+      button.setAttribute("aria-disabled", "true");
+      if (note) { note.dataset.text = note.textContent; note.textContent = VOICE_OFF_NOTE; button.setAttribute("aria-describedby", note.id); }
+      if (tip) { tip.dataset.html = tip.innerHTML; tip.textContent = VOICE_OFF_NOTE; }
+    } else {
+      delete button.dataset.offMode;
+      button.removeAttribute("aria-disabled");
+      if (button.dataset.describedby) button.setAttribute("aria-describedby", button.dataset.describedby);
+      else button.removeAttribute("aria-describedby");
+      if (note && note.dataset.text) note.textContent = note.dataset.text;
+      if (tip && tip.dataset.html) tip.innerHTML = tip.dataset.html;
+    }
+  });
+  document.querySelectorAll(".voice-item[id$='FanConversation']").forEach((item) => {
+    if ((item.dataset.off === "true") === off) return;
+    if (off) {
+      item.dataset.off = "true";
+      item.dataset.label = item.getAttribute("aria-label");
+      item.setAttribute("aria-disabled", "true");
+      item.setAttribute("aria-label", `${item.dataset.label} (${VOICE_OFF_NOTE.toLowerCase().replace(/\.$/, "")})`);
+      const note = document.createElement("span");
+      note.className = "voice-note voice-off-note";
+      note.textContent = VOICE_OFF_NOTE;
+      item.querySelector(".voice-label").append(note);
+    } else {
+      delete item.dataset.off;
+      item.removeAttribute("aria-disabled");
+      item.setAttribute("aria-label", item.dataset.label);
+      item.querySelector(".voice-off-note")?.remove();
+    }
+  });
+}
 
 function applyAssistantMode() {
   document.documentElement.dataset.assistant = assistantMode;
@@ -217,6 +266,7 @@ function applyAssistantMode() {
     agentController?.abort();
     if (document.body.dataset.agent === "open") delete document.body.dataset.agent;
   }
+  applyVoiceOff();
   refreshFollowupButton();
 }
 
@@ -1006,6 +1056,7 @@ function attachDictation(button, textarea, { continuous = true, intercept, label
     rec.stop();
   }
   button.addEventListener("click", () => {
+    if (button.getAttribute("aria-disabled") === "true") { statusText.textContent = VOICE_OFF_NOTE; return; } // Off mode
     if (intercept?.()) return;
     if (rec) stop();
     else start();
@@ -1251,6 +1302,7 @@ function createVoiceFan(prefix, { conversationRun, conversationNote = null }) {
   fan.addEventListener("focusout", (event) => { if (open && event.relatedTarget && !inside(event.relatedTarget)) api.hide(); });
   document.addEventListener("pointerdown", (event) => { if (open && !inside(event.target)) api.hide(); });
   entries.forEach((entry) => entry.item.addEventListener("click", () => {
+    if (entry.item.dataset.off === "true") { statusText.textContent = VOICE_OFF_NOTE; return; } // Off mode
     if (entry.item.getAttribute("aria-disabled") === "true") { statusText.textContent = `${entry.item.querySelector(".voice-label").firstChild.textContent}: ${entry.note.toLowerCase()} in this browser`; return; }
     const keyboard = entry.item.matches(":focus-visible");
     if (entry.closes) api.hide({ returnFocus: keyboard });
@@ -1264,6 +1316,8 @@ const VoiceFans = {
   intake: createVoiceFan("intake", { conversationRun: () => { if (!conversationActive) openAgent(); conversationMode.click(); } }),
   agent: createVoiceFan("agent", { conversationRun: () => conversationMode.click() }),
 };
+voiceReady = true;
+applyVoiceOff();
 
 // Cmd/Ctrl+Shift+Space toggles voice input for the composer that has focus (intake when neither does).
 document.addEventListener("keydown", (event) => {
