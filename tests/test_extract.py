@@ -157,3 +157,79 @@ def test_extract_endpoint_rejects_oversized_body_before_reading():
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
+
+
+# --- .docx decompression-bomb guard (Codex review on PR #32, P1) ------------------------------------------------
+
+def _zip_bomb(uncompressed_bytes: int, *, entries: int = 1) -> bytes:
+    """A crafted .docx-shaped ZIP: tiny on the wire, huge once inflated. Built in the test, never stored."""
+    import zipfile
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+        archive.writestr("[Content_Types].xml", '<?xml version="1.0"?><Types/>')
+        with archive.open("word/document.xml", "w", force_zip64=True) as member:
+            chunk = b"<w:t>" + b"A" * (1024 * 1024 - 10) + b"</w:t>"
+            remaining = uncompressed_bytes
+            while remaining > 0:
+                member.write(chunk[:remaining])
+                remaining -= len(chunk)
+        for index in range(entries - 2):
+            archive.writestr(f"word/media/pad{index}.xml", "x")
+    return buffer.getvalue()
+
+
+def _forbid_python_docx(monkeypatch):
+    docx = pytest.importorskip("docx")
+
+    def never(*args, **kwargs):  # noqa: ARG001
+        raise AssertionError("python-docx must not open an archive that failed the size checks")
+
+    monkeypatch.setattr(docx, "Document", never)
+
+
+def test_docx_bomb_over_the_total_size_limit_is_rejected_before_parsing(monkeypatch):
+    _forbid_python_docx(monkeypatch)
+    bomb = _zip_bomb(extract.DOCX_MAX_UNCOMPRESSED_BYTES + 10 * 1024 * 1024)
+    assert len(bomb) < MAX_UPLOAD_BYTES  # it sails under the upload cap
+    with pytest.raises(ExtractionError, match="expands to far more") as error:
+        extract_text("bomb.docx", bomb)
+    assert error.value.status == 413
+
+
+def test_docx_with_an_extreme_compression_ratio_is_rejected(monkeypatch):
+    _forbid_python_docx(monkeypatch)
+    bomb = _zip_bomb(8 * 1024 * 1024)  # under the total cap, but ~1000:1
+    with pytest.raises(ExtractionError, match="expands to far more") as error:
+        extract_text("ratio.docx", bomb)
+    assert error.value.status == 413
+
+
+def test_docx_with_too_many_entries_is_rejected(monkeypatch):
+    _forbid_python_docx(monkeypatch)
+    many = _zip_bomb(10, entries=extract.DOCX_MAX_ENTRIES + 5)
+    with pytest.raises(ExtractionError, match="expands to far more") as error:
+        extract_text("many.docx", many)
+    assert error.value.status == 413
+
+
+def test_docx_with_large_incompressible_media_still_opens():
+    docx = pytest.importorskip("docx")
+    import os
+    import zipfile
+
+    document = docx.Document()
+    document.add_paragraph("Company name: Media Co")
+    buffer = io.BytesIO()
+    document.save(buffer)
+    # Add a 3 MB incompressible "image" the way Word stores photos.
+    with zipfile.ZipFile(buffer, "a", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("word/media/photo.bin", os.urandom(3 * 1024 * 1024))
+    assert len(buffer.getvalue()) < MAX_UPLOAD_BYTES
+    assert "Media Co" in extract_text("media.docx", buffer.getvalue())
+
+
+def test_extract_endpoint_answers_a_docx_bomb_with_413():
+    status, payload = _post_raw("/api/extract", _zip_bomb(extract.DOCX_MAX_UNCOMPRESSED_BYTES + 1024 * 1024), "bomb.docx")
+    assert status == 413
+    assert "expands to far more" in payload["error"]

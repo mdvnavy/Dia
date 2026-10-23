@@ -275,6 +275,12 @@ function setAssistantMode(mode) {
   assistantMode = mode;
   try { localStorage.setItem(ASSISTANT_KEY, mode); } catch (error) { /* session only */ }
   applyAssistantMode(); // aria-checked announces the change
+  // Off also ends a live Conversation mode and cancels its pending Ask DIA request, so a late reply is never
+  // spoken and never restarts the mic (Codex review on PR #38). Only reachable after load, so the voice state exists.
+  if (mode === "off") {
+    chatController?.abort();
+    if (conversationActive) stopConversation("Conversation ended: Assistant is Off");
+  }
 }
 
 assistantOptions.forEach((option, index) => {
@@ -371,6 +377,9 @@ function buildAgentContext() {
   return sections.length ? `\n\nContext:\n${sections.join("\n\n---\n\n")}` : "";
 }
 
+// The in-flight Ask DIA request (typed or Conversation mode); switching to Off aborts it.
+let chatController = null;
+
 async function sendAgentMessage() {
   if (assistantMode === "off") return null; // Off: no Gemini call, ever
   const message = agentMessage.value.trim();
@@ -383,29 +392,35 @@ async function sendAgentMessage() {
   agentAiLabel.hidden = true;
   copyQuestions.hidden = true;
   setBusy(runChat, true);
+  chatController?.abort();
+  const controller = new AbortController();
+  chatController = controller;
   try {
     const response = await fetch("/api/agent", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message: message + context }),
+      signal: controller.signal,
     });
     const payload = await response.json();
     if (!response.ok) {
       throw new Error(payload.error || "Agent run failed");
     }
+    if (controller.signal.aborted || assistantMode === "off") return null;
     showAiReply(payload.reply || "(empty response)");
     return payload.reply || "";
   } catch (error) {
-    agentOutput.textContent = error.message;
+    agentOutput.textContent = error.name === "AbortError" ? "Request cancelled" : error.message;
     return null;
   } finally {
+    if (chatController === controller) chatController = null;
     setBusy(runChat, false);
   }
 }
 
 runChat.addEventListener("click", async () => {
   const reply = await sendAgentMessage();
-  if (autoSpeakEnabled && reply) {
+  if (autoSpeakEnabled && reply && assistantMode !== "off") {
     speakText(reply, listenAgent);
   }
 });
@@ -1783,11 +1798,25 @@ function updateActive() {
   }
 }
 
+// Where Escape returns focus. Menus hide as the palette opens, so a row inside one maps to the button that opened it
+// (Codex review on PR #32: focus was lost to a hidden DIA menu row).
+function paletteReturnTarget(el) {
+  if (!el || el === document.body || palette.contains(el)) return null;
+  if (navDropdown.contains(el)) return navBrandMenu;
+  const plusMenu = el.closest?.("[id$='PlusMenu']");
+  if (plusMenu) return document.querySelector(`#${plusMenu.id.replace(/Menu$/, "Button")}`) || null;
+  return el;
+}
+
+function canTakeFocus(el) {
+  return Boolean(el && el.isConnected && !el.closest("[hidden], [inert]") && el.getClientRects().length);
+}
+
 function openPalette() {
   if (palette.open) return;
+  paletteReturnFocus = paletteReturnTarget(document.activeElement);
   setNavMenu(false);
   if (helpDialog.open) helpDialog.close();
-  paletteReturnFocus = document.activeElement;
   paletteInput.value = "";
   activeIndex = 0;
   renderPalette();
@@ -1799,9 +1828,10 @@ function closePalette({ restoreFocus = true } = {}) {
   if (!palette.open) return;
   palette.close();
   paletteInput.setAttribute("aria-expanded", "false");
-  if (restoreFocus && paletteReturnFocus && document.contains(paletteReturnFocus)) {
-    paletteReturnFocus.focus();
-  }
+  if (!restoreFocus) return;
+  const target = canTakeFocus(paletteReturnFocus) ? paletteReturnFocus : paletteTrigger;
+  if (canTakeFocus(target)) target.focus();
+  else paletteInput.blur(); // never leave focus inside the closed dialog
 }
 
 function runCommand(command) {
