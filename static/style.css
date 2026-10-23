@@ -398,6 +398,8 @@ body[data-agent="open"] .center-stage { margin-top: 3rem; }
 .tittle { position: relative; display: inline-block; letter-spacing: 0; margin-right: -0.04em; }
 .tittle::after {
   content: 'BASH';
+  /* Empty alt text keeps the mark out of the h1's accessible name. */
+  content: 'BASH' / '';
   position: absolute;
   top: -0.02em;
   left: 50%;
