@@ -769,17 +769,86 @@ def with_budget(text: str, budget: str) -> str:
     return text.replace("| Budget range | $2,500-$10,000 |", f"| Budget range | {budget} |")
 
 
-def test_a_listed_task_without_hours_makes_value_at_stake_missing_not_a_partial_total():
-    from client_discovery.report_model import inputs_confidence
+ALL_Q1 = "Invoice entry - office manager, 6 hours a week, 1 person; Scheduling - founder, 4 hours a week, 1 person"
+NONE_Q1 = "Invoice entry - office manager; Scheduling - founder"
+PARTIAL_VALUE = 6 * 50 * 48  # 14,400: only the task with hours counts
+
+
+def test_all_tasks_with_hours_give_the_full_value_at_stake_as_about():
+    from client_discovery.report_model import value_at_stake_text
+
+    report, intake, s = report_for(questionnaire(q1=ALL_Q1, q2="$50 an hour"))
+    assert s.value_at_stake == (6 + 4) * 50 * 48 == 24000 and not s.value_at_stake_partial
+    assert "VALUE_AT_STAKE_PARTIAL" not in s.flags and "VALUE_AT_STAKE_MISSING" not in s.flags
+    assert value_at_stake_text(s) == "about $24,000"
+    assert report["sections"][4]["title"] == "Northstar Studio loses about $24,000 a year to 2 manual workflows"
+    assert "at least" not in report["method_and_sources"] and "lower bound" not in report["method_and_sources"]
+
+
+def test_some_tasks_without_hours_give_a_lower_bound_shown_as_at_least():
+    from client_discovery.report_model import inputs_confidence, value_at_stake_text
+
+    report, intake, s = report_for(questionnaire(q1=PARTIAL_Q1, q2="$50 an hour"))
+    assert s.value_at_stake == PARTIAL_VALUE == 14400 and s.value_at_stake_partial
+    assert "VALUE_AT_STAKE_PARTIAL" in s.flags and "VALUE_AT_STAKE_MISSING" not in s.flags
+    assert not s.strategic_value_default and s.strategic_value == strategic_value_for(PARTIAL_VALUE) == 3  # floor
+    assert s.signal_reasons["strategic_value"] == ("value at stake of at least $14,400 a year "
+                                                  "(tasks without weekly hours are excluded)")
+    assert [w["value"] for w in s.workflows] == [PARTIAL_VALUE, None]  # each row keeps its own figure
+    assert value_at_stake_text(s) == "at least $14,400"
+    assert inputs_confidence(s, validate_intake(intake)) == "thin"
+    assert report["sections"][4]["title"] == "Northstar Studio loses at least $14,400 a year to 1 of 2 manual workflows"
+    summary = report["sections"][0]["body"]
+    assert summary.startswith("Northstar Studio fits a Custom AI Agent, pending weekly hours for every listed task.")
+    assert "The value at stake is at least $14,400 a year; tasks without weekly hours are excluded" in summary
+    assert "Ask for the weekly hours of each manual task that has none" in " ".join(report["actions"])
+    method = report["method_and_sources"]
+    assert "excluded from the value at stake, so the figure\nis a lower bound" in method
+    assert "hourly rate × 48 weeks" in method  # the approved §5 text stays, with the note added after it
+    md = markdown_export(questionnaire(q1=PARTIAL_Q1, q2="$50 an hour"))
+    assert "loses at least $14,400 a year" in md and "about $14,400" not in md
+
+
+def test_partial_value_band_is_a_floor_and_never_raises_roi_weak():
+    # 1 h x $50 x 48 = $2,400 against a $10,000 budget top: ROI_WEAK when complete, not when it is only a floor.
+    one = "Invoice entry - office manager, 1 hours a week, 1 person"
+    assert "ROI_WEAK" in score_of(questionnaire(q1=one, q2="$50 an hour")).flags
+    s = score_of(questionnaire(q1=one + "; Scheduling - founder", q2="$50 an hour"))
+    assert s.value_at_stake == 2400 and s.value_at_stake_partial and s.strategic_value == 2
+    assert "ROI_WEAK" not in s.flags
+    big = score_of(questionnaire(q1="Invoice entry - office manager, 25 hours a week, 1 person; Scheduling - founder",
+                                 q2="$50 an hour"))
+    assert big.value_at_stake == 60000 and big.strategic_value == 5  # the floor alone reaches the top band
+
+
+def test_no_task_with_hours_is_still_value_at_stake_missing():
+    from client_discovery.report_model import inputs_confidence, value_at_stake_text
+
+    report, intake, s = report_for(questionnaire(q1=NONE_Q1, q2="$50 an hour"))
+    assert s.value_at_stake is None and not s.value_at_stake_partial
+    assert "VALUE_AT_STAKE_MISSING" in s.flags and "VALUE_AT_STAKE_PARTIAL" not in s.flags
+    assert s.strategic_value == 3 and s.strategic_value_default
+    assert value_at_stake_text(s) is None
+    assert inputs_confidence(s, validate_intake(intake)) == "thin"
+    assert "at least" not in report["sections"][4]["title"]
+
+
+def test_partial_value_reaches_the_json_html_and_pdf():
+    pytest.importorskip("weasyprint")
+    from client_discovery.report import render_html, render_pdf
+
+    result = app_build(questionnaire(q1=PARTIAL_Q1, q2="$50 an hour"))
+    assert result["value_at_stake"] == 14400 and result["value_at_stake_partial"] is True
+    assert result["value_at_stake_text"] == "at least $14,400" and result["inputs_confidence"] == "thin"
+    from client_discovery.service import _savant_extras
 
     intake = parse_questionnaire_markdown(questionnaire(q1=PARTIAL_Q1, q2="$50 an hour"))
-    s = score_opportunity(intake)
-    assert s.value_at_stake is None  # never the 6 x $50 x 48 subtotal presented as the whole
-    assert s.strategic_value == 3 and s.strategic_value_default
-    assert "VALUE_AT_STAKE_MISSING" in s.flags
-    assert "every listed task" in s.signal_reasons["strategic_value"]
-    assert [w["value"] for w in s.workflows] == [6 * 50 * 48, None]  # the valued row keeps its own figure
-    assert inputs_confidence(s, validate_intake(intake)) == "thin"  # was "complete" with the partial sum
+    extras = _savant_extras(intake, score_opportunity(intake), validate_intake(intake))
+    assert extras["value_at_stake_text"] == "at least $14,400" and extras["value_at_stake_partial"] is True
+    html = render_html(result, report_date=DATE)
+    assert "loses at least $14,400 a year to 1 of 2 manual workflows" in html and "lower bound" in html
+    pdf = " ".join(pdf_text_of(render_pdf(result, report_date=DATE)).split())
+    assert "at least $14,400" in pdf and "lower bound" in pdf
 
 
 @pytest.mark.parametrize("budget, top", [

@@ -343,20 +343,22 @@ def score_opportunity(intake: ClientIntake) -> OpportunityScore:
         urgency = min(5, urgency + 1)
         urgency_reason += f", and the manual work matches a known time sink ({sink})"
     workflows.sort(key=lambda row: (-(row["value"] or 0), len(row["gaps"])))
-    # Any listed task without a value makes the total incomplete: a partial sum would understate the value at stake
-    # and read as complete, so it is treated as missing (strategic value stays 3 with the flag; Codex review on #39).
+    # Ikenna (via Bash): 'show partial value as "at least $X"'. When some listed tasks have a value and others do
+    # not, the subtotal of the valued tasks is a lower bound: it is shown as "at least $X", flagged
+    # VALUE_AT_STAKE_PARTIAL (Inputs "thin"), and banded as a floor. Only when no task has a value is it missing.
     # Each valued row still shows its own figure in Top workflows.
-    complete = bool(workflows) and all(row["value"] is not None for row in workflows)
-    value_at_stake = sum(row["value"] for row in workflows) if complete else None
+    valued = [row["value"] for row in workflows if row["value"] is not None]
+    value_partial = bool(valued) and len(valued) < len(workflows)
+    value_at_stake = sum(valued) if valued else None
     strategic_value = strategic_value_for(value_at_stake)
     strategic_default = value_at_stake is None
     if strategic_default:
         flags.append("VALUE_AT_STAKE_MISSING")
-        strategic_reason = (
-            "default until weekly hours are provided for every listed task"
-            if workflows and rate and any(row["value"] is not None for row in workflows)
-            else "default until weekly hours and an hourly cost are provided"
-        )
+        strategic_reason = "default until weekly hours and an hourly cost are provided"
+    elif value_partial:
+        flags.append("VALUE_AT_STAKE_PARTIAL")
+        strategic_reason = (f"value at stake of at least ${value_at_stake:,} a year "
+                            "(tasks without weekly hours are excluded)")
     else:
         strategic_reason = f"value at stake of about ${value_at_stake:,} a year"
 
@@ -400,7 +402,7 @@ def score_opportunity(intake: ClientIntake) -> OpportunityScore:
         if ratio < 1:
             budget_fit = min(5, budget_fit + 1)
             budget_reason += "; the yearly value at stake exceeds the top of the budget"
-        elif ratio > 2:
+        elif ratio > 2 and not value_partial:  # a lower bound cannot show the budget outruns the value
             flags.append("ROI_WEAK")
 
     total_score = urgency + budget_fit + tech_readiness + strategic_value
@@ -431,6 +433,7 @@ def score_opportunity(intake: ClientIntake) -> OpportunityScore:
         max_score=20,
         reasons=reasons,
         value_at_stake=value_at_stake,
+        value_at_stake_partial=value_partial,
         strategic_value_default=strategic_default,
         flags=flags,
         workflows=workflows,

@@ -55,6 +55,7 @@ class OpportunityScore:
     reasons: list[str]
     # Scorer v2 (dia-savant v1.0 §2.3). Defaults keep older callers and stored results working.
     value_at_stake: int | None = None          # $/yr: hours a week x loaded hourly rate x weeks, from the client's answers
+    value_at_stake_partial: bool = False       # True when some tasks lack hours: value_at_stake is a lower bound
     strategic_value_default: bool = False      # True when value at stake is missing and strategic value stays 3
     flags: list[str] = field(default_factory=list)
     workflows: list[dict] = field(default_factory=list)   # up to 3: task, hours, value, gaps (sorted by value)

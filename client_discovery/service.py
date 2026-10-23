@@ -32,10 +32,11 @@ def read_sample_questionnaire() -> str:
 
 def _savant_extras(intake, score, issues) -> dict[str, object]:
     """dia-savant §6 JSON fields, as in app.build_intake_response."""
-    from client_discovery.report_model import build_report
+    from client_discovery.report_model import build_report, value_at_stake_text
 
     report = build_report(intake, score, issues)
-    return {"value_at_stake": score.value_at_stake, "flags": list(score.flags), "flag_actions": list(report["actions"]),
+    return {"value_at_stake": score.value_at_stake, "value_at_stake_partial": score.value_at_stake_partial,
+            "value_at_stake_text": value_at_stake_text(score), "flags": list(score.flags), "flag_actions": list(report["actions"]),
             "sources": report["sources"], "inputs_confidence": report["inputs_confidence"]}
 
 

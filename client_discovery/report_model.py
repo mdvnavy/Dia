@@ -31,6 +31,9 @@ Presentation conventions informed by:
 The analysis and recommendation are DIA's own. These works shaped the layout, not the
 conclusions. Their authors and publishers have not reviewed or endorsed DIA or this
 report. Names are trademarks of their owners."""
+# Added after the Method paragraph only when some tasks lack weekly hours (VALUE_AT_STAKE_PARTIAL).
+METHOD_PARTIAL_NOTE = ("Tasks listed without weekly hours are excluded from the value at stake, so the figure\n"
+                       "is a lower bound and is shown as \"at least\".")
 
 def _weeks_label() -> str:
     """The week count the scorer actually used, so the Method text matches the dollar figures (Codex review on #39).
@@ -72,6 +75,8 @@ MD_EXPORT_ORDER = ("opportunity-analysis.md", "client-profile.md", "proposal-dra
 ANSWER_FLAGS = {
     "VALUE_AT_STAKE_MISSING": ("value inputs", ("missing_workflow_tasks", "missing_hourly_cost"),
                                "Weekly hours and an hourly cost are needed to compute the value at stake."),
+    "VALUE_AT_STAKE_PARTIAL": ("task hours", (),
+                               "Weekly hours are needed for every listed task; tasks without them are left out of the value at stake."),
     "NO_SUCCESS_METRIC": ("success metric", ("missing_success_metric",),
                           "A success metric with a number is needed to show the project worked."),
     "NO_OWNER": ("process owner", (), "A process owner is needed to run the project and sign it off."),
@@ -90,6 +95,7 @@ ISSUE_LABELS = {
 }
 FLAG_ACTIONS = {  # §2.4: every flag is written as the action that clears it
     "VALUE_AT_STAKE_MISSING": "Ask for the weekly hours of each manual task and the loaded hourly cost (questions 1 and 2).",
+    "VALUE_AT_STAKE_PARTIAL": "Ask for the weekly hours of each manual task that has none, to complete the value at stake (question 1).",
     "NO_SUCCESS_METRIC": "Agree on one success metric and its value today (question 3).",
     "NO_OWNER": "Name the process owner and the person who signs off on the project (question 4).",
     "DATA_CLEANUP_FIRST": "Plan data clean-up before the build starts (question 6).",
@@ -120,6 +126,13 @@ def default_report_date() -> str:
 
 def _money(value: int) -> str:
     return f"${value:,}"
+
+
+def value_at_stake_text(score: OpportunityScore) -> str | None:
+    """The value at stake as shown everywhere: "about $X", or "at least $X" when it is a lower bound."""
+    if score.value_at_stake is None:
+        return None
+    return f"{'at least' if score.value_at_stake_partial else 'about'} {_money(score.value_at_stake)}"
 
 
 def _plural(n: int, one: str, many: str | None = None) -> str:
@@ -157,8 +170,9 @@ def missing_answers(issues: list[ValidationIssue], flags: list[str]) -> list[tup
 
 
 def inputs_confidence(score: OpportunityScore, issues: list[ValidationIssue]) -> str:
-    """§3.5: thin = value missing or 3+ required answers missing; partial = any flag or gap; complete otherwise."""
-    if score.value_at_stake is None or len(issues) >= 3:
+    """§3.5: thin = value missing or a lower bound, or 3+ required answers missing; partial = any flag or gap;
+    complete otherwise."""
+    if score.value_at_stake is None or score.value_at_stake_partial or len(issues) >= 3:
         return "thin"
     if score.flags or issues:
         return "partial"
@@ -175,6 +189,8 @@ def _pending(intake: ClientIntake, score: OpportunityScore) -> list[str]:
         pending.append("a budget range")
     if score.value_at_stake is None:
         pending += ["weekly hours", "an hourly cost"]
+    elif score.value_at_stake_partial:
+        pending.append("weekly hours for every listed task")
     return pending
 
 
@@ -230,6 +246,9 @@ def build_report(intake: ClientIntake, score: OpportunityScore, issues: list[Val
         lines.append("The questionnaire lists no pain points.")
     if score.strategic_value_default:
         lines.append("Strategic value is set to 3 of 5 until weekly hours and an hourly cost are provided.")
+    elif score.value_at_stake_partial:
+        lines.append(f"The value at stake is at least {_money(score.value_at_stake)} a year; tasks without weekly "
+                     "hours are excluded, so the figure is a lower bound.")
     why = ["Why this tier:", ""] + [
         f"- {label} {getattr(score, key)}/5: {reasons.get(key, '')}." for key, label in SIGNALS[:3]
     ]
@@ -294,7 +313,11 @@ def build_report(intake: ClientIntake, score: OpportunityScore, issues: list[Val
     # 05 Top workflows by value at stake (§2.4)
     if score.value_at_stake is not None:
         n = len([w for w in score.workflows if w.get("value") is not None])
-        wf_title = f"{client} loses about {_money(score.value_at_stake)} a year to {_plural(n, 'manual workflow')}"
+        if score.value_at_stake_partial:
+            wf_title = (f"{client} loses {value_at_stake_text(score)} a year to {n} of "
+                        f"{_plural(len(score.workflows), 'manual workflow')}")
+        else:
+            wf_title = f"{client} loses {value_at_stake_text(score)} a year to {_plural(n, 'manual workflow')}"
     else:
         wf_title = "Strategic value stays at 3 of 5 until hours and an hourly cost are provided"
     if score.workflows:
@@ -354,7 +377,10 @@ def build_report(intake: ClientIntake, score: OpportunityScore, issues: list[Val
         f"- **Next step:** {next_step}",
     ])
 
-    method = METHOD_AND_SOURCES.replace("× 48 weeks", f"× {_weeks_label()} weeks", 1).format(client=client, date=date)
+    method_text = METHOD_AND_SOURCES
+    if score.value_at_stake_partial:
+        method_text = method_text.replace("text appears in it.\n", f"text appears in it.\n{METHOD_PARTIAL_NOTE}\n", 1)
+    method = method_text.replace("× 48 weeks", f"× {_weeks_label()} weeks", 1).format(client=client, date=date)
 
     bodies = {
         "summary": (None, summary),

@@ -11,7 +11,7 @@ import re
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
-from client_discovery.report_model import build_report
+from client_discovery.report_model import build_report, value_at_stake_text
 from client_discovery.core import (
     generate_documents,
     parse_questionnaire_markdown,
@@ -109,6 +109,8 @@ def build_intake_response(questionnaire: str) -> dict[str, object]:
         "documents": documents,
         # dia-savant §6: deterministic extras for the JSON export and the screen (no AI text).
         "value_at_stake": score.value_at_stake,
+        "value_at_stake_partial": score.value_at_stake_partial,  # True: value_at_stake is a lower bound
+        "value_at_stake_text": value_at_stake_text(score),       # "about $X" or "at least $X"
         "flags": list(score.flags),
         "flag_actions": list(report["actions"]),
         "sources": report["sources"],
