@@ -271,16 +271,13 @@
 
       <!-- Results workspace: appears below the composer after a run, like Tia's response card. -->
       <section class="results" id="resultsStage" aria-label="Intake results">
-        <!-- Addendum §7.3: on screen only, never exported. -->
-        <section id="beforeAfter" class="before-after" aria-labelledby="beforeAfterTitle" hidden>
-          <h3 id="beforeAfterTitle">Scored before / after</h3>
-          <dl></dl>
-        </section>
         <div class="results-summary">
           <div class="score-card">
             <span>Recommended Tier</span>
             <strong id="tier">-</strong>
             <small id="score">Score pending</small>
+            <!-- Addendum v1.1.2 §7.3: one-line delta on a re-run; the full before/after sits below this card. -->
+            <small id="scoreDelta" class="score-delta" hidden></small>
             <!-- dia-savant §3.5: input quality, on screen only (never in the PDF or Markdown). -->
             <small id="inputsState" hidden></small>
             <!-- Proto, on #39: a reopened cabinet intake scored before value at stake keeps its old score. -->
@@ -299,6 +296,12 @@
             </div>
           </div>
         </div>
+
+        <!-- Addendum §7.3 (v1.1.2): on screen only, never exported; below the recommended tier card (answer first). -->
+        <section id="beforeAfter" class="before-after" aria-labelledby="beforeAfterTitle" hidden>
+          <h3 id="beforeAfterTitle">Scored before / after</h3>
+          <dl></dl>
+        </section>
 
         <div class="response-area doc-card">
           <div class="doc-head">

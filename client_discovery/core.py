@@ -26,6 +26,11 @@ SECTION6_ALIASES = {
     "finance_signals": ("finance only", "days overdue"),
 }
 
+# The one questionnaire map for "(question N)" references: section 6 question numbers, in questionnaire order
+# (SECTION6_ALIASES is listed in that order; tests pin it to the sample's rows). Older questionnaires without
+# section 6 have no numbered questions, so references to them carry no number.
+QUESTION_NUMBERS = {field: number for number, field in enumerate(SECTION6_ALIASES, 1)}
+
 QUESTION_ALIASES = {
     **SECTION6_ALIASES,
     "company_name": ("company name",),

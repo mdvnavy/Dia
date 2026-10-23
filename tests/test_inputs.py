@@ -14,7 +14,7 @@ import pytest
 
 from app import build_intake_response, consulting_config
 from client_discovery import inputs
-from client_discovery.core import QUESTION_ALIASES, SECTION6_ALIASES, parse_questionnaire_markdown
+from client_discovery.core import QUESTION_ALIASES, QUESTION_NUMBERS, SECTION6_ALIASES, parse_questionnaire_markdown
 from tests.test_savant import LEGACY, SAMPLE, questionnaire
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -250,24 +250,24 @@ def test_next_step_from_the_first_gap():  # §10.10
 
 
 def test_next_step_without_gaps_uses_the_first_flag_action_or_kickoff():  # §10.10
-    from client_discovery.report_model import FLAG_ACTIONS
+    from client_discovery.report_model import flag_action
 
     doc = analysis(SAMPLE)
-    assert f"Next step: {FLAG_ACTIONS['TRUST_REPAIR'].format(client='Northstar Studio')}" in doc
+    assert f"Next step: {flag_action('TRUST_REPAIR', 'Northstar Studio')}" in doc
     clean = questionnaire(q9="None")
     assert "Next step: Confirm scope on a kickoff call." in analysis(clean)
 
 
 def test_dedupe_drops_value_and_metric_flag_actions_when_steps_exist():  # §10.11
-    from client_discovery.report_model import FLAG_ACTIONS
+    from client_discovery.report_model import flag_action
 
     for text, flag in ((NO_METRIC, "NO_SUCCESS_METRIC"), (NO_COST, "VALUE_AT_STAKE_MISSING"), (PARTIAL, "VALUE_AT_STAKE_PARTIAL")):
         result = build_intake_response(text)
         assert flag in result["flags"]
-        action = FLAG_ACTIONS[flag].format(client="Northstar Studio")
+        action = flag_action(flag, "Northstar Studio")
         assert action not in result["documents"]["opportunity-analysis.md"], flag
     # Other flag actions stay.
-    assert FLAG_ACTIONS["TRUST_REPAIR"].format(client="Northstar Studio") in analysis(NO_METRIC)
+    assert flag_action("TRUST_REPAIR", "Northstar Studio") in analysis(NO_METRIC)
 
 
 def test_partial_value_uses_the_no_hours_yet_wording():
@@ -447,8 +447,10 @@ def test_off_mode_prompt_shows_and_nothing_is_sent_before_run(context, base_url)
     paste(page, NO_COST)
     page.wait_for_selector("#inputsPrompt", state="visible", timeout=2000)
     page.wait_for_timeout(300)
-    # Only a lazily loaded web font may be fetched (the prompt's bold weight); no API call and no data leaves.
-    assert [r for r in requests if r[1] != "font"] == [], requests
+    # Only lazily loaded static assets may be fetched (a web font, the app's own /static icons); no API call and
+    # no data leaves.
+    leaving = [r for r in requests if not (r[1] == "font" or r[0].startswith(f"{base_url}/static/"))]
+    assert leaving == [], leaving
     assert not any(r[2] for r in requests)
     assert page.errors == []
 
@@ -557,8 +559,16 @@ def test_rerun_keeps_prior_answers_and_files_a_linked_card(browser, base_url):  
         meta = page.locator("#cabinetDrawer .card-meta").first.text_content()
         assert meta.startswith("Re-run · ")
         page.evaluate("() => CabinetDrawer.close()")
-        # Scored before / after (screen only).
+        # Scored before / after (screen only), below the recommended tier card (v1.1.2: answer first).
         assert page.is_visible("#beforeAfter")
+        assert page.evaluate("""() => !!(document.querySelector('.score-card').compareDocumentPosition(
+            document.querySelector('#beforeAfter')) & Node.DOCUMENT_POSITION_FOLLOWING)""")
+        assert page.locator("#beforeAfter").bounding_box()["y"] >= sum(
+            page.locator(".score-card").bounding_box()[k] for k in ("y", "height"))
+        previous_total = items[1]["result"]["score"]["total_score"]
+        current_total = items[0]["result"]["score"]["total_score"]
+        assert page.is_visible(".score-card #scoreDelta")
+        assert page.inner_text("#scoreDelta") == f"Was {previous_total}, now {current_total}"
         rows = dict(zip(page.eval_on_selector_all("#beforeAfter dt", "els => els.map(e => e.textContent)"),
                         page.eval_on_selector_all("#beforeAfter dd", "els => els.map(e => e.textContent)")))
         assert list(rows) == ["Score", "Strategic value", "Value at stake", "Inputs", "Flags cleared", "New flags", "Answers changed"]
@@ -590,14 +600,173 @@ def test_before_after_for_a_legacy_previous_run_says_older_rules(context, base_u
     page.click("#runAgent")
     page.wait_for_function("document.body.dataset.stage === 'results' && !document.querySelector('#beforeAfter').hidden")
     assert page.inner_text("#beforeAfter dl") == "Scored with older rules, so no comparison."
+    assert not page.is_visible("#scoreDelta")
+    run_intake(page, SAMPLE)  # a fresh run (not a re-run) hides both
+    assert not page.is_visible("#beforeAfter") and not page.is_visible("#scoreDelta")
 
 
-def test_agent_prompt_carries_rule_7():  # §10.4 is manual (AI output); the instruction itself is pinned here
-    character = pytest.importorskip("character")
-    try:
-        prompt = character.build_agent().instruction
-    except Exception as error:  # noqa: BLE001
-        pytest.skip(f"agent unavailable: {error}")
-    assert "never do the work (persona rule 7)" in prompt
+def test_agent_prompt_carries_rule_7():  # v1.1.2 item 4: deterministic, never skipped (§10.4 refusal check stays manual)
+    from client_discovery.agent_instruction import AGENT_INSTRUCTION
+
+    prompt = " ".join(AGENT_INSTRUCTION.split())
+    assert "Recommend; never do the work (persona rule 7)." in prompt
     assert "Never fill in, guess or estimate intake values" in prompt
-    assert "Bash Systems & Services offers business" in " ".join(prompt.split())
+    for value in ("weekly hours", "people", "systems", "success metric", "hourly cost"):
+        assert value in prompt
+    assert "never write into the composer or any field" in prompt
+    assert "reply with the matching question and two paths:" in prompt
+    assert "(1) the client works it out with its own team and runs DIA again" in prompt
+    assert f"(2) {CTA}" in prompt
+    assert "Follow-up drafts are questions only, never answers." in prompt
+    # The agent is built with exactly this instruction (checked from the source, so no SDK or API key is needed).
+    tree = ast.parse((ROOT / "character.py").read_text(encoding="utf-8"))
+    build = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "build_agent")
+    keywords = [kw for node in ast.walk(build) if isinstance(node, ast.Call) for kw in node.keywords if kw.arg == "instruction"]
+    assert len(keywords) == 1 and isinstance(keywords[0].value, ast.Name) and keywords[0].value.id == "AGENT_INSTRUCTION"
+    assert "from client_discovery.agent_instruction import AGENT_INSTRUCTION" in (ROOT / "character.py").read_text(encoding="utf-8")
+
+
+# --- v1.1.2 item 3: one questionnaire map for every "(question N)" ------------------------------------------------
+
+# What each flag action asks the client to clear, by questionnaire field (pinned here, numbered by the map).
+FLAG_QUESTION_FIELDS = {
+    "VALUE_AT_STAKE_MISSING": [["workflow_tasks", "hourly_cost"]],
+    "VALUE_AT_STAKE_PARTIAL": [["workflow_tasks"]],
+    "NO_SUCCESS_METRIC": [["success_metric"]],
+    "NO_OWNER": [["process_owner"]],
+    "DATA_CLEANUP_FIRST": [["data_readiness"]],
+    "SCOPE_RISK_SYSTEMS": [["systems_access"]],
+    "COMPLIANCE_REVIEW": [["sensitive_data"]],
+    "TRUST_REPAIR": [["past_attempts"], ["success_metric"]],  # the earlier attempt is Q9; the metric is Q3
+    "HUMAN_IN_LOOP": [["exceptions"]],
+    "SUPPORT_TERMS_NEEDED": [["maintenance"]],
+    "ROI_WEAK": [],
+}
+REF = re.compile(r"\(questions? [^)]*\)")
+FLAGGED = questionnaire(q4="", q5="HubSpot; no API access", q6="Spreadsheets", q8="Yes, health records",
+                        q7="Duplicates; VIP requests; refunds", q10="")
+
+
+def _ref(numbers: list[int]) -> str:
+    if len(numbers) == 1:
+        return f"(question {numbers[0]})"
+    return f"(questions {', '.join(map(str, numbers[:-1]))} and {numbers[-1]})"
+
+
+ALLOWED_REFS = {_ref([QUESTION_NUMBERS[f] for f in fields]) for spec in FLAG_QUESTION_FIELDS.values() for fields in spec}
+
+
+def test_question_map_is_the_questionnaire_order():
+    assert list(QUESTION_NUMBERS) == list(SECTION6_ALIASES)
+    section = SAMPLE[SAMPLE.index("## 6. Workflows and value"):]
+    rows = [line for line in section.splitlines() if line.startswith("| ") and not line.startswith(("| Question", "| ---"))]
+    assert len(rows) == len(QUESTION_NUMBERS) == 11
+    for field, number in QUESTION_NUMBERS.items():
+        label = rows[number - 1].split("|")[1].strip().lower()
+        assert any(alias in label for alias in SECTION6_ALIASES[field]), (field, number, label)
+        # The field parses from the row the map says it is on.
+        marker = f"marker {number} {field}"
+        assert getattr(parse_questionnaire_markdown(questionnaire(**{f"q{number}": marker})), field) == marker
+
+
+def test_every_flag_action_takes_its_numbers_from_the_map_for_both_questionnaire_versions():
+    from client_discovery.report_model import FLAG_ACTIONS, flag_action
+
+    assert set(FLAG_QUESTION_FIELDS) == set(FLAG_ACTIONS)
+    for flag, template in FLAG_ACTIONS.items():
+        assert not REF.search(template), f"{flag}: hard-coded question number"
+        current = flag_action(flag, "Northstar Studio", numbered=True)
+        expected = [_ref([QUESTION_NUMBERS[field] for field in fields]) for fields in FLAG_QUESTION_FIELDS[flag]]
+        assert REF.findall(current) == expected, flag
+        older = flag_action(flag, "Northstar Studio", numbered=False)  # no section 6: no numbers at all
+        assert "question" not in older.lower() and "  " not in older and " ." not in older and " ," not in older, flag
+        assert REF.sub("", current).replace(" ,", ",").replace(" .", ".") == older, flag
+    trust = flag_action("TRUST_REPAIR", "Northstar Studio")
+    assert "attempt (question 9)" in trust and "metric (question 3)" in trust  # Proto's bug: the metric is Q3
+
+
+@pytest.mark.parametrize("version", ["current", "older"])
+def test_report_flag_actions_use_the_map_or_no_number(version):
+    from dataclasses import replace as dc_replace
+
+    from client_discovery.core import score_opportunity, validate_intake
+    from client_discovery.report_model import FLAG_ACTIONS, build_report, flag_action, render_documents
+
+    text = questionnaire(q9="None") if version == "current" else LEGACY
+    intake = parse_questionnaire_markdown(text)
+    assert intake.workflows_section is (version == "current")
+    score = dc_replace(score_opportunity(intake), flags=list(FLAG_ACTIONS))  # every flag at once
+    report = build_report(intake, score, validate_intake(intake), "2026-10-23")
+    assert len(report["actions"]) >= 8
+    assert set(report["actions"]) <= {flag_action(f, report["client"], version == "current") for f in FLAG_ACTIONS}
+    refs = REF.findall("\n".join(render_documents(report).values()))
+    if version == "older":
+        assert refs == []
+    else:
+        assert refs and set(refs) <= ALLOWED_REFS
+
+
+@pytest.mark.parametrize("text", [FLAGGED, SAMPLE, LEGACY], ids=["current-flags", "current-sample", "older"])
+def test_screen_payload_markdown_and_pdf_carry_the_same_mapped_numbers(text):
+    from client_discovery.report_model import FLAG_ACTIONS, flag_action
+
+    result = build_intake_response(text)
+    numbered = result["intake"]["workflows_section"]
+    client = result["intake"]["company_name"]
+    assert set(result["flag_actions"]) <= {flag_action(f, client, numbered) for f in result["flags"] if f in FLAG_ACTIONS}
+    md = "\n".join(result["documents"].values())
+    pdf = pdf_text(result)
+    for action in result["flag_actions"]:
+        assert action in md
+    payload_refs = sorted(set(REF.findall(" ".join(result["flag_actions"]))))
+    if not numbered:
+        assert payload_refs == [] and REF.findall(md) == [] and REF.findall(pdf) == []
+        return
+    assert payload_refs and set(payload_refs) <= ALLOWED_REFS
+    assert sorted(set(REF.findall(md))) == payload_refs
+    assert sorted(set(REF.findall(pdf))) == payload_refs
+
+
+def test_no_hard_coded_question_numbers_in_the_code():
+    pattern = re.compile(r"\(questions? \d")
+    paths = [*(ROOT / "client_discovery").glob("*.py"), ROOT / "app.py", ROOT / "character.py", ROOT / "static/app.js",
+             *(ROOT / "templates").rglob("*.html")]
+    for path in paths:
+        assert not pattern.search(path.read_text(encoding="utf-8")), path.name
+
+
+def test_js_question_numbers_mirror_the_map():
+    block = APP_JS[APP_JS.index("const QUESTION_NUMBERS = {"):]
+    block = block[:block.index("};")]
+    assert {k: int(v) for k, v in re.findall(r"(\w+): (\d+)", block)} == QUESTION_NUMBERS
+    assert "Q${QUESTION_NUMBERS[key]}" in APP_JS and not re.search(r'"Q\d+ ', APP_JS)
+
+
+def test_answers_changed_has_no_numbers_for_an_older_questionnaire(context, base_url):
+    page = open_page(context, base_url)
+    labels = page.evaluate("""() => [answerLabel('success_metric', true), answerLabel('success_metric', false),
+        answerLabel('budget', true)]""")
+    assert labels == ["Q3 success metric", "success metric", "budget"]
+
+
+# --- v1.1.2 item 1: Re-run names its item; Remove keeps its confirmation ------------------------------------------
+
+def test_card_rerun_accessible_name_includes_the_title_and_remove_keeps_undo(context, base_url):
+    page = open_page(context, base_url)
+    run_intake(page, SAMPLE)
+    title = cabinet(page)[0]["title"]
+    page.evaluate("() => CabinetDrawer.open()")
+    rerun = page.get_by_role("button", name=f"Re-run {title} with updated answers", exact=True)
+    assert rerun.count() == 1 and rerun.inner_text() == "Re-run"
+    remove = page.get_by_role("button", name=f"Remove {title}", exact=True)
+    assert remove.count() == 1
+    # Remove is unchanged: it removes, then confirms with an Undo toast that restores the card.
+    remove.click()
+    page.wait_for_selector("#toast:not([hidden])")
+    assert page.inner_text("#toastText") == f"Removed “{title}”"
+    assert cabinet(page) == []
+    page.locator("#toastActions button", has_text="Undo").click()
+    assert [item["title"] for item in cabinet(page)] == [title]
+    page.evaluate("() => CabinetDrawer.open()")
+    assert page.get_by_role("button", name=f"Re-run {title} with updated answers", exact=True).count() == 1
+    assert page.errors == []

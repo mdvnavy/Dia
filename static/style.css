@@ -1284,7 +1284,7 @@ html[data-assistant="expert"] body:not([data-agent="open"]) .agent { display: no
 
 /* dia-savant inputs addendum: pre-run inputs prompt (§3), quiet surface with silver accents; Glyph owns the final look. */
 .inputs-prompt { text-align: left; margin: 10px 4px 0; padding: 12px 14px; border: 1px solid #A3A9B1; border-radius: 10px; background: var(--surface); color: var(--text); font-size: 14px; }
-.inputs-prompt[hidden], .before-after[hidden] { display: none !important; }
+.inputs-prompt[hidden], .before-after[hidden], .score-delta[hidden] { display: none !important; }
 .inputs-prompt-head { display: flex; align-items: flex-start; gap: 8px; }
 .inputs-prompt-head h3 { flex: 1; margin: 0 0 6px; font: 600 15px/1.35 var(--sans); text-transform: none; }
 .inputs-prompt-head .icon-button { width: 28px; height: 28px; font-size: 18px; line-height: 1; }
@@ -1295,7 +1295,7 @@ html[data-assistant="expert"] body:not([data-agent="open"]) .agent { display: no
 .inputs-prompt-foot { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
 .inputs-prompt-foot a { color: inherit; text-decoration: underline; }
 /* §7.3 Scored before / after: on screen only. */
-.before-after { text-align: left; margin: 0 0 14px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; font-size: 14px; }
+.before-after { text-align: left; margin: 14px 0; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; font-size: 14px; }
 .before-after h3 { margin: 0 0 8px; font: 600 15px var(--sans); text-transform: none; }
 .before-after dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; }
 .before-after dt { color: var(--muted); }
@@ -1304,3 +1304,6 @@ html[data-assistant="expert"] body:not([data-agent="open"]) .agent { display: no
 .card-rerun { margin-left: auto; }
 .card-rerun + .card-remove { margin-left: 0; }
 #cabinetClear { white-space: nowrap; }
+.score-card .score-delta { margin-top: 4px; font: 400 13px var(--sans); letter-spacing: 0; text-transform: none; }
+/* v1.1.2: while the cabinet drawer is open, the toast (Remove's Undo) lives inside it, pinned to its bottom edge. */
+.drawer > .toast { left: 16px; right: 16px; top: auto; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); translate: none; max-width: none; }

@@ -2313,6 +2313,10 @@ function showToast(message, actions = [], { duration = 10000 } = {}) {
     button.addEventListener("click", () => { hideToast(); action.run(); });
     toastActions.appendChild(button);
   }
+  // A modal dialog (the cabinet drawer) makes the rest of the page inert, so the toast joins it while it is open;
+  // otherwise Remove's Undo could not be reached (v1.1.2: keep Remove's confirmation).
+  const host = [...document.querySelectorAll("dialog[open]")].filter((d) => d.matches(":modal")).pop() || document.body;
+  if (toast.parentElement !== host) host.appendChild(toast);
   toast.hidden = false;
   toastTimer = setTimeout(hideToast, duration);
 }
@@ -3200,12 +3204,21 @@ function rerunIntake(item) {
 }
 
 // Scored before / after (addendum §7.3): on screen only, after a re-run whose previous result is still stored.
-const BA_LABELS = {
-  workflow_tasks: "Q1 manual tasks", hourly_cost: "Q2 hourly cost", success_metric: "Q3 success metric",
-  process_owner: "Q4 process owner", systems_access: "Q5 systems", data_readiness: "Q6 data", exceptions: "Q7 exceptions",
-  sensitive_data: "Q8 regulated data", past_attempts: "Q9 previous attempts", maintenance: "Q10 maintenance",
-  finance_signals: "Q11 finance", budget: "budget", pain_points: "pain points", goals: "goals",
+// Question numbers mirror client_discovery.core.QUESTION_NUMBERS (the one questionnaire map; a test pins the parity).
+// Older questionnaires without section 6 have no numbered questions, so their labels carry no number.
+const QUESTION_NUMBERS = {
+  workflow_tasks: 1, hourly_cost: 2, success_metric: 3, process_owner: 4, systems_access: 5, data_readiness: 6,
+  exceptions: 7, sensitive_data: 8, past_attempts: 9, maintenance: 10, finance_signals: 11,
 };
+const BA_LABELS = {
+  workflow_tasks: "manual tasks", hourly_cost: "hourly cost", success_metric: "success metric",
+  process_owner: "process owner", systems_access: "systems", data_readiness: "data", exceptions: "exceptions",
+  sensitive_data: "regulated data", past_attempts: "previous attempts", maintenance: "maintenance",
+  finance_signals: "finance", budget: "budget", pain_points: "pain points", goals: "goals",
+};
+function answerLabel(key, numbered) {
+  return numbered && QUESTION_NUMBERS[key] ? `Q${QUESTION_NUMBERS[key]} ${BA_LABELS[key]}` : BA_LABELS[key];
+}
 const flagWords = (flag) => flag.toLowerCase().replace(/_/g, " ");
 function valueWords(payload) {
   if (!payload.score || payload.score.value_at_stake === null || payload.score.value_at_stake === undefined) return "not computed";
@@ -3224,16 +3237,22 @@ function beforeAfterRows(previous, current) {
     ["Inputs", `${previous.inputs_confidence || "unknown"} → ${current.inputs_confidence || "unknown"}`],
     ["Flags cleared", pf.filter((f) => !cf.includes(f)).map(flagWords).join(", ") || "none"],
     ["New flags", cf.filter((f) => !pf.includes(f)).map(flagWords).join(", ") || "none"],
-    ["Answers changed", changed.map((key) => BA_LABELS[key]).join(", ") || "none"],
+    ["Answers changed", changed.map((key) => answerLabel(key, Boolean((current.intake || {}).workflows_section))).join(", ") || "none"],
   ];
 }
 function renderBeforeAfter(current, previousId) {
   const box = document.querySelector("#beforeAfter");
   if (!box) return;
+  const delta = document.querySelector("#scoreDelta");
   const previous = previousId ? readCabinet().find((item) => item.id === previousId) : null;
   box.hidden = !previous;
+  if (delta) delta.hidden = true;
   if (!previous) return;
   const rows = beforeAfterRows(previous.result || {}, current);
+  if (rows && delta) {  // compact one-line delta inside the tier card (v1.1.2)
+    delta.textContent = `Was ${previous.result.score.total_score}, now ${current.score.total_score}`;
+    delta.hidden = false;
+  }
   const list = box.querySelector("dl");
   list.replaceChildren();
   if (!rows) {

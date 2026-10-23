@@ -359,8 +359,9 @@ def test_summary_follows_the_answer_first_template():  # §3.2, §9 item 1
     assert lines[1] == "Today Northstar Studio runs lead triage across three forms by hand: about 6 hours a week, roughly $15,840 a year."
     assert lines[2].startswith('2 pain points slow the team, led by "Leads arrive from three forms')
     assert "Why this tier:\n\n- Urgency 3/5:" in summary and "\n- Budget fit 4/5:" in summary and "\n- Readiness 4/5:" in summary
-    assert summary.endswith("Next step: The engagement should start with a paid pilot on a single workflow, measured against "
-                            "one agreed metric (question 9).")  # formal third person (code review on #39)
+    assert summary.endswith("Next step: Given the earlier automation attempt (question 9), the engagement should start "
+                            "with a paid pilot on a single workflow, measured against one agreed metric (question 3).")
+    # formal third person (code review on #39); numbers from core.QUESTION_NUMBERS (v1.1.2)
     assert "needs a reliable way to turn discovery intake" not in markdown_export(SAMPLE)  # §9 item 1
 
 
@@ -733,7 +734,7 @@ def test_json_carries_value_flags_sources_and_inputs_confidence():  # §6
     assert result["inputs_confidence"] == "partial"
     assert result["sources"][0].startswith("Data: Northstar Studio discovery questionnaire, received ")
     assert result["sources"][1:] == list(report_model.WORKS)
-    assert result["flag_actions"] == [report_model.FLAG_ACTIONS["TRUST_REPAIR"]]
+    assert result["flag_actions"] == [report_model.flag_action("TRUST_REPAIR", "Northstar Studio")]
     assert app_build(LEGACY)["inputs_confidence"] == "thin"
     assert app_build(questionnaire(q9="None"))["inputs_confidence"] == "complete"
     assert "strategic_analysis" not in result

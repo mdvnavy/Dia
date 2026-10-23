@@ -11,6 +11,7 @@ import re
 from dataclasses import replace
 from datetime import date as _date
 
+from .core import QUESTION_NUMBERS
 from .inputs import next_step_from_gap, next_steps, next_steps_markdown
 from .models import ClientIntake, OpportunityScore, ValidationIssue
 
@@ -98,19 +99,42 @@ ISSUE_LABELS = {
 }
 FLAG_ACTIONS = {  # §2.4: every flag is written as the action that clears it. Formal third person ({client}),
     # because these lines reach the client PDF (code review on #39: no operator voice such as "Ask for...").
-    "VALUE_AT_STAKE_MISSING": "{client} should provide the weekly hours of each manual task and the loaded hourly cost (questions 1 and 2).",
-    "VALUE_AT_STAKE_PARTIAL": "{client} should provide the weekly hours of each manual task that has none, to complete the value at stake (question 1).",
-    "NO_SUCCESS_METRIC": "{client} should agree on one success metric and its value today (question 3).",
-    "NO_OWNER": "{client} should name the process owner and the person who signs off on the project (question 4).",
-    "DATA_CLEANUP_FIRST": "{client} should plan data clean-up before the build starts (question 6).",
+    # Question references are {q:field[,field]} tokens, numbered from core.QUESTION_NUMBERS by flag_action() and
+    # left out for questionnaires without section 6. Never write a literal "(question N)" here.
+    "VALUE_AT_STAKE_MISSING": "{client} should provide the weekly hours of each manual task and the loaded hourly cost{q:workflow_tasks,hourly_cost}.",
+    "VALUE_AT_STAKE_PARTIAL": "{client} should provide the weekly hours of each manual task that has none, to complete the value at stake{q:workflow_tasks}.",
+    "NO_SUCCESS_METRIC": "{client} should agree on one success metric and its value today{q:success_metric}.",
+    "NO_OWNER": "{client} should name the process owner and the person who signs off on the project{q:process_owner}.",
+    "DATA_CLEANUP_FIRST": "{client} should plan data clean-up before the build starts{q:data_readiness}.",
     "SCOPE_RISK_SYSTEMS": ("{client} should confirm login or application programming interface (API) access to every "
-                           "system before the timeline is fixed (question 5)."),
-    "COMPLIANCE_REVIEW": "A person should review every output before it is sent (question 8).",
-    "TRUST_REPAIR": "The engagement should start with a paid pilot on a single workflow, measured against one agreed metric (question 9).",
-    "HUMAN_IN_LOOP": "{client} should write hand-off rules that route each listed exception to a named person (question 7).",
-    "SUPPORT_TERMS_NEEDED": "{client} should agree on who maintains the system and what support follows launch (question 10).",
+                           "system before the timeline is fixed{q:systems_access}."),
+    "COMPLIANCE_REVIEW": "A person should review every output before it is sent{q:sensitive_data}.",
+    "TRUST_REPAIR": ("Given the earlier automation attempt{q:past_attempts}, the engagement should start with a paid pilot "
+                     "on a single workflow, measured against one agreed metric{q:success_metric}."),
+    "HUMAN_IN_LOOP": "{client} should write hand-off rules that route each listed exception to a named person{q:exceptions}.",
+    "SUPPORT_TERMS_NEEDED": "{client} should agree on who maintains the system and what support follows launch{q:maintenance}.",
     "ROI_WEAK": "The budget should be checked against the value at stake: the top of the budget exceeds twice the yearly value.",
 }
+QUESTION_REF = re.compile(r"\{q:([a-z_,]+)\}")
+
+
+def question_ref(fields: list[str], numbered: bool = True) -> str:
+    """The ' (question N)' or ' (questions N and M)' suffix, numbered from core.QUESTION_NUMBERS, or '' when the
+    questionnaire has no numbered section 6."""
+    if not numbered:
+        return ""
+    numbers = [QUESTION_NUMBERS[field] for field in fields]
+    if len(numbers) == 1:
+        return f" (question {numbers[0]})"
+    return f" (questions {', '.join(map(str, numbers[:-1]))} and {numbers[-1]})"
+
+
+def flag_action(flag: str, client: str, numbered: bool = True) -> str:
+    """The client-facing action for a flag, with its question numbers taken from the one questionnaire map."""
+    text = QUESTION_REF.sub(lambda m: question_ref(m.group(1).split(","), numbered), FLAG_ACTIONS[flag])
+    return text.format(client=client)
+
+
 # Addendum §4.3: when Recommended next steps are shown, they replace these flag actions in "Flags to clear first".
 INPUT_GAP_FLAGS = ("VALUE_AT_STAKE_MISSING", "VALUE_AT_STAKE_PARTIAL", "NO_SUCCESS_METRIC")
 SIGNALS = (  # fixed Exhibit 1 order
@@ -250,7 +274,7 @@ def build_report(intake: ClientIntake, score: OpportunityScore, issues: list[Val
     flags = list(score.flags)
     missing = missing_answers(issues, flags)
     steps = next_steps(client, intake, score)  # addendum §4: None when no key input is missing
-    actions = [FLAG_ACTIONS[flag].format(client=client) for flag in flags
+    actions = [flag_action(flag, client, intake.workflows_section) for flag in flags
                if flag in FLAG_ACTIONS and not (steps and flag in INPUT_GAP_FLAGS)]
     top = score.workflows[0] if score.workflows else None
     pending = _pending(intake, score)
