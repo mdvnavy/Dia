@@ -156,9 +156,79 @@ python app.py   # forwarded port 8080
 | GET    | `/`                   | Web demo UI                               |
 | GET    | `/healthz`            | Cloud Run health check                    |
 | GET    | `/api/sample`         | Returns the sample questionnaire markdown |
-| GET    | `/api/agent/status`   | Reports whether a Gemini key is configured|
+| GET    | `/api/agent/status`   | Gemini key configured? + agent auth mode  |
 | POST   | `/api/process`        | Deterministic parse/score/generate        |
 | POST   | `/api/agent`          | Live Gemini ADK agent turn                |
+
+## Live agent access
+
+Interim policy until DIA has proper accounts (`agent_auth.py`, `agent_quota.py`):
+
+| Who | Ask DIA (`/api/agent`) |
+| --- | ---------------------- |
+| Visitors | Open, no sign-in. **10 questions per visitor per calendar day (America/New_York)**, then a friendly 429: "You've used today's 10 questions. Come back tomorrow!" |
+| Signed in with Google, email in `OWNER_EMAILS` | Unlimited, and skips the burst guard. |
+| Signed in with any other Google account | Same as a visitor (10/day). |
+
+**Google Sign-In.** The *Sign in* button sits in the top bar's right corner,
+just before the theme toggle. It uses Google Identity Services (the same
+pattern as Tia): the browser gets a Google ID token and POSTs it once to
+`/api/auth/session`, where the server verifies it with `google-auth`
+(signature, `aud` = `GOOGLE_CLIENT_ID`, `iss` = `accounts.google.com`, `exp`,
+`email_verified`). It then sets a `dia_session` cookie that lasts 12 hours. The
+cookie is HttpOnly, SameSite=Lax, Secure on Cloud Run, and HMAC-signed with
+`DIA_SESSION_SECRET`. It carries only the verified email, and owner status is
+re-checked against `OWNER_EMAILS` on every request. *Sign out* clears the
+cookie and calls `google.accounts.id.disableAutoSelect()`. The ID token is
+never stored in the page or logged.
+
+Without `GOOGLE_CLIENT_ID` or a `DIA_SESSION_SECRET` of at least 32
+characters, the button is hidden and everyone gets the visitor cap. Rotating
+`DIA_SESSION_SECRET` signs everyone out.
+
+**Who is a "visitor"?** Each question is charged to two buckets and allowed only
+if both are under the limit: the client IP (on Cloud Run the right-most
+`X-Forwarded-For` hop, which Google appends; the left-most hops are
+client-supplied and ignored; IPv6 is collapsed to its /64) and a random
+`dia_vid` cookie (HttpOnly, SameSite=Lax, Secure on Cloud Run). Clearing
+cookies doesn't reset the cap (the IP bucket is full), and nor does switching
+networks with the same browser (the cookie bucket is). Keys are stored as
+salted HMAC-SHA256 hashes (`DIA_VISITOR_SALT`), never raw IPs. People sharing
+one IP (an office NAT) share its 10 questions.
+
+**Where counts live.** `DIA_QUOTA_STORE=firestore` keeps counters in
+Firestore (one atomic `commit` with an increment transform per question;
+documents in `dia_agent_quota` carry `expire_at` for a TTL policy), so the cap
+holds across Cloud Run instances. Without it the counters are **in memory, per
+instance, and lost when an instance restarts**: a visitor can get up to
+`10 x instances` questions a day, plus a fresh 10 whenever Cloud Run recycles
+an instance. If you run without Firestore, keep `--max-instances` at 1–2.
+
+**If Firestore is down** the question is counted in the in-memory store
+instead (fail-soft): visitors aren't locked out by an outage, and spend is
+still capped (per instance), never unlimited.
+
+Only questions that actually reach Gemini are charged: empty messages and
+"agent not configured" replies are free. A short per-IP burst guard
+(`DIA_AGENT_RATE_LIMIT`, default `10/60`, in memory) also stays in front, so
+scripted clients are throttled before touching the quota store. Owners bypass
+both. Sign-in attempts have their own burst guard.
+
+MCP toolsets are attached only via `DIA_AGENT_MCP_MODE` (`none` by default, or
+`make`, `gcp`, `all`); words in a prompt never switch tools on. The
+deterministic `/api/process` path is unaffected by all of this.
+
+| Variable | Default | Purpose |
+| -------- | ------- | ------- |
+| `GOOGLE_CLIENT_ID` | unset | OAuth Web client ID for Google Sign-In (public). Unset = no sign-in button. |
+| `OWNER_EMAILS` | unset | Comma list of Google emails with unlimited access (case-insensitive). |
+| `DIA_SESSION_SECRET` | unset | Signs the 12h session cookie (≥32 chars, from Secret Manager). Unset = sign-in off. |
+| `DIA_AGENT_DAILY_LIMIT` | `10` | Questions per visitor per day (`0` = visitors can't use Ask DIA). |
+| `DIA_QUOTA_STORE` | `memory` | `firestore` for a cap shared across instances. |
+| `DIA_FIRESTORE_PROJECT` / `DIA_FIRESTORE_DATABASE` / `DIA_FIRESTORE_COLLECTION` | ADC project / `(default)` / `dia_agent_quota` | Firestore location. |
+| `DIA_VISITOR_SALT` | built-in | Secret salt for hashing visitor keys (set it in production). |
+| `DIA_AGENT_RATE_LIMIT` | `10/60` | Burst guard, calls/seconds per IP (`0` disables). |
+| `DIA_TRUST_FORWARDED_FOR` | off | Trust `X-Forwarded-For` off Cloud Run (behind your own proxy). |
 
 ## Submission hygiene
 
