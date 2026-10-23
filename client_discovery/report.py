@@ -73,14 +73,11 @@ def _safe_fetcher() -> Any:
     return LocalOnlyFetcher(allowed_protocols=("file",))
 
 
-def _rebuild(result: dict[str, Any], report_date: str | None) -> dict[str, Any]:
-    """Rebuild the report deterministically from the intake answers. Client-supplied documents, scores and
-    issues are ignored, so nothing but DIA's own templates can reach the PDF (persona v1.2 rule 1)."""
+def intake_from_result(result: dict[str, Any]):
+    """The ClientIntake held in a saved result, coerced field by field. Nothing else in the result is used."""
     from dataclasses import fields
 
-    from client_discovery.core import score_opportunity, validate_intake
     from client_discovery.models import ClientIntake
-    from client_discovery.report_model import build_report
 
     raw = result.get("intake") if isinstance(result.get("intake"), dict) else {}
     kwargs = {}
@@ -95,7 +92,16 @@ def _rebuild(result: dict[str, Any], report_date: str | None) -> dict[str, Any]:
         else:
             value = "" if value is None else str(value)
         kwargs[f.name] = value
-    intake = ClientIntake(**kwargs)
+    return ClientIntake(**kwargs)
+
+
+def _rebuild(result: dict[str, Any], report_date: str | None) -> dict[str, Any]:
+    """Rebuild the report deterministically from the intake answers. Client-supplied documents, scores and
+    issues are ignored, so nothing but DIA's own templates can reach the PDF (persona v1.2 rule 1)."""
+    from client_discovery.core import score_opportunity, validate_intake
+    from client_discovery.report_model import build_report
+
+    intake = intake_from_result(result)
     score = score_opportunity(intake)
     issues = validate_intake(intake)
     return {"intake": intake, "score": score, "issues": issues,

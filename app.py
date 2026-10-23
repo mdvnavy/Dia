@@ -97,7 +97,27 @@ def build_intake_response(questionnaire: str) -> dict[str, object]:
     if not questionnaire.strip():
         raise ValueError("questionnaire is required")
 
-    intake = parse_questionnaire_markdown(questionnaire)
+    return response_for_intake(parse_questionnaire_markdown(questionnaire))
+
+
+def rescore_result(result: dict[str, object]) -> dict[str, object]:
+    """Proto (#39 follow-up): an intake saved under older rules is rescored from its saved intake answers, the same
+    input the PDF is built from, so the screen and the PDF show the same figures. Marked `rescored`."""
+    from client_discovery.report import intake_from_result
+
+    if not isinstance(result, dict) or not isinstance(result.get("intake"), dict):
+        raise ValueError("result with intake is required")
+    response = response_for_intake(intake_from_result(result))
+    response["rescored"] = True
+    return response
+
+
+def score_header(score: dict[str, object]) -> str:
+    """"Tier|total/max|timeline": the figures the screen shows, sent with a PDF so the two can be compared."""
+    return f"{score.get('tier')}|{score.get('total_score')}/{score.get('max_score')}|{score.get('timeline')}"
+
+
+def response_for_intake(intake) -> dict[str, object]:
     issues = validate_intake(intake)
     score = score_opportunity(intake)
     documents = generate_documents(intake, score)
@@ -165,6 +185,9 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
         if path == "/api/pdf":
             self.handle_pdf()
             return
+        if path == "/api/rescore":
+            self.handle_rescore()
+            return
         self.send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
 
     def handle_process(self) -> None:
@@ -231,10 +254,13 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
         try:
             payload = self.read_json()
             questionnaire = str(payload.get("questionnaire") or "")
-            if questionnaire.strip():
+            saved = payload.get("result")
+            # Proto (#39 follow-up): a saved result is the source when one exists (its intake answers, rescored by
+            # DIA's own rules in render_pdf), so the PDF matches the screen; the questionnaire is the fallback.
+            if isinstance(saved, dict) and isinstance(saved.get("intake"), dict):
+                result = saved
+            elif questionnaire.strip():
                 result = build_intake_response(questionnaire)
-            elif isinstance(payload.get("result"), dict):
-                result = payload["result"]
             else:
                 raise ValueError("questionnaire or result is required")
             report_date = payload.get("date")
@@ -251,10 +277,27 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
             return
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "application/pdf")
+        from client_discovery.core import client_score_dict as _csd, score_opportunity as _so
+        from client_discovery.report import intake_from_result
+
+        self.send_header("X-DIA-Score", score_header(_csd(_so(intake_from_result(result)))))
         self.send_header("Content-Disposition", f'attachment; filename="{pdf_filename(result)}"')
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def handle_rescore(self) -> None:
+        """Rescore a saved result under the current rules. Nothing is recorded (it is not a new run)."""
+        try:
+            payload = self.read_json()
+            response = rescore_result(payload.get("result"))
+        except json.JSONDecodeError:
+            self.send_json({"error": "invalid json"}, HTTPStatus.BAD_REQUEST)
+            return
+        except ValueError as error:
+            self.send_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
+            return
+        self.send_json(response)
 
     def _record_engagement(self, response: dict[str, object]) -> None:
         try:

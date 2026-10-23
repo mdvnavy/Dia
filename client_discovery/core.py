@@ -235,6 +235,23 @@ def top_time_sink(text: str, values: list[float | None]) -> str | None:
     return min(candidates)[2] if candidates else sinks[0]
 
 
+def _cap(text: str) -> str:
+    return text[:1].upper() + text[1:] if text else text
+
+
+def top_uncategorised_task(text: str, workflows: list[dict]) -> dict | None:
+    """The highest-value Q1 task (first in Q1 order on a tie) when it matches no time-sink category, else None.
+    `workflows` is parse_workflows order with a "value" each. The category is matched as in top_time_sink (the
+    task text before " - "). None also when no task has a value, since then no task is known to carry the most."""
+    parts = _workflow_parts(text)
+    valued = [(i, row) for i, row in enumerate(workflows) if row.get("value") is not None]
+    if not valued:
+        return None
+    index, top = min(valued, key=lambda item: (-item[1]["value"], item[0]))
+    task_text = re.split(r"\s+[-–—]\s+", parts[index], maxsplit=1)[0] if index < len(parts) else top["task"]
+    return None if time_sink_matches(task_text) else top
+
+
 def _has_number(text: str) -> bool:
     return bool(re.search(r"\d", text or ""))
 
@@ -301,16 +318,20 @@ def _band_label(value: int) -> str:
     return f"below the ${low:,} threshold"
 
 
-def _signal_evidence(*, pain_count, sink, urgency_base, urgency, budget, budget_base, budget_fit,
+def _signal_evidence(*, pain_count, sink, top_task=None, urgency_base, urgency, budget, budget_base, budget_fit,
                      readiness_base, readiness_minus, tech_readiness, value_at_stake, value_partial,
                      strategic_value) -> dict:
     """'Why this tier': one sentence per sub-score naming the evidence that sets it (Proto, on #39), so the
     section cites the scoring inputs instead of restating the summary bullets."""
     bump = urgency - urgency_base
+    other = "another listed task matching a known time sink" if top_task else "a known time sink"
     urgency_text = (f"A count of {_plural(pain_count, 'pain point')}"
-                    + (f", plus 1 for a known time sink ({sink})," if bump else "")
-                    + (f", with a known time sink ({sink}) and the 5-point cap," if sink and not bump else "")
+                    + (f", plus 1 for {other} ({sink})," if bump else "")
+                    + (f", with {other} ({sink}) and the 5-point cap," if sink and not bump else "")
                     + f" places urgency at {urgency} of 5.")
+    if top_task:
+        urgency_text += (f" {_cap(top_task['task'])} carries the largest value at stake "
+                         f"(${top_task['value']:,}/yr) and has no time-sink category.")
     value_text = None
     if value_at_stake is not None:
         value_text = f"{'at least ' if value_partial else ''}${value_at_stake:,}/yr"
@@ -406,9 +427,16 @@ def score_opportunity(intake: ClientIntake) -> OpportunityScore:
         gaps = [gap for gap, missing in (("Weekly hours missing", row["hours"] is None), ("Hourly cost missing", not rate)) if missing]
         workflows.append({**row, "value": value, "gaps": gaps})
     sink = top_time_sink(intake.workflow_tasks, [row["value"] for row in workflows])
+    # Proto (#39 follow-up): wording only. When the highest-value task has no time-sink category (lead intake is
+    # left out on purpose, §2.1), the reason names that task instead of the category of a smaller one.
+    top_task = top_uncategorised_task(intake.workflow_tasks, workflows) if sink else None
     if sink:
         urgency = min(5, urgency + 1)
-        urgency_reason += f", and the manual work matches a known time sink ({sink})"
+        if top_task:
+            urgency_reason += (f"; {_cap(top_task['task'])} carries the largest value at stake "
+                               f"(${top_task['value']:,}/yr), and another listed task matches a known time sink")
+        else:
+            urgency_reason += f", and the manual work matches a known time sink ({sink})"
     workflows.sort(key=lambda row: (-(row["value"] or 0), len(row["gaps"])))
     # Ikenna (via Bash): 'show partial value as "at least $X"'. When some listed tasks have a value and others do
     # not, the subtotal of the valued tasks is a lower bound: it is shown as "at least $X", flagged
@@ -511,7 +539,7 @@ def score_opportunity(intake: ClientIntake) -> OpportunityScore:
         quick_wins=quick_wins,
         signal_reasons=signal_reasons,
         signal_evidence=_signal_evidence(
-            pain_count=pain_count, sink=sink, urgency_base=urgency_base, urgency=urgency,
+            pain_count=pain_count, sink=sink, top_task=top_task, urgency_base=urgency_base, urgency=urgency,
             budget=intake.budget.strip(), budget_base=budget_base, budget_fit=budget_fit,
             readiness_base=readiness_base, readiness_minus=readiness_minus, tech_readiness=tech_readiness,
             value_at_stake=value_at_stake, value_partial=value_partial, strategic_value=strategic_value),

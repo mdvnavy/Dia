@@ -712,11 +712,34 @@ function renderIssues(items) {
   }
 }
 
-// Proto, on #39: intakes saved before dia-savant have no value_at_stake in their score. They keep their old
-// score (nothing is re-scored on reopen) and show a small hint instead. Fresh runs always carry the field.
+// Proto, on #39: intakes saved before dia-savant have no value_at_stake in their score. On reopen they are rescored
+// under the current rules (from their saved intake, the same input the PDF uses), so the screen and the PDF never
+// disagree; the hint then reads "Rescored under the current rules." If the rescore can't run (offline), the old
+// score stays on screen with "Scored before value at stake".
+const isLegacyScore = (payload) => Boolean(payload && payload.score && !Object.prototype.hasOwnProperty.call(payload.score, "value_at_stake"));
 function renderLegacyScoreHint(payload) {
   const hint = document.querySelector("#legacyScoreHint");
-  if (hint) hint.hidden = !(payload.score && !Object.prototype.hasOwnProperty.call(payload.score, "value_at_stake"));
+  if (!hint) return;
+  const rescored = Boolean(payload && payload.rescored);
+  hint.hidden = !(rescored || isLegacyScore(payload));
+  hint.textContent = rescored ? "Rescored under the current rules." : "Scored before value at stake";
+}
+
+async function rescoreEntry(item) {
+  const response = await fetch("/api/rescore", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ result: scrubForExport(item.result) }),
+  });
+  if (!response.ok) throw new Error("rescore failed");
+  const payload = await response.json();
+  const onScreen = latestPayload === item.result || (item.id && currentEntryId === item.id);
+  item.result = payload;
+  if (item.id && readCabinet().some((entry) => entry.id === item.id)) {
+    updateEntry(item.id, { result: payload, tier: payload.score.tier, score: payload.score.total_score, maxScore: payload.score.max_score });
+  }
+  if (onScreen) showResults(payload, item.questionnaire);
+  return payload;
 }
 
 // dia-savant §3.5: the Inputs label (complete, partial or thin) and one sentence on what to do. Screen only.
@@ -3050,6 +3073,10 @@ function reopenIntake(item) {
   showResults(item.result, item.questionnaire);
   currentEntryId = item.id;
   statusText.textContent = `Reopened ${item.title}`;
+  if (isLegacyScore(item.result)) {
+    rescoreEntry(item).then(() => { statusText.textContent = `Reopened ${item.title}. Rescored under the current rules.`; })
+      .catch(() => { /* offline: the saved score stays, with its "Scored before value at stake" hint */ });
+  }
   const heading = document.querySelector(".score-card span");
   if (heading) { heading.tabIndex = -1; heading.focus({ preventScroll: true }); heading.scrollIntoView({ block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" }); }
 }
@@ -3068,6 +3095,13 @@ async function fetchPdf(item, signal) {
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
     throw new Error(payload.error || "PDF rendering failed on the server.");
+  }
+  // Screen and PDF must never disagree: when the PDF's figures differ from the saved ones (older rules), the saved
+  // result is rescored and the screen updated to match.
+  const pdfScore = response.headers.get("X-DIA-Score");
+  const saved = item.result && item.result.score;
+  if (pdfScore && saved && pdfScore !== `${saved.tier}|${saved.total_score}/${saved.max_score}|${saved.timeline}`) {
+    await rescoreEntry(item).catch(() => {});
   }
   return response.blob();
 }
@@ -3116,7 +3150,7 @@ downloadPdf.addEventListener("click", async () => {
   downloadPdf.setAttribute("aria-busy", "true");
   flashStatus(exportStatus, "Building PDF…");
   try {
-    const item = { title: latestPayload.intake?.company_name || "intake", questionnaire: lastRunQuestionnaire, result: latestPayload, savedAt: new Date().toISOString() };
+    const item = { id: currentEntryId, title: latestPayload.intake?.company_name || "intake", questionnaire: lastRunQuestionnaire, result: latestPayload, savedAt: new Date().toISOString() };
     downloadBlob(`dia-${slugify(item.title)}.pdf`, await fetchPdf(item));
     if (currentEntryId) updateEntry(currentEntryId, { exportedAt: new Date().toISOString() });
     flashStatus(exportStatus, "PDF downloaded");

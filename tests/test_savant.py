@@ -188,6 +188,10 @@ def _urgency_reason(**answers: str) -> str:
     return score_of(questionnaire(**answers)).signal_reasons["urgency"]
 
 
+def _urgency_evidence(**answers: str) -> str:
+    return score_of(questionnaire(**answers)).signal_evidence["urgency"]
+
+
 def test_time_sink_named_is_the_highest_value_matching_task():
     # Scheduling (coordination) is worth more than bookkeeping (finance admin), so keyword order no longer wins.
     reason = _urgency_reason(q1="Bookkeeping - founder, 2 hours a week, 1 person; "
@@ -203,13 +207,38 @@ def test_time_sink_ignores_the_person_named_after_the_task():
     # "sales coordinator" is who does it, not coordination work; lead intake is not a scored category (§2.1).
     reason = _urgency_reason(q1="Lead triage - sales coordinator, 9 hours a week, 1 person; "
                                 "Invoice chasing - founder, 2 hours a week, 1 person", q2="$50 an hour")
-    assert reason.endswith("(finance admin)")
+    # Lead triage carries the most and has no category, so the reason names it; the +1 still comes from finance admin.
+    assert "; Lead triage carries the largest value at stake ($" in reason
+    assert reason.endswith("and another listed task matches a known time sink")
+    assert "coordination" not in reason
+    assert "(finance admin)" in _urgency_evidence(q1="Lead triage - sales coordinator, 9 hours a week, 1 person; "
+                                                    "Invoice chasing - founder, 2 hours a week, 1 person",
+                                                 q2="$50 an hour")
 
 
-def test_sample_urgency_names_its_highest_value_known_time_sink():
-    # Lead triage ($15,840) and CRM updates ($13,200) match no category; invoice chasing ($7,920) is finance admin.
-    assert score_of(SAMPLE).signal_reasons["urgency"] == (
-        "2 pain points listed, and the manual work matches a known time sink (finance admin)")
+def test_sample_urgency_names_its_highest_value_task_when_it_has_no_category():
+    # Proto (#39 follow-up, wording only): lead triage ($15,840) is the top task and matches no category (lead intake
+    # is unweighted, §2.1), so the reason names that task instead of the finance admin category of a smaller one.
+    score = score_of(SAMPLE)
+    assert score.signal_reasons["urgency"] == (
+        "2 pain points listed; Lead triage across three forms carries the largest value at stake ($15,840/yr), "
+        "and another listed task matches a known time sink")
+    assert "Urgency 3/5: 2 pain points listed; Lead triage across three forms carries the largest value at stake " \
+           "($15,840/yr), and another listed task matches a known time sink." in score.reasons
+    assert score.urgency == 3  # scoring unchanged: 2 pain points + 1 for the finance admin task
+    assert score.signal_evidence["urgency"] == (
+        "A count of 2 pain points, plus 1 for another listed task matching a known time sink (finance admin), "
+        "places urgency at 3 of 5. Lead triage across three forms carries the largest value at stake ($15,840/yr) "
+        "and has no time-sink category.")
+    summary = report_for(SAMPLE)[0]["sections"][0]["body"]
+    assert "matches a known time sink (finance admin)" not in summary
+    assert "Lead triage across three forms carries the largest value at stake ($15,840/yr)" in summary
+
+
+def test_urgency_keeps_category_wording_when_the_top_task_has_one():
+    reason = _urgency_reason(q1="Bookkeeping - founder, 9 hours a week, 1 person; "
+                                "Lead triage - sales rep, 2 hours a week, 1 person", q2="$50 an hour")
+    assert reason == "2 pain points listed, and the manual work matches a known time sink (finance admin)"
 
 
 def test_time_sink_tie_falls_back_to_keyword_order():
@@ -234,9 +263,11 @@ def test_time_sink_without_values_falls_back_to_keyword_order(answers):
 
 def test_time_sink_unvalued_match_falls_back_even_when_other_tasks_have_values():
     # The only valued task matches no category, so the keyword-order rule names the sink.
-    reason = _urgency_reason(q1="Lead triage - sales rep, 8 hours a week, 1 person; Scheduling - founder; "
-                                "Bookkeeping - founder", q2="$50 an hour")
-    assert reason.endswith("(finance admin)")
+    answers = dict(q1="Lead triage - sales rep, 8 hours a week, 1 person; Scheduling - founder; "
+                      "Bookkeeping - founder", q2="$50 an hour")
+    assert "(finance admin)" in _urgency_evidence(**answers)
+    # The valued task is the top one and has no category, so the reason names it (Proto wording rule).
+    assert "; Lead triage carries the largest value at stake ($" in _urgency_reason(**answers)
 
 
 def test_budget_against_value():
@@ -894,8 +925,9 @@ def test_urgency_names_the_category_of_the_highest_value_task():
     q1 = ("Lead triage across three forms - sales coordinator, 6 hours a week, 1 person; Invoice chasing and "
           "reconciliation - founder, 3 hours a week, 1 person; Scheduling - office manager, 8 hours a week, 1 person")
     assert score_of(questionnaire(q1=q1)).signal_reasons["urgency"].endswith("(coordination)")
-    # The sample itself: its two top tasks (lead triage, CRM updates) match no category, so finance admin stays.
-    assert score_of(SAMPLE).signal_reasons["urgency"].endswith("(finance admin)")
+    # The sample itself: its two top tasks (lead triage, CRM updates) match no category, so finance admin still
+    # scores the +1, but the reason names lead triage (see test_sample_urgency_names_its_highest_value_task...).
+    assert "(finance admin)" in score_of(SAMPLE).signal_evidence["urgency"]
 
 
 def test_why_this_tier_cites_sub_score_evidence_not_the_summary_bullets():
@@ -903,7 +935,9 @@ def test_why_this_tier_cites_sub_score_evidence_not_the_summary_bullets():
     why = report["sections"][3]["body"]
     assert why.splitlines() == [
         "- 2 pain points and 2 goals map to the Custom AI Agent tier.",
-        "- A count of 2 pain points, plus 1 for a known time sink (finance admin), places urgency at 3 of 5.",
+        "- A count of 2 pain points, plus 1 for another listed task matching a known time sink (finance admin), "
+        "places urgency at 3 of 5. Lead triage across three forms carries the largest value at stake ($15,840/yr) "
+        "and has no time-sink category.",
         "- A stated budget of $2,500-$10,000 that fits this tier, plus 1 because the value at stake of "
         "$36,960/yr exceeds its top, places budget fit at 4 of 5.",
         "- Having an in-house technical person and current tools places readiness at 4 of 5.",
@@ -947,16 +981,120 @@ def test_title_over_the_limit_uses_the_short_form_without_the_name(monkeypatch):
     assert not any(LONG_NAME in title for title in report["action_titles"])
 
 
-def test_reopened_intake_scored_before_value_at_stake_keeps_its_score_and_shows_a_hint(context, base_url):
+LEGACY_REOPEN = """() => { const p = JSON.parse(JSON.stringify(latestPayload));
+    delete p.score.value_at_stake; delete p.score.rules_version; p.score.total_score = 12;
+    window.__legacy = { id: 'old', title: 'Old intake', questionnaire: '', result: p, savedAt: new Date().toISOString() };
+    reopenIntake(window.__legacy); }"""
+
+
+def test_reopened_intake_scored_before_value_at_stake_is_rescored_and_says_so(context, base_url):
+    # Proto (#39 follow-up): the old intake is rescored on screen too, so the screen and the PDF agree.
     page = open_page(context, base_url)
     run_intake(page, SAMPLE)
     assert page.is_hidden("#legacyScoreHint")  # fresh runs carry value_at_stake
-    page.evaluate("""() => { const p = JSON.parse(JSON.stringify(latestPayload));
-        delete p.score.value_at_stake; delete p.score.rules_version; p.score.total_score = 12;
-        reopenIntake({ id: 'old', title: 'Old intake', questionnaire: '', result: p }); }""")
+    page.evaluate(LEGACY_REOPEN)
+    page.wait_for_function("document.querySelector('#legacyScoreHint').textContent === 'Rescored under the current rules.'")
     assert page.is_visible("#legacyScoreHint")
-    assert page.inner_text("#legacyScoreHint") == "Scored before value at stake"
-    assert page.inner_text("#score").startswith("12/20")  # the old score is shown as saved, not re-scored
+    assert page.inner_text("#score").startswith("15/20")  # the rescored figure, not the saved 12
+    assert "Scored before value at stake" not in page.inner_text("body")
     run_intake(page, SAMPLE)
     assert page.is_hidden("#legacyScoreHint")
     assert page.errors == []
+
+
+def test_reopened_old_intake_keeps_its_score_with_the_old_hint_when_it_cannot_be_rescored(context, base_url):
+    page = open_page(context, base_url)
+    run_intake(page, SAMPLE)
+    page.route("**/api/rescore", lambda route: route.abort())
+    page.evaluate(LEGACY_REOPEN)
+    page.wait_for_timeout(300)
+    assert page.inner_text("#legacyScoreHint") == "Scored before value at stake"
+    assert page.inner_text("#score").startswith("12/20")
+    assert page.errors == []
+
+
+def _pdf_text(body: bytes) -> str:
+    import subprocess as _sp
+    import tempfile
+
+    with tempfile.NamedTemporaryFile(suffix=".pdf") as handle:
+        handle.write(body)
+        handle.flush()
+        return _sp.run(["pdftotext", "-layout", handle.name, "-"], capture_output=True, text=True, check=True).stdout
+
+
+def test_old_intake_pdf_matches_the_screen(context, base_url):
+    # Screen and PDF never disagree: the PDF is built from the saved (rescored) result and carries its figures.
+    pytest.importorskip("weasyprint")
+    if not shutil.which("pdftotext"):
+        pytest.skip("pdftotext not installed")
+    page = open_page(context, base_url)
+    run_intake(page, SAMPLE)
+    page.evaluate(LEGACY_REOPEN)
+    page.wait_for_function("document.querySelector('#legacyScoreHint').textContent === 'Rescored under the current rules.'")
+    got = page.evaluate("""async () => { const r = await fetch('/api/pdf', { method: 'POST', headers: { 'Content-Type':
+        'application/json' }, body: JSON.stringify({ questionnaire: 'not the saved one', result: scrubForExport(
+        window.__legacy.result) }) }); const b = new Uint8Array(await r.arrayBuffer()); let s = '';
+        for (const x of b) s += String.fromCharCode(x); return { header: r.headers.get('X-DIA-Score'), pdf: btoa(s) }; }""")
+    tier, total, timeline = page.text_content("#tier"), *page.text_content("#score").split(" · ")
+    assert got["header"] == f"{tier}|{total}|{timeline}"
+    import base64
+
+    text = " ".join(_pdf_text(base64.b64decode(got["pdf"])).split())
+    assert f"start with a {tier} ({timeline})" in text and "15 /20" in text.replace("15/20", "15 /20")
+    assert page.errors == []
+
+
+def test_pdf_with_a_mismatched_saved_score_updates_the_screen(context, base_url):
+    # A saved result whose figures differ from the PDF's (older rules) is rescored, and the screen updated.
+    pytest.importorskip("weasyprint")
+    page = open_page(context, base_url)
+    run_intake(page, SAMPLE)
+    page.evaluate("""() => { const p = JSON.parse(JSON.stringify(latestPayload)); p.score.total_score = 11;
+        showResults(p, lastRunQuestionnaire); }""")
+    assert page.inner_text("#score").startswith("11/20")
+    page.evaluate("""async () => { await fetchPdf({ title: 'x', questionnaire: lastRunQuestionnaire,
+        result: latestPayload, savedAt: new Date().toISOString() }); }""")
+    page.wait_for_function("document.querySelector('#score').textContent.startsWith('15/20')")
+    assert page.inner_text("#legacyScoreHint") == "Rescored under the current rules."
+    assert page.errors == []
+
+
+def test_api_pdf_prefers_the_saved_result_over_the_questionnaire():
+    pytest.importorskip("weasyprint")
+    import threading
+    import urllib.request
+    from http.server import ThreadingHTTPServer
+
+    from app import ClientDiscoveryHandler
+
+    saved = app_build(SAMPLE)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), ClientDiscoveryHandler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        other = SAMPLE.replace("Northstar Studio", "Different Client Co")
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{server.server_address[1]}/api/pdf", method="POST",
+            data=json.dumps({"questionnaire": other, "result": saved}).encode(),
+            headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(request, timeout=60) as response:
+            header, body = response.headers["X-DIA-Score"], response.read()
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert header == f"Custom AI Agent|15/20|2-4 weeks"
+    if shutil.which("pdftotext"):
+        text = _pdf_text(body)
+        assert "Northstar Studio" in text and "Different Client Co" not in text
+
+
+def test_rescore_result_uses_the_saved_intake_and_marks_it():
+    from app import rescore_result
+
+    saved = app_build(SAMPLE)
+    old = json.loads(json.dumps(saved))
+    del old["score"]["value_at_stake"]
+    old["score"]["total_score"] = 12
+    again = rescore_result(old)
+    assert again["rescored"] is True and again["score"] == saved["score"]
+    assert again["documents"] == saved["documents"]
