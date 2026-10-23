@@ -10,6 +10,8 @@ import os
 from pathlib import Path
 from urllib.parse import urlparse
 
+from agent_auth import RateLimiter
+
 from client_discovery.core import (
     generate_documents,
     parse_questionnaire_markdown,
@@ -32,6 +34,7 @@ MAX_REQUEST_BYTES = 10 * 1024 * 1024
 PUBLIC_FILES = {
     "/": BASE_DIR / "templates" / "index.html",
     "/static/app.js": BASE_DIR / "static" / "app.js",
+    "/static/owner-key.js": BASE_DIR / "static" / "owner-key.js",
     "/static/style.css": BASE_DIR / "static" / "style.css",
 }
 # Runtime sample lives outside tests/ so it ships in the Cloud Run image even
@@ -66,6 +69,11 @@ def build_intake_response(questionnaire: str) -> dict[str, object]:
     }
 
 
+# Separate burst guard for /api/agent/status so page loads don't eat the
+# agent's burst allowance; when exceeded, status just omits the quota.
+status_rate_limiter = RateLimiter()
+
+
 class ClientDiscoveryHandler(BaseHTTPRequestHandler):
     server_version = "DIADiscoveryIntakeAgent/0.1"
     # Socket timeout so a client that claims a body but never sends it cannot
@@ -81,12 +89,7 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
             self.send_json({"questionnaire": read_sample_questionnaire()})
             return
         if path == "/api/agent/status":
-            from agent_auth import configured_mode
-            from agent_runtime import is_configured
-
-            self.send_json(
-                {"configured": is_configured(), "auth": configured_mode()}
-            )
+            self.handle_agent_status()
             return
 
         file_path = PUBLIC_FILES.get(path)
@@ -159,31 +162,93 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
         except Exception as error:  # noqa: BLE001 - capture must never break intake
             logger.warning("OBS capture skipped: %s", error)
 
+    # --- live agent ---------------------------------------------------------
+
+    def _visitor_keys(self) -> list[str]:
+        """Quota buckets for this request; mints the visitor cookie if needed."""
+        from agent_auth import client_ip
+        from agent_quota import (
+            new_visitor_id,
+            parse_cookie,
+            valid_visitor_id,
+            visitor_cookie_header,
+            visitor_keys,
+        )
+
+        visitor_id = parse_cookie(self.headers.get("Cookie"))
+        if not valid_visitor_id(visitor_id):
+            visitor_id = new_visitor_id()
+            secure = bool(os.environ.get("K_SERVICE")) or (
+                self.headers.get("X-Forwarded-Proto", "").lower() == "https"
+            )
+            self._pending_headers = {
+                **getattr(self, "_pending_headers", {}),
+                "Set-Cookie": visitor_cookie_header(visitor_id, secure),
+            }
+        ip = client_ip(self.headers, self.client_address[0])
+        return visitor_keys(ip, visitor_id)
+
+    def handle_agent_status(self) -> None:
+        from agent_auth import client_ip, configured_mode, is_owner, supplied_owner_token
+        from agent_quota import get_quota
+        from agent_runtime import is_configured
+
+        payload: dict[str, object] = {
+            "configured": is_configured(),
+            "auth": configured_mode(),
+        }
+        if is_owner(self.headers):
+            payload.update(owner=True, quota=None)
+        else:
+            payload["owner"] = False
+            if supplied_owner_token(self.headers):
+                payload["owner_key"] = "invalid"
+            keys = self._visitor_keys()
+            allowed, _ = status_rate_limiter.check(
+                client_ip(self.headers, self.client_address[0])
+            )
+            if allowed:
+                quota = get_quota()
+                payload["quota"] = quota.peek(keys).as_json()
+                payload["quota_store"] = quota.store_name
+        self.send_json(payload)
+
     def handle_agent(self) -> None:
-        from agent_auth import agent_rate_limiter, authorize, client_ip
+        from agent_auth import (
+            agent_rate_limiter,
+            client_ip,
+            is_owner,
+            supplied_owner_token,
+        )
+        from agent_quota import get_quota, limit_message
         from agent_runtime import AgentNotConfigured, is_configured, run_agent
 
-        # Rate-limit first (so failed auth attempts are throttled too), then
-        # authenticate, and only then read the body or touch Gemini.
-        allowed, retry_after = agent_rate_limiter.check(
-            client_ip(self.headers, self.client_address[0])
-        )
-        if not allowed:
-            self.send_json(
-                {"error": "rate limit exceeded; try again shortly"},
-                HTTPStatus.TOO_MANY_REQUESTS,
-                extra_headers={"Retry-After": str(retry_after)},
+        owner = is_owner(self.headers)
+        if not owner:
+            # Burst guard first, so bad owner keys and scripted clients are
+            # throttled before anything else (including the quota store).
+            allowed, retry_after = agent_rate_limiter.check(
+                client_ip(self.headers, self.client_address[0])
             )
-            return
-
-        decision = authorize(self.headers, self.client_address[0])
-        if not decision.allowed:
-            self.send_json(
-                {"error": decision.reason},
-                HTTPStatus.UNAUTHORIZED,
-                extra_headers={"WWW-Authenticate": 'Bearer realm="dia-agent"'},
-            )
-            return
+            if not allowed:
+                self.send_json(
+                    {"error": "Too many questions at once. Give it a minute and try again."},
+                    HTTPStatus.TOO_MANY_REQUESTS,
+                    extra_headers={"Retry-After": str(retry_after)},
+                )
+                return
+            if supplied_owner_token(self.headers):
+                self.send_json(
+                    {
+                        "error": (
+                            "Owner key not recognised. Fix or remove it in "
+                            "Help & settings to ask as a visitor."
+                        )
+                    },
+                    HTTPStatus.UNAUTHORIZED,
+                    extra_headers={"WWW-Authenticate": 'Bearer realm="dia-owner"'},
+                )
+                return
 
         try:
             payload = self.read_json()
@@ -200,6 +265,7 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
             return
 
         if not is_configured():
+            # Nothing is spent, so nothing is charged against the quota.
             self.send_json(
                 {
                     "configured": False,
@@ -211,6 +277,22 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
                 }
             )
             return
+
+        quota_info: dict[str, object] | None = None
+        if not owner:
+            quota = get_quota()
+            result = quota.consume(self._visitor_keys())
+            if not result.allowed:
+                self.send_json(
+                    {
+                        "error": limit_message(result.limit),
+                        "quota": result.as_json(),
+                    },
+                    HTTPStatus.TOO_MANY_REQUESTS,
+                    extra_headers={"Retry-After": str(result.retry_after(quota.now()))},
+                )
+                return
+            quota_info = result.as_json()
 
         try:
             reply = run_agent(message)
@@ -224,7 +306,12 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
             )
             return
 
-        self.send_json({"configured": True, "reply": reply})
+        response: dict[str, object] = {"configured": True, "reply": reply}
+        if owner:
+            response["owner"] = True
+        else:
+            response["quota"] = quota_info
+        self.send_json(response)
 
     def read_json(self) -> dict[str, object]:
         try:
@@ -253,7 +340,9 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
-        for name, value in (extra_headers or {}).items():
+        headers = {**getattr(self, "_pending_headers", {}), **(extra_headers or {})}
+        self._pending_headers = {}
+        for name, value in headers.items():
             self.send_header(name, value)
         self.end_headers()
         self.wfile.write(body)

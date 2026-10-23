@@ -1,51 +1,34 @@
-"""Access control and rate limiting for the live Gemini agent (``/api/agent``).
+"""Owner sign-in, client identification and burst limiting for ``/api/agent``.
 
-``/api/agent`` spends Gemini quota and, when MCP toolsets are configured, can
-reach real side effects (Make scenarios, GCP APIs). It must never be callable
-by anonymous internet traffic, so access is **secure by default**:
+Interim policy (see ``agent_quota`` for the daily visitor cap):
 
-1. ``DIA_AGENT_TOKEN`` set: callers must send ``Authorization: Bearer <token>``
-   (or ``X-DIA-Agent-Token: <token>``). Anything else gets 401. Fail closed.
-2. ``DIA_IAP_AUDIENCE`` set: a request carrying a valid Identity-Aware Proxy
-   JWT (``X-Goog-IAP-JWT-Assertion``) for that audience is accepted. The JWT
-   is cryptographically verified; the plain ``X-Goog-Authenticated-User-*``
-   headers are never trusted on their own because any client can forge them
-   when the service is not actually behind IAP.
-3. Neither set (local development): only loopback clients (127.0.0.1 / ::1)
-   are allowed, and never on Cloud Run (``K_SERVICE`` present). A deployed
-   service with no auth configured therefore refuses every agent call instead
-   of silently exposing it.
+* **Visitors** may use Ask DIA anonymously, capped per day by ``agent_quota``,
+  and by a short per-IP burst guard (``DIA_AGENT_RATE_LIMIT``, default
+  ``10/60``) that keeps scripted clients from hammering the quota store.
+* **The owner** is unlimited. The owner signs in once by pasting the owner key
+  into *Help & settings* (kept in the browser's localStorage) and the UI sends
+  it as ``Authorization: Bearer <key>``. The server compares it to
+  ``DIA_OWNER_TOKEN`` in constant time. The key is never logged or echoed.
 
-Rate limiting is a simple in-memory sliding window per client IP
-(``DIA_AGENT_RATE_LIMIT``, default ``10/60`` = 10 calls per 60 seconds;
-``0`` disables). It is per-instance, which is enough to stop casual abuse;
-a shared limiter would need Redis/Memorystore.
+``DIA_OWNER_TOKEN`` shorter than ``MIN_OWNER_TOKEN_LENGTH`` characters is
+ignored (with a warning) so a weak key can't become an unlimited bypass.
 """
 
 from __future__ import annotations
 
 import hmac
-import ipaddress
 import logging
 import os
 import threading
 import time
 from collections import deque
-from dataclasses import dataclass
 from typing import Callable, Mapping
 
 logger = logging.getLogger(__name__)
 
-IAP_CERTS_URL = "https://www.gstatic.com/iap/verify/public_key"
-IAP_ISSUER = "https://cloud.google.com/iap"
 DEFAULT_RATE_LIMIT = "10/60"
-
-
-@dataclass(frozen=True)
-class AuthDecision:
-    allowed: bool
-    reason: str = ""
-    principal: str = ""
+MIN_OWNER_TOKEN_LENGTH = 32
+OWNER_HEADER = "X-DIA-Owner-Token"
 
 
 def _header(headers: Mapping[str, str], name: str) -> str:
@@ -53,99 +36,53 @@ def _header(headers: Mapping[str, str], name: str) -> str:
     return value.strip() if isinstance(value, str) else ""
 
 
-def configured_mode() -> str:
-    """Describe the active auth mode: ``token``, ``iap``, ``token+iap`` or ``local-only``."""
-    modes = []
-    if os.environ.get("DIA_AGENT_TOKEN", "").strip():
-        modes.append("token")
-    if os.environ.get("DIA_IAP_AUDIENCE", "").strip():
-        modes.append("iap")
-    return "+".join(modes) or "local-only"
+def owner_token() -> str:
+    token = os.environ.get("DIA_OWNER_TOKEN", "").strip()
+    if token and len(token) < MIN_OWNER_TOKEN_LENGTH:
+        logger.warning(
+            "DIA_OWNER_TOKEN is shorter than %d characters; owner bypass disabled",
+            MIN_OWNER_TOKEN_LENGTH,
+        )
+        return ""
+    return token
 
 
-def _is_loopback(address: str) -> bool:
-    try:
-        return ipaddress.ip_address(address).is_loopback
-    except ValueError:
+def supplied_owner_token(headers: Mapping[str, str]) -> str:
+    """The owner key the client sent, if any (bearer or ``X-DIA-Owner-Token``)."""
+    supplied = _header(headers, OWNER_HEADER)
+    if supplied:
+        return supplied
+    authorization = _header(headers, "Authorization")
+    if authorization.lower().startswith("bearer "):
+        return authorization[7:].strip()
+    return ""
+
+
+def is_owner(headers: Mapping[str, str]) -> bool:
+    expected = owner_token()
+    supplied = supplied_owner_token(headers)
+    if not expected or not supplied:
         return False
+    return hmac.compare_digest(supplied.encode("utf-8"), expected.encode("utf-8"))
+
+
+def configured_mode() -> str:
+    """``owner-key`` when an owner key is configured, else ``visitors-only``."""
+    return "owner-key" if owner_token() else "visitors-only"
 
 
 def _on_cloud_run() -> bool:
     return bool(os.environ.get("K_SERVICE"))
 
 
-def _verify_iap_jwt(assertion: str, audience: str) -> str | None:
-    """Return the verified principal email for an IAP JWT, or None."""
-    try:
-        from google.auth.transport import requests as google_requests
-        from google.oauth2 import id_token
-
-        claims = id_token.verify_token(
-            assertion,
-            google_requests.Request(),
-            audience=audience,
-            certs_url=IAP_CERTS_URL,
-        )
-    except Exception as error:  # noqa: BLE001 - any verification failure denies
-        logger.info("IAP JWT rejected: %s", type(error).__name__)
-        return None
-    if claims.get("iss") != IAP_ISSUER:
-        return None
-    return str(claims.get("email") or claims.get("sub") or "iap-user")
-
-
-def authorize(
-    headers: Mapping[str, str],
-    client_ip: str,
-    *,
-    iap_verifier: Callable[[str, str], str | None] = _verify_iap_jwt,
-) -> AuthDecision:
-    """Decide whether a request may run a live agent turn."""
-    token = os.environ.get("DIA_AGENT_TOKEN", "").strip()
-    audience = os.environ.get("DIA_IAP_AUDIENCE", "").strip()
-
-    if token:
-        supplied = _header(headers, "X-DIA-Agent-Token")
-        authorization = _header(headers, "Authorization")
-        if not supplied and authorization.lower().startswith("bearer "):
-            supplied = authorization[7:].strip()
-        if supplied and hmac.compare_digest(
-            supplied.encode("utf-8"), token.encode("utf-8")
-        ):
-            return AuthDecision(True, principal="token")
-
-    if audience:
-        assertion = _header(headers, "X-Goog-IAP-JWT-Assertion")
-        if assertion:
-            principal = iap_verifier(assertion, audience)
-            if principal:
-                return AuthDecision(True, principal=principal)
-
-    if token or audience:
-        return AuthDecision(False, "agent access requires a valid token or IAP identity")
-
-    # No auth configured: local development only.
-    if _on_cloud_run():
-        return AuthDecision(
-            False,
-            "agent access is disabled: set DIA_AGENT_TOKEN or DIA_IAP_AUDIENCE "
-            "on this deployment",
-        )
-    if _is_loopback(client_ip):
-        return AuthDecision(True, principal="local")
-    return AuthDecision(
-        False,
-        "agent access from non-local clients requires DIA_AGENT_TOKEN or DIA_IAP_AUDIENCE",
-    )
-
-
 def client_ip(headers: Mapping[str, str], peer_ip: str) -> str:
-    """Best-effort client IP for rate limiting.
+    """Best-effort client IP for limits.
 
     On Cloud Run the socket peer is Google's front end, and the real client is
-    the *right-most* ``X-Forwarded-For`` entry (left-most entries are supplied
-    by the client and can be forged). Off Cloud Run, the socket peer is used
-    unless ``DIA_TRUST_FORWARDED_FOR`` is set (e.g. behind your own proxy).
+    the *right-most* ``X-Forwarded-For`` entry (Google appends the address it
+    saw; anything to the left was supplied by the client and can be forged).
+    Off Cloud Run, the socket peer is used unless ``DIA_TRUST_FORWARDED_FOR``
+    is set (e.g. behind your own proxy).
     """
     trust = _on_cloud_run() or os.environ.get(
         "DIA_TRUST_FORWARDED_FOR", ""
@@ -178,7 +115,7 @@ def _parse_rate_limit(raw: str) -> tuple[int, float]:
 
 
 class RateLimiter:
-    """Thread-safe sliding-window limiter keyed by client IP."""
+    """Thread-safe in-memory sliding-window burst guard keyed by client IP."""
 
     MAX_KEYS = 10_000
 
