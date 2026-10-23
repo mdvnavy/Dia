@@ -83,7 +83,8 @@ def test_read_sample_questionnaire_does_not_depend_on_tests_dir():
     assert "Discovery Intake Questionnaire" in read_sample_questionnaire()
 
 
-def test_agent_endpoint_requires_message():
+def test_agent_endpoint_requires_message(monkeypatch):
+    monkeypatch.setenv("ASK_DIA_ENABLED", "true")
     status, payload = _request("POST", "/api/agent", json.dumps({"message": ""}))
 
     assert status == 400
@@ -91,6 +92,7 @@ def test_agent_endpoint_requires_message():
 
 
 def test_agent_endpoint_degrades_gracefully_without_api_key(monkeypatch):
+    monkeypatch.setenv("ASK_DIA_ENABLED", "true")
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
 
