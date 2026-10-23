@@ -1170,8 +1170,10 @@ function renderPalette() {
     empty.textContent = "No matching commands";
     paletteList.append(empty);
     paletteInput.removeAttribute("aria-activedescendant");
+    paletteInput.setAttribute("aria-expanded", "false");
     return;
   }
+  paletteInput.setAttribute("aria-expanded", "true");
   visibleCommands.forEach((command, index) => {
     const item = document.createElement("li");
     item.className = "palette-item";
@@ -1224,6 +1226,7 @@ function openPalette() {
 function closePalette({ restoreFocus = true } = {}) {
   if (!palette.open) return;
   palette.close();
+  paletteInput.setAttribute("aria-expanded", "false");
   if (restoreFocus && paletteReturnFocus && document.contains(paletteReturnFocus)) {
     paletteReturnFocus.focus();
   }
