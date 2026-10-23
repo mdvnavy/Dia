@@ -22,7 +22,8 @@ from app import ClientDiscoveryHandler  # noqa: E402
 ROOT = Path(__file__).resolve().parents[1]
 KEY = "dia-whats-new-seen"
 TAG_DARK, TAG_LIGHT = (255, 92, 119), (193, 16, 45)   # base reds of Glyph's clay NEW image (= --wn-tag-text-dark/-light)
-GLYPH_CLAY_NEW = Path("/workspace/dia-tia/glyph/clay-new")   # Glyph's working files (halo-only renders), read only
+GLYPH_CLAY_NEW = Path("/workspace/dia-tia/glyph/clay-new")   # Glyph's measuring files (halo-only renders), read only
+GLYPH_BRAND = Path("/workspace/dia-tia/glyph/brand")         # ... and the 44px letter masks; never shipped in static/
 NOTES = {
     "version": 1,
     "notes": [
@@ -571,9 +572,9 @@ def _shot(s, clip):
 @pytest.mark.parametrize("theme", ["dark", "light"])
 @pytest.mark.parametrize("width", [1280, 390])
 @pytest.mark.parametrize("dsf", [1, 2, 3])
-def test_23_bloom_at_clock_empty_space_le_4_and_never_on_glyphs(session, theme, width, dsf, strict=False):
-    """Spec v0.5 (Glyph 2:40 PM ET): inside the clock's text box the visible bloom (glow on vs off, per channel) may reach
-    <= 4/255 in empty space but must never raise a clock glyph pixel; clock text keeps >= 6.82:1 light / 7.95:1 dark."""
+def test_23_bloom_at_clock_empty_space_le_4_and_glyphs_noise_only(session, theme, width, dsf):
+    """Spec v0.5.1 test 23: inside the clock's text box the visible bloom (glow on vs off, per channel) may reach <= 4/255
+    in empty space; clock glyph pixels rise by <= 1/255 (noise); clock text keeps >= 6.82:1 light / 7.95:1 dark."""
     s = session(seen=OLDEST, theme=theme, width=width, height=844, dsf=dsf)
     s.page.clock.set_fixed_time("2026-10-23T14:59:00-04:00")
     s.page.wait_for_timeout(50)
@@ -608,19 +609,21 @@ def test_23_bloom_at_clock_empty_space_le_4_and_never_on_glyphs(session, theme, 
     print(MEASURED[("bloom", theme, width, dsf)])
     assert glyph and core
     assert max(empty or [0]) <= 4                                       # empty space inside the clock's text box
-    # Spec v0.5 §3 says "never on a glyph (... glyph pixels measure 1/255)": the measured 1/255 is the accepted floor.
-    # A strict 0/255 is tracked separately below (xfail) so the gap stays visible.
-    assert raised[1] <= 1, raised
+    assert raised[1] <= 1, raised     # spec v0.5.1: clock glyph pixels may rise by at most 1/255 (measurement noise)
     assert worst >= (6.82 if theme == "light" else 7.95), worst
-    if strict:
-        assert raised[1] == 0, f"glow raises clock glyph pixels by {raised[1]}/255"
 
 
-@pytest.mark.xfail(strict=True, reason="spread 1.3px raises clock glyph pixels nearest the mark by 1/255 (spec measures "
-                   "the same 1/255); a strict 0/255 needs Glyph's call. Flips to XPASS (and fails) if that ever changes")
-@pytest.mark.parametrize("theme", ["dark"])
-def test_23_bloom_strict_zero_on_glyphs(session, theme):
-    test_23_bloom_at_clock_empty_space_le_4_and_never_on_glyphs(session, theme, 1280, 2, strict=True)
+@pytest.mark.parametrize("theme", ["dark", "light"])
+@pytest.mark.parametrize("width", [1280, 390, 360])
+def test_23_button_top_snapped_to_whole_pixel(session, theme, width):
+    """Spec v0.5.1: the button's top edge sits on a whole pixel (it was y 3.5 at 1280, 5.5 at 390), so the mark and the
+    NEW image render sharp at DPR 1; it stays centred in the band and the mark/tag move with it."""
+    s = session(seen=OLDEST, theme=theme, width=width, height=844)
+    g = s.ev("""() => { const r = (q) => document.querySelector(q).getBoundingClientRect();
+      const b = r('#whatsNew'), m = r('.wn-mark'), t = r('#whatsNew .wn-tag'), h = r('header.top-nav');
+      return { top: b.top, markTop: m.top, tagTop: t.top, bandMid: h.top + h.height / 2, mid: b.top + b.height / 2 }; }""")
+    assert g["top"] == int(g["top"]) and g["markTop"] == int(g["markTop"]) and g["tagTop"] == int(g["tagTop"]), g
+    assert abs(g["mid"] - g["bandMid"]) <= 0.5, g
 
 
 @pytest.mark.parametrize("theme", ["dark", "light"])
@@ -800,28 +803,39 @@ def test_22_theme_toggle_swaps_clay_new_variant(session):
     assert imgs == {"light": "block", "dark": "none"}
 
 
-@pytest.mark.skipif(not GLYPH_CLAY_NEW.exists(), reason="Glyph's halo-only renders not on this machine")
+@pytest.mark.skipif(not (GLYPH_CLAY_NEW / "clay-new-dark-44-haloonly.png").exists(),
+                    reason="Glyph's 44px measuring files not on this machine")
 @pytest.mark.parametrize("theme", ["dark", "light"])
 @pytest.mark.parametrize("width", [1280, 390])
 def test_22_new_letters_contrast_over_glow(session, theme, width):
-    """Glyph's method: base red vs what sits behind each letter pixel (alpha >= 50%), with the image's bg-coloured
-    seat in place (a halo-only render of the same asset) and the stronger glow on. Must be >= 4.5:1."""
+    """Glyph's 44px method at DPR 2: render the page with the halo-only asset (seat, no letters) in place of the NEW image,
+    then compare the base red with the backdrop under every letter pixel of Glyph's 44px ink mask (alpha >= 128).
+    Must be >= 4.5:1 (Glyph: 5.41 light / 6.43 dark)."""
     import base64
     from io import BytesIO
     from PIL import Image
     s = session(seen=OLDEST, theme=theme, width=width, height=844, dsf=2)
-    halo = "data:image/png;base64," + base64.b64encode((GLYPH_CLAY_NEW / f"clay-new-{theme}-22-haloonly.png").read_bytes()).decode()
+    s.page.clock.set_fixed_time("2026-10-23T14:59:00-04:00")   # the clock's text width sets the mark's x
+    s.page.wait_for_timeout(50)
+    halo = "data:image/png;base64," + base64.b64encode((GLYPH_CLAY_NEW / f"clay-new-{theme}-44-haloonly.png").read_bytes()).decode()
     s.ev("""(src) => new Promise((ok) => { const i = [...document.querySelectorAll('#whatsNewTag img')].find((x) => getComputedStyle(x).display !== 'none');
-      i.onload = () => ok(); i.removeAttribute('srcset'); i.src = src; })""", halo)
+      i.onload = () => ok(); i.srcset = src + ' 2x'; i.src = src; })""", halo)
     t = s.page.locator("#whatsNew .wn-tag").bounding_box()
-    under = Image.open(BytesIO(s.page.screenshot(clip=t, scale="device"))).convert("RGB")
-    mask = Image.open(ROOT / "static" / "brand" / f"clay-new-{theme}-44.png").getchannel("A").resize(under.size)
+    assert t["y"] == int(t["y"])                                   # snapped vertically (spec v0.5.1)
+    x = round(t["x"] * 2) / 2
+    assert abs(x - t["x"]) <= 0.06                                 # 1280: the clock's text width leaves x at .05
+    under = Image.open(BytesIO(s.page.screenshot(clip={"x": x, "y": t["y"], "width": 22, "height": 8}, scale="device"))).convert("RGB")
+    mask = Image.open(GLYPH_BRAND / f"clay-new-{theme}-44-mask.png").getchannel("A")
+    assert under.size == mask.size == (44, 16)
     base = TAG_DARK if theme == "dark" else TAG_LIGHT
     u, m = under.load(), mask.load()
-    ratios = [_contrast(base, u[x, y]) for y in range(under.size[1]) for x in range(under.size[0]) if m[x, y] >= 128]
-    MEASURED[("contrast", theme, width)] = round(min(ratios), 2)
-    print({"theme": theme, "width": width, "min": round(min(ratios), 2), "median": round(sorted(ratios)[len(ratios) // 2], 2)})
-    assert len(ratios) > 100 and min(ratios) >= 4.5
+    pts = [(x, y) for y in range(16) for x in range(44) if m[x, y] >= 128]
+    ratios = sorted((_contrast(base, u[p]), u[p]) for p in pts)
+    worst, worst_bg = ratios[0]
+    MEASURED[("contrast", theme, width)] = round(worst, 2)
+    print({"theme": theme, "width": width, "pixels": len(pts), "min": round(worst, 2), "worst_bg": "#%02X%02X%02X" % worst_bg,
+           "median": round(ratios[len(ratios) // 2][0], 2)})
+    assert len(pts) == 382 and worst >= 4.5
 
 
 @pytest.mark.parametrize("mode", ["contrast-more", "forced-colors"])

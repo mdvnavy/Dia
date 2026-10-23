@@ -38,9 +38,13 @@ html[data-theme="light"] {
 .lh-centre-slot .lh-centre { position: static; transform: none; }
 /* Bloom must never clip: everything between the mark and the band stays overflow: visible. */
 .top-nav.lh, .lh-centre-slot, .lh-centre, #lhClock, .wn-wrap, .wn-btn { overflow: visible; }
+/* Pixel snap (spec v0.5.1, test 23): the 25px clock (desktop) and the 55px band content (mobile) put the 44px button on a
+   half pixel (y 3.5 at 1280, 5.5 at 390), which softens the 1x mark and NEW image. Nudging it 0.5px down puts its top on a
+   whole pixel and centres it exactly in the 52/56px band. A transform, so nothing else in the layout moves. */
 .wn-wrap {
+  --wn-snap-y: 0.5px;
   position: absolute; left: calc(100% + var(--wn-gap) - (var(--wn-target) - var(--wn-size)) / 2);
-  top: 50%; transform: translateY(-50%);
+  top: 50%; transform: translateY(calc(-50% + var(--wn-snap-y)));
   display: inline-grid;
 }
 
@@ -127,7 +131,7 @@ html[data-theme="light"] .wn-tag-img--dark { display: none; }
     display: flex; flex-direction: row; align-items: center; justify-content: center; gap: 2px;
   }
   .lh-centre-slot .lh-centre { flex: 0 1 auto; }
-  .wn-wrap { position: relative; left: auto; top: auto; transform: none; margin: 0 -6px 0 0; flex: none; }
+  .wn-wrap { position: relative; left: auto; top: auto; transform: translateY(var(--wn-snap-y)); margin: 0 -6px 0 0; flex: none; }
   .wn-tip { left: auto; right: 0; transform: none; }
 }
 /* < 375px the band hides the clock; the mark stays, just before Search. */
