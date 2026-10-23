@@ -954,7 +954,15 @@ html[data-theme="light"] { --control-focus: #5f6670; } /* new controls, light: >
 .cabinet-badge { position: absolute; top: -4px; right: -4px; box-shadow: 0 0 0 2px var(--bg); }
 
 /* Tray (upload) */
-.dock-row { display: flex; align-items: center; gap: 10px; margin: 0 0 10px 4px; }
+.dock-row { display: flex; align-items: center; gap: 10px; margin: 0 4px 10px 4px; }
+/* Cabinet: far right of the dock row, mirroring the tray (same 44px box, radius and border). */
+.dock-row .cabinet { margin-left: auto; }
+.dock-row .cabinet-btn { width: 44px; height: 44px; border-radius: 12px; border-color: var(--border); background: var(--surface); }
+.dock-row .cabinet-btn:hover { border-color: #9EA4AC; }
+.dock-row .cabinet-btn:focus-visible { outline: 2px solid var(--control-focus); outline-offset: 2px; }
+/* Stack anchors to the cabinet's right edge (fan right:-6px in cabinet-fan.css) and drops down;
+   when there's no room below, JS sets data-drop="up" and --fan-up-top so it opens upward instead. */
+.cabinet[data-drop="up"] .fan { top: var(--fan-up-top, auto); }
 .dock-icon {
   width: 44px; height: 44px; display: grid; place-items: center; padding: 0;
   border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text);
@@ -991,11 +999,7 @@ body.file-dragging #intakeComposer { outline: 2px dashed var(--control-focus); o
   padding: 20px; border: 0; border-left: 1px solid var(--border); background: var(--bg); color: var(--text);
   box-shadow: -18px 0 48px rgba(0, 0, 0, 0.18); overflow-y: auto;
 }
-/* Drawer slide only when motion is welcome; otherwise it simply appears (flows.md 6.5). */
-@media (prefers-reduced-motion: no-preference) {
-  .drawer { transform: translateX(16px); opacity: 0; transition: transform 200ms cubic-bezier(0.22, 1, 0.36, 1), opacity 160ms linear; }
-  .drawer.is-open { transform: none; opacity: 1; }
-}
+/* Drawer open/close motion lives in cabinet-fan.css (Glyph v4, SPRING_PANEL on `translate`). */
 .drawer::backdrop { background: rgba(0, 0, 0, 0.28); }
 .drawer-head { display: flex; align-items: center; gap: 8px; }
 .drawer-head h2 { margin: 0; flex: 1; font: 700 20px/1.3 var(--sans); }
@@ -1035,7 +1039,7 @@ body.file-dragging #intakeComposer { outline: 2px dashed var(--control-focus); o
 
 /* Toast */
 .toast {
-  position: fixed; left: 50%; bottom: 24px; z-index: 60; transform: translateX(-50%);
+  position: fixed; left: 50%; bottom: 24px; z-index: 60; translate: -50% 0; /* centring on `translate` so the slideUp toast keyframes (transform) don't fight it */
   display: flex; align-items: center; gap: 10px; max-width: min(560px, calc(100vw - 32px));
   padding: 10px 10px 10px 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22); font-size: 14px;
@@ -1045,9 +1049,11 @@ body.file-dragging #intakeComposer { outline: 2px dashed var(--control-focus); o
 .toast button { border: 1px solid var(--border); border-radius: 8px; background: transparent; color: var(--text); padding: 5px 10px; cursor: pointer; font: 500 13px var(--sans); }
 #toastClose { border: 0; font-size: 16px; }
 
+/* Mobile bottom sheet: same SPRING_PANEL tokens as cabinet-fan.css, but sliding up instead of in from the right. */
 @media (prefers-reduced-motion: no-preference) and (max-width: 600px) {
-  .drawer { transform: translateY(16px); }
-  .drawer.is-open { transform: none; }
+  .drawer.cabinet-drawer { translate: 0 100%; }
+  .drawer.cabinet-drawer[open] { translate: 0 0; }
+  @starting-style { .drawer.cabinet-drawer[open] { translate: 0 100%; } }
 }
 .drawer [hidden], .dock-row [hidden], .file-chips[hidden], .intake-error[hidden] { display: none !important; }
 

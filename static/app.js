@@ -1874,8 +1874,27 @@ const CabinetFan = (() => {
     all.forEach((el) => { el.tabIndex = el === target ? 0 : -1; });
     target?.focus();
   }
+  // Drop down from the cabinet; drop up when the viewport has no room below (cabinet sits by the composer).
+  function placeFan(count) {
+    const style = getComputedStyle(cabinetDock);
+    const step = parseFloat(style.getPropertyValue("--fan-step")) || 48;
+    const cardH = parseFloat(style.getPropertyValue("--fan-card-h")) || 76;
+    const openH = fan.querySelector(".fan-open-btn")?.offsetHeight || 34;
+    const height = Math.max(count - 1, 0) * step + (count ? cardH + 10 : 0) + openH;
+    const rect = cabinetButton.getBoundingClientRect();
+    const below = window.innerHeight - rect.bottom - 12;
+    const above = rect.top - 12;
+    if (below < height && above > below) {
+      cabinetDock.dataset.drop = "up";
+      cabinetDock.style.setProperty("--fan-up-top", `${-(height + 12)}px`);
+    } else {
+      delete cabinetDock.dataset.drop;
+      cabinetDock.style.removeProperty("--fan-up-top");
+    }
+  }
   function openFan(items, { focusFirst = true } = {}) {
     render(items);
+    placeFan(Math.min(items.length, CABINET_PAGE));
     open = true;
     cabinetDock.dataset.open = "true";
     cabinetButton.setAttribute("aria-expanded", "true");

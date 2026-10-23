@@ -1,5 +1,5 @@
-/* Source: glyph/fanout.css v3 (straight-down stack), copied verbatim. Single home of the
- * cabinet stack open/close motion; JS counterpart: CabinetFan in static/app.js. */
+/* Source: glyph/fanout.css v4 (straight-down stack + motion tokens from mdvnavy/components), copied verbatim.
+ * Single home of the cabinet stack, drawer and toast motion (--dia-* tokens); JS counterpart: CabinetFan / CabinetDrawer in static/app.js. */
 /* DIA filing cabinet: quick-peek STACK (v3: straight vertical drawer stack; replaces the arc).
  * The fan is a PEEK, not the cabinet. The full cabinet is the right-side drawer (~380px)
  * from flows.md §3.2, which owns "Show more" paging (5 -> 10 -> 15).

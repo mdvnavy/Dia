@@ -86,3 +86,17 @@ def test_new_controls_have_labels():
         tag = re.search(rf"<button[^>]*{control}[^>]*>", INDEX).group(0)
         assert "aria-label=" in tag
     assert 'id="intakeError" class="intake-error" role="alert"' in INDEX
+
+
+def test_cabinet_sits_at_far_right_of_composer_row():
+    """Ikenna: cabinet mirrors the tray (tray far left, cabinet far right of the composer), not in the top bar."""
+    html = (ROOT / "templates" / "index.html").read_text(encoding="utf-8")
+    header = html[html.index("<header"):html.index("</header>")]
+    assert 'id="cabinetButton"' not in header
+    dock = html[html.index('<div class="dock-row">'):html.index('id="dropHint"')]
+    assert dock.index('id="trayButton"') < dock.index('id="cabinetButton"')
+    assert 'class="dock-icon cabinet-btn px-btn"' in dock
+    assert 'id="cabinetCount" class="cabinet-badge"' in dock
+    css = (ROOT / "static" / "style.css").read_text(encoding="utf-8")
+    assert ".dock-row .cabinet { margin-left: auto; }" in css
+    assert '.cabinet[data-drop="up"] .fan' in css
