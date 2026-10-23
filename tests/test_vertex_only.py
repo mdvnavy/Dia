@@ -101,3 +101,8 @@ def test_deploy_script_binds_no_api_key_and_sets_vertex_env():
     assert "GOOGLE_CLOUD_LOCATION=${VERTEX_LOCATION}" in script
     # Keep the service's other env vars: never replace them wholesale.
     assert "--set-env-vars" not in script
+
+
+def test_deploy_script_defaults_vertex_location_to_global():
+    script = (ROOT / "deploy-cloudrun.sh").read_text(encoding="utf-8")
+    assert 'VERTEX_LOCATION="${VERTEX_LOCATION:-global}"' in script

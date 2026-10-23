@@ -14,15 +14,17 @@
 #
 # Usage:
 #   PROJECT_ID=my-project ./deploy-cloudrun.sh
-#   PROJECT_ID=my-project VERTEX_LOCATION=us-central1 \
+#   PROJECT_ID=my-project VERTEX_LOCATION=global \
 #     GCP_MCP_URL=https://monitoring.googleapis.com/mcp ./deploy-cloudrun.sh
 set -euo pipefail
 
 PROJECT_ID="${PROJECT_ID:?Set PROJECT_ID to your Google Cloud project id}"
 SERVICE="${SERVICE:-dia-discovery-intake}"
 REGION="${REGION:-us-central1}"
-# Vertex AI location for model calls (may differ from the Cloud Run region).
-VERTEX_LOCATION="${VERTEX_LOCATION:-${REGION}}"
+# Vertex AI location for model calls, separate from the Cloud Run region.
+# Current Gemini models (e.g. gemini-3.8-flash) are served from "global" and
+# the us/eu multi-regions only, not from us-central1.
+VERTEX_LOCATION="${VERTEX_LOCATION:-global}"
 
 # --update-env-vars merges rather than replaces, so env already on the service, e.g.
 # OWNER_EMAILS or ASK_DIA_ENABLED, is kept rather than wiped.

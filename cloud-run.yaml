@@ -26,7 +26,7 @@ spec:
             - name: GOOGLE_CLOUD_PROJECT
               value: PROJECT_ID
             - name: GOOGLE_CLOUD_LOCATION
-              value: us-central1
+              value: global
             # In production, bind these to Google Secret Manager secrets:
             # - name: JULES_API_KEY
             #   valueFrom:

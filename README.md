@@ -75,7 +75,7 @@ The repo includes a `Dockerfile` and `deploy-cloudrun.sh`. With the gcloud CLI
 authenticated:
 
 ```bash
-PROJECT_ID=your-project ./deploy-cloudrun.sh   # optional: VERTEX_LOCATION=us-central1
+PROJECT_ID=your-project ./deploy-cloudrun.sh   # optional: VERTEX_LOCATION=global (default)
 ```
 
 The runtime service account needs `roles/aiplatform.user` (the script does not
