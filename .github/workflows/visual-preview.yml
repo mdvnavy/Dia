@@ -1,0 +1,106 @@
+# Gate: before/after screenshots for visual PRs (proposal section 2).
+# Serves base and head locally on the runner, screenshots them with Playwright,
+# uploads them as an artifact and upserts one PR comment linking to it.
+# No secrets other than GITHUB_TOKEN. No deploys. No cloud credentials.
+name: visual-preview
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+permissions:
+  contents: read
+  pull-requests: write
+concurrency:
+  group: visual-preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+env:
+  VISUAL_RE: '^(templates|static)/|\.(css|scss|sass|less|html?|jsx|tsx|svg|png|jpe?g|gif|webp|ico|woff2?|ttf|otf)$'
+  VISUAL_EXCLUDE_RE: '^(tests|docs|eval|samples)/'
+  ROUTES: '/'
+  PLAYWRIGHT_VERSION: "1.64.1"
+jobs:
+  screenshots:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: head
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Detect visual changes
+        id: detect
+        run: |
+          cd head
+          files=$(git diff --name-only "${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}")
+          vis=$(printf '%s\n' "$files" | grep -Ei "$VISUAL_RE" | { if [ -n "$VISUAL_EXCLUDE_RE" ]; then grep -Eiv "$VISUAL_EXCLUDE_RE"; else cat; fi; } || true)
+          if [ -n "$vis" ]; then echo "visual=true" >> "$GITHUB_OUTPUT"; else echo "visual=false" >> "$GITHUB_OUTPUT"; fi
+          printf 'Visual files:\n%s\n' "$vis"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.detect.outputs.visual == 'true'
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        if: steps.detect.outputs.visual == 'true'
+      - name: Install app deps (head requirements)
+        if: steps.detect.outputs.visual == 'true'
+        run: uv venv /tmp/venv -p 3.12 && uv pip install -p /tmp/venv -r head/requirements.txt
+      - name: Start base (:8001) and head (:8002)
+        if: steps.detect.outputs.visual == 'true'
+        run: |
+          (cd base && PORT=8001 HOST=127.0.0.1 nohup /tmp/venv/bin/python app.py > /tmp/srv-base.log 2>&1 &)
+          (cd head && PORT=8002 HOST=127.0.0.1 nohup /tmp/venv/bin/python app.py > /tmp/srv-head.log 2>&1 &)
+          for p in 8001 8002; do
+            for i in $(seq 1 45); do curl -fsS -o /dev/null "http://127.0.0.1:$p/" && break; sleep 2; done
+            curl -fsS -o /dev/null "http://127.0.0.1:$p/" || { echo "server on :$p did not start"; cat /tmp/srv-*.log || true; exit 1; }
+          done
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: steps.detect.outputs.visual == 'true'
+        with:
+          node-version: "22"
+      - name: Screenshot with Playwright
+        if: steps.detect.outputs.visual == 'true'
+        run: |
+          npx -y "playwright@${PLAYWRIGHT_VERSION}" install --with-deps chromium
+          mkdir -p shots/before shots/after
+          for r in $ROUTES; do
+            n=$(echo "$r" | tr '/' '_' | sed 's/^_$/root/; s/^_//')
+            [ -z "$n" ] && n=root
+            for side in before:8001 after:8002; do
+              d=${side%%:*}; p=${side##*:}
+              npx -y "playwright@${PLAYWRIGHT_VERSION}" screenshot -b chromium --viewport-size "1440,900" --full-page --wait-for-timeout 1500 "http://127.0.0.1:$p$r" "shots/$d/${n}-desktop.png" || echo "desktop $d $r failed"
+              npx -y "playwright@${PLAYWRIGHT_VERSION}" screenshot -b chromium --device "iPhone 13" --full-page --wait-for-timeout 1500 "http://127.0.0.1:$p$r" "shots/$d/${n}-mobile.png" || echo "mobile $d $r failed"
+            done
+          done
+          ls -R shots
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: steps.detect.outputs.visual == 'true'
+        id: upload
+        with:
+          name: visual-preview-pr${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+          path: shots
+          retention-days: 14
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        if: steps.detect.outputs.visual == 'true'
+        env:
+          ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
+        with:
+          script: |
+            const fs = require('fs');
+            const { owner, repo } = context.repo;
+            const num = context.payload.pull_request.number;
+            const sha = context.payload.pull_request.head.sha;
+            const marker = '<!-- gate-visual-preview -->';
+            const list = d => (fs.existsSync(`shots/${d}`) ? fs.readdirSync(`shots/${d}`) : []).sort();
+            const runUrl = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
+            const body = [marker,
+              `### Visual preview for ${sha.slice(0,7)}`,
+              `Before (base) and after (head) screenshots, desktop 1440x900 and iPhone 13, routes: \`${process.env.ROUTES}\`.`,
+              `Download: ${process.env.ARTIFACT_URL || runUrl} (run: ${runUrl})`,
+              `Before: ${list('before').join(', ') || 'none'}`, `After: ${list('after').join(', ') || 'none'}`,
+              '', 'To approve (Glyph or Proto): comment `Visual review: APPROVED` + `Reviewer: Glyph|Proto` + `SHA: ' + sha.slice(0,7) + '`, then add the `visual-approved` label.'].join('\n');
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number: num, per_page: 100 });
+            const mine = comments.find(c => (c.body || '').startsWith(marker));
+            if (mine) await github.rest.issues.updateComment({ owner, repo, comment_id: mine.id, body });
+            else await github.rest.issues.createComment({ owner, repo, issue_number: num, body });
