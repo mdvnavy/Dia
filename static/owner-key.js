@@ -88,7 +88,7 @@
     <p class="owner-signin-help">Visitors get a few free Ask DIA questions a day.
       The owner can paste the owner key once to ask without limits; it stays in
       this browser only.</p>
-    <form id="ownerKeyForm" autocomplete="off">
+    <form id="ownerKeyForm" autocomplete="off" style="display:flex;flex-wrap:wrap;align-items:center;gap:0.5em">
       <label for="ownerKeyInput">Owner key</label>
       <input id="ownerKeyInput" type="password" autocomplete="off" spellcheck="false" />
       <button type="submit" id="ownerKeySave">Sign in</button>
