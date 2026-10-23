@@ -984,6 +984,17 @@ agentMessage.addEventListener("keydown", (event) => {
 
 function newIntake() {
   questionnaire.value = "";
+  // Drop the previous run so stale results and exports cannot leak into the
+  // new intake: back to the landing stage with exports disabled.
+  latestPayload = null;
+  lastRunQuestionnaire = "";
+  documents = {};
+  tier.textContent = "-";
+  score.textContent = "Score pending";
+  issues.replaceChildren();
+  renderDocument(activeDoc);
+  setExportAvailability(false);
+  setStage("landing");
   if (intakeBody.hidden) setIntakeCollapsed(false);
   autosizeComposer(questionnaire);
   statusText.textContent = "Ready for a new intake";
