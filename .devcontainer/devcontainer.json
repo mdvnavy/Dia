@@ -4,7 +4,7 @@
   "features": {
     "ghcr.io/devcontainers/features/google-cloud-cli:1": {}
   },
-  "postCreateCommand": "python -m pip install --upgrade pip && python -m pip install -r requirements.txt",
+  "postCreateCommand": "python -m pip install --upgrade pip && python -m pip install -r requirements.txt && python -m pip install --no-deps -r requirements-security-overrides.txt",
   "forwardPorts": [8080],
   "portsAttributes": {
     "8080": {
