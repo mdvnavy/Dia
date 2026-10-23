@@ -51,6 +51,16 @@ GCP_MCP_KEYWORDS = (
 )
 
 
+DEFAULT_TURN_TIMEOUT_SECONDS = 55.0
+# Share of the turn budget the primary model may use before we give up on it
+# and hand the rest of the budget to the fallback model.
+PRIMARY_BUDGET_SHARE = 0.7
+
+
+class AgentTimeout(TimeoutError):
+    """Raised when no model produced a reply within the per-turn budget."""
+
+
 class AgentNotConfigured(RuntimeError):
     """Raised when no Google API key is available for live agent runs."""
 
@@ -90,7 +100,23 @@ def _select_mcp_toolsets(message: str) -> tuple[bool, bool]:
     return include_make, include_gcp
 
 
-async def _run_turn(message: str) -> str:
+def turn_timeout_seconds() -> float:
+    """Per-turn wall-clock budget (DIA_AGENT_TIMEOUT_SECONDS, default 55s).
+
+    Values are clamped to 5..300 s; invalid values fall back to the default.
+    """
+    raw = os.environ.get("DIA_AGENT_TIMEOUT_SECONDS", "").strip()
+    if not raw:
+        return DEFAULT_TURN_TIMEOUT_SECONDS
+    try:
+        value = float(raw)
+    except ValueError:
+        logger.warning("invalid DIA_AGENT_TIMEOUT_SECONDS %r; using default", raw)
+        return DEFAULT_TURN_TIMEOUT_SECONDS
+    return min(max(value, 5.0), 300.0)
+
+
+async def _run_turn(message: str, model: str | None = None) -> str:
     # Imported lazily so the deterministic endpoints and tests do not require
     # the heavy ADK/genai stack to be importable.
     from google.adk.runners import Runner
@@ -104,7 +130,9 @@ async def _run_turn(message: str) -> str:
     # built fresh here rather than shared at module level.
     include_make_mcp, include_gcp_mcp = _select_mcp_toolsets(message)
     agent = build_agent(
-        include_make_mcp=include_make_mcp, include_gcp_mcp=include_gcp_mcp
+        include_make_mcp=include_make_mcp,
+        include_gcp_mcp=include_gcp_mcp,
+        model=model,
     )
 
     session_service = InMemorySessionService()
@@ -154,4 +182,50 @@ def run_agent(message: str) -> str:
         raise AgentNotConfigured(
             "Set GEMINI_API_KEY (or GOOGLE_API_KEY) to enable live Gemini agent runs."
         )
-    return asyncio.run(_run_turn(message))
+    return asyncio.run(_run_with_fallback(message))
+
+
+async def _run_with_fallback(message: str) -> str:
+    """Run one turn on the primary model, falling back once on error/timeout.
+
+    The whole turn shares one budget (:func:`turn_timeout_seconds`). With a
+    fallback configured, the primary gets ``PRIMARY_BUDGET_SHARE`` of it and
+    the fallback gets whatever is left; without one, the primary gets it all.
+    """
+    from character import fallback_model, primary_model
+
+    loop = asyncio.get_running_loop()
+    budget = turn_timeout_seconds()
+    deadline = loop.time() + budget
+    primary = primary_model()
+    fallback = fallback_model()
+    primary_timeout = budget * PRIMARY_BUDGET_SHARE if fallback else budget
+
+    try:
+        return await asyncio.wait_for(_run_turn(message, primary), primary_timeout)
+    except asyncio.TimeoutError:
+        failure: BaseException = AgentTimeout(
+            f"{primary} did not reply within {primary_timeout:.0f}s"
+        )
+    except Exception as error:  # noqa: BLE001 - any model/API failure may fall back
+        failure = error
+
+    if not fallback:
+        raise failure
+
+    remaining = deadline - loop.time()
+    logger.warning(
+        "primary model %s failed (%s); falling back to %s with %.0fs left",
+        primary,
+        type(failure).__name__,
+        fallback,
+        remaining,
+    )
+    if remaining <= 1:
+        raise AgentTimeout(f"no time left for fallback after {primary} failed") from failure
+    try:
+        return await asyncio.wait_for(_run_turn(message, fallback), remaining)
+    except asyncio.TimeoutError as error:
+        raise AgentTimeout(
+            f"neither {primary} nor {fallback} replied within {budget:.0f}s"
+        ) from error
