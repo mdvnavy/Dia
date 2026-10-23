@@ -36,6 +36,8 @@
   --shadow-lifted: 0 12px 36px rgba(0, 0, 0, 0.5);
   --backdrop: rgba(0, 0, 0, 0.55);
   --placeholder: rgba(238, 238, 242, 0.42);
+  /* Focus/selection indicator: must stay >= 3:1 against every surface (WCAG 1.4.11). */
+  --focus-ring: var(--accent);
   color-scheme: dark;
 }
 
@@ -76,6 +78,9 @@ html[data-theme="light"] {
   --shadow-lifted: 0 12px 36px rgba(28, 20, 8, 0.10);
   --backdrop: rgba(22, 21, 15, 0.35);
   --placeholder: rgba(22, 21, 15, 0.45);
+  /* The silver accent (#A3A9B1) is ~2:1 on these surfaces, so it stays
+     decorative; focus and selection use a darker silver (>= 4.9:1). */
+  --focus-ring: #5f6670;
   color-scheme: light;
 }
 
@@ -117,7 +122,7 @@ html[data-theme="light"] {
 .skip-link:focus { top: 12px; }
 
 :focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 
@@ -459,6 +464,9 @@ body[data-stage="results"] .subtitle { font-size: 15px; margin-bottom: 1.75rem; 
   box-shadow: var(--pill-shadow-hover), inset 0 2px 3px var(--glass-inset), inset 0 -2px 4px var(--glass-mid);
   transform: translateY(-2px);
 }
+
+/* The textarea itself has no outline, so the pill's outline is the focus indicator. */
+.prompt-bar:focus-within { outline-color: var(--focus-ring); }
 
 .prompt-bar.multiline { align-items: flex-end; border-radius: 24px; }
 
@@ -850,6 +858,8 @@ body[data-stage="results"] .footer-note { margin-top: 2rem; }
   background: linear-gradient(135deg, var(--glass-top) 0%, var(--glass-mid) 45%, var(--glass-bot) 100%);
   box-shadow: var(--pill-shadow-hover), inset 0 2px 3px var(--glass-inset);
 }
+
+.palette-search:focus-within { outline-color: var(--focus-ring); }
 
 .palette-search svg { width: 18px; height: 18px; flex: none; fill: none; stroke: var(--muted); stroke-width: 2; stroke-linecap: round; }
 
