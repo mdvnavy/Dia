@@ -29,38 +29,66 @@
         <td class="stat-score" aria-label="Score {{ score }} out of {{ score_max }}">{{ score }}<span class="out-of">/{{ score_max }}</span></td>
       </tr>
     </table>
+
+    <!-- dia-savant §3.1: the answer on the cover, in one sentence. -->
+    <p class="cover-sentence">{{ cover_sentence }}</p>
   </header>
 
-  <section class="missing" aria-labelledby="missing-title">
-    <h2 class="block-title" id="missing-title">
-      Missing details
-      <span class="count">{{ missing|length }}</span>
-    </h2>
-    {% if missing %}
-    <ol class="issue-list">
-      {% for item in missing %}
-      <li><span class="issue-index">{{ "%02d"|format(loop.index) }}</span><span class="issue-text">{{ item }}</span></li>
-      {% endfor %}
-    </ol>
+  <!-- dia-savant v1.0: answer-first sections in §3.1 order. Each section has a plain label and,
+       where §3.3 asks for one, a sentence-case action title. -->
+  {% for section in sections %}
+  <section class="section" id="{{ section.key }}">
+    <h2 class="section-title"><span class="section-no">{{ section.no }}</span>{{ section.label }}</h2>
+
+    {% if section.key == "why" %}
+    <figure class="exhibit" aria-labelledby="exhibit-title">
+      <p class="block-title exhibit-label">{{ exhibit.label }}</p>
+      <h3 class="action-title" id="exhibit-title">{{ exhibit.title }}</h3>
+      <p class="exhibit-unit">{{ exhibit.unit }}</p>
+      <!-- Bars are a table with each value in text: the text equivalent is always present. -->
+      <table class="bars">
+        {% for bar in exhibit.bars %}
+        <tr class="bar-row{% if bar.highlight %} is-highlight{% endif %}{% if bar.default %} is-default{% endif %}">
+          <th scope="row" class="bar-label">{{ bar.label }}{% if bar.highlight %} <span class="bar-note">(weakest)</span>{% endif %}</th>
+          <td class="bar-track"><span class="bar-rail"><span class="bar-fill" style="width: {{ (bar.value / 5 * 100)|round(1) }}%"></span></span></td>
+          <td class="bar-value">{{ bar.text }}</td>
+        </tr>
+        {% endfor %}
+      </table>
+      <p class="exhibit-total">{{ exhibit.total }}</p>
+      <p class="exhibit-source">{{ exhibit.source }}</p>
+    </figure>
+    {% elif section.title %}
+    <h3 class="action-title">{{ section.title }}</h3>
+    {% endif %}
+
+    {% if section.key == "missing" %}
+    <div class="missing">
+      {% if missing %}
+      <ol class="issue-list">
+        {% for item in missing %}
+        <li><span class="issue-index">{{ "%02d"|format(loop.index) }}</span><span class="issue-text">{{ item }}</span></li>
+        {% endfor %}
+      </ol>
+      {% else %}
+      <p class="none">The questionnaire answers every required question.</p>
+      {% endif %}
+      {% if actions %}
+      <h4 class="block-title flags-title">Flags to clear first</h4>
+      <ol class="issue-list">
+        {% for action in actions %}
+        <li><span class="issue-index">{{ "%02d"|format(loop.index) }}</span><span class="issue-text">{{ action }}</span></li>
+        {% endfor %}
+      </ol>
+      {% endif %}
+    </div>
+    {% elif section.key == "method" %}
+    <div class="prose method-sources">{{ method_and_sources }}</div>
     {% else %}
-    <p class="none">Nothing missing. The questionnaire covers every required field.</p>
+    <div class="prose">{{ section.html }}</div>
     {% endif %}
   </section>
-
-  <section class="section" id="profile">
-    <h2 class="section-title"><span class="section-no">01</span>Profile</h2>
-    <div class="prose">{{ profile_html|safe }}</div>
-  </section>
-
-  <section class="section" id="analysis">
-    <h2 class="section-title"><span class="section-no">02</span>Analysis</h2>
-    <div class="prose">{{ analysis_html|safe }}</div>
-  </section>
-
-  <section class="section" id="proposal">
-    <h2 class="section-title"><span class="section-no">03</span>Proposal</h2>
-    <div class="prose">{{ proposal_html|safe }}</div>
-  </section>
+  {% endfor %}
 
 </body>
 </html>

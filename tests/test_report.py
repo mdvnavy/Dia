@@ -47,7 +47,7 @@ def test_missing_details_come_from_validation_issues():
 
 def test_html_contains_sections_and_brand(result):
     html = report.render_html(result, report_date="October 23, 2026")
-    for text in ("Northstar Studio", "October 23, 2026", ">B<", "/20", "Profile", "Analysis", "Proposal"):
+    for text in ("Northstar Studio", "October 23, 2026", ">B<", "/20", "Summary", "Client profile", "Delivery plan and investment"):
         assert text in html
     css = (report.TEMPLATE_DIR / "intake-report.css").read_text(encoding="utf-8")
     assert "Made by BASH" in css

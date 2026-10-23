@@ -1,10 +1,11 @@
 """Formatted PDF intake report (WeasyPrint + a Jinja template).
 
-The template lives in templates/report/ (intake-report.html + intake-report.css)
-and receives these placeholders: client, date, tier (letter), score, score_max, profile_html,
-analysis_html, proposal_html and missing (a list of strings). Extra context
-(score_detail, issues, intake, reasons, price_range, timeline) is also passed
-for richer templates.
+The template lives in templates/report/ (intake-report.html + intake-report.css).
+dia-savant v1.0: the report is answer-first (§3.1). build_context rebuilds the intake, score, issues
+and report model (client_discovery.report_model) from the intake answers alone, and passes:
+client, date, tier (letter), tier_name, score, score_max, cover_sentence, sections (no, label,
+title, html), exhibit (Exhibit 1 data), method_and_sources (§5, verbatim) and missing. The
+per-document profile_html, analysis_html and proposal_html are still passed for other templates.
 
 User-supplied text is HTML-escaped before Markdown rendering, and the URL
 fetcher only serves files from the report template and font directories, so a
@@ -72,32 +73,73 @@ def _safe_fetcher() -> Any:
     return LocalOnlyFetcher(allowed_protocols=("file",))
 
 
+def _rebuild(result: dict[str, Any], report_date: str | None) -> dict[str, Any]:
+    """Rebuild the report deterministically from the intake answers. Client-supplied documents, scores and
+    issues are ignored, so nothing but DIA's own templates can reach the PDF (persona v1.2 rule 1)."""
+    from dataclasses import fields
+
+    from client_discovery.core import score_opportunity, validate_intake
+    from client_discovery.models import ClientIntake
+    from client_discovery.report_model import build_report
+
+    raw = result.get("intake") if isinstance(result.get("intake"), dict) else {}
+    kwargs = {}
+    for f in fields(ClientIntake):
+        if f.name not in raw:
+            continue
+        value = raw[f.name]
+        if f.name in ("pain_points", "goals"):
+            value = [str(v) for v in value] if isinstance(value, (list, tuple)) else ([str(value)] if value else [])
+        elif f.name == "workflows_section":
+            value = bool(value)
+        else:
+            value = "" if value is None else str(value)
+        kwargs[f.name] = value
+    intake = ClientIntake(**kwargs)
+    score = score_opportunity(intake)
+    issues = validate_intake(intake)
+    return {"intake": intake, "score": score, "issues": issues,
+            "report": build_report(intake, score, issues, report_date)}
+
+
 def build_context(result: dict[str, Any], *, report_date: str | None = None) -> dict[str, Any]:
+    from dataclasses import asdict
+
     from client_discovery.core import scrub_for_export
+    from client_discovery.report_model import render_documents
 
     result = scrub_for_export(result)  # no AI text in client exports (persona v1.2 rule 1)
-    intake = result.get("intake") or {}
-    score = result.get("score") or {}
-    documents = result.get("documents") or {}
-    issues = result.get("issues") or []
+    rebuilt = _rebuild(result, report_date or _date.today().strftime("%B %-d, %Y"))
+    intake, score, issues, model = rebuilt["intake"], rebuilt["score"], rebuilt["issues"], rebuilt["report"]
+    sections = []
+    for section in model["sections"]:
+        item = dict(section)
+        item["html"] = "" if section["key"] == "method" else markdown_to_html(section["body"])
+        sections.append(item)
     context: dict[str, Any] = {
         "corners": REPORT_CORNERS,
-        "client": str(intake.get("company_name") or "Untitled client"),
-        "date": report_date or _date.today().strftime("%B %-d, %Y"),
-        "tier": TIER_LETTERS.get(str(score.get("tier") or ""), str(score.get("tier") or "")[:1].upper()),
-        "tier_name": str(score.get("tier") or ""),
-        "score": str(score.get("total_score", 0)),
-        "score_max": str(score.get("max_score", 20)),
-        "missing": [str(issue.get("message", issue)) if isinstance(issue, dict) else str(issue) for issue in issues],
-        "score_detail": score,
-        "reasons": list(score.get("reasons") or []),
-        "price_range": str(score.get("price_range") or ""),
-        "timeline": str(score.get("timeline") or ""),
-        "issues": issues,
-        "intake": intake,
+        "client": intake.company_name.strip() or "Untitled client",
+        "date": model["date"],
+        "tier": TIER_LETTERS.get(score.tier, score.tier[:1].upper()),
+        "tier_name": score.tier,
+        "score": str(score.total_score),
+        "score_max": str(score.max_score),
+        "cover_sentence": model["cover_sentence"],
+        "sections": sections,
+        "exhibit": model["exhibit"],
+        "method_and_sources": model["method_and_sources"],
+        "missing": list(model["missing"]),
+        "actions": list(model["actions"]),
+        "score_detail": asdict(score),
+        "reasons": list(score.reasons),
+        "price_range": score.price_range,
+        "timeline": score.timeline,
+        "issues": [asdict(issue) for issue in issues],
+        "intake": asdict(intake),
     }
+    documents = render_documents(model)
     for key, doc_name in DOC_KEYS.items():
-        context[key] = markdown_to_html(str(documents.get(doc_name, "")))
+        context[key] = markdown_to_html(documents[doc_name])
     return context
 
 
@@ -112,6 +154,8 @@ def render_html(result: dict[str, Any], *, report_date: str | None = None) -> st
 
     for key in DOC_KEYS:
         context[key] = Markup(context[key])
+    for section in context["sections"]:
+        section["html"] = Markup(section["html"])
     context["font_dir"] = FONT_DIR.resolve().as_uri()
     return template.render(**context)
 

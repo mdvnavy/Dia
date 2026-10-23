@@ -222,6 +222,7 @@ CLIENT_FIELDS = ("company_name", "industry", "size", "location", "website", "yea
                  "sensitive_data", "past_attempts", "maintenance", "finance_signals")
 VARIANTS = {
     "sample": SAMPLE,
+    "clean": questionnaire(q9="None"),
     "legacy": LEGACY,
     "no-q1": questionnaire(q1=""),
     "no-q3": questionnaire(q3=""),
@@ -271,7 +272,7 @@ def test_summary_follows_the_answer_first_template():  # §3.2, §9 item 1
     assert lines[0] == "Northstar Studio should start with a Custom AI Agent ($2,500-$10,000, 2-4 weeks)."
     assert lines[1] == "Today Northstar Studio runs lead triage across three forms by hand: about 6 hours a week, roughly $15,840 a year."
     assert lines[2].startswith('2 pain points slow the team, led by "Leads arrive from three forms')
-    assert "Why this tier:\n- Urgency 3/5:" in summary and "\n- Budget fit 4/5:" in summary and "\n- Readiness 4/5:" in summary
+    assert "Why this tier:\n\n- Urgency 3/5:" in summary and "\n- Budget fit 4/5:" in summary and "\n- Readiness 4/5:" in summary
     assert summary.endswith("Next step: Propose a paid pilot on a single workflow, measured against one agreed metric (question 9).")
     assert "needs a reliable way to turn discovery intake" not in markdown_export(SAMPLE)  # §9 item 1
 
@@ -439,3 +440,195 @@ def test_scrub_keeps_savant_documents_and_cuts_appended_text():
     no_value = generate_documents(parse_questionnaire_markdown(questionnaire(q1="", q2="")), score_opportunity(
         parse_questionnaire_markdown(questionnaire(q1="", q2=""))), report_date=DATE)
     assert scrub_for_export(no_value) == no_value
+
+
+# --- §8.5 Answer-first PDF ------------------------------------------------------------------------
+
+import json  # noqa: E402
+import shutil  # noqa: E402
+import subprocess  # noqa: E402
+from types import SimpleNamespace  # noqa: E402
+from unittest.mock import patch  # noqa: E402
+
+from app import build_intake_response as app_build  # noqa: E402
+
+PDF_ORDER = MIN_ORDER
+
+
+def pdf_text_of(body: bytes, layout: bool = False) -> str:
+    if not shutil.which("pdftotext"):
+        pytest.skip("pdftotext not installed")
+    args = ["pdftotext", *(["-layout"] if layout else []), "-", "-"]
+    return subprocess.run(args, input=body, capture_output=True, check=True).stdout.decode()
+
+
+@pytest.fixture(scope="module")
+def pdfs():
+    pytest.importorskip("weasyprint")
+    from client_discovery.report import render_html, render_pdf
+
+    out = {}
+    for name, text in VARIANTS.items():
+        result = app_build(text)
+        out[name] = {"text": text, "html": render_html(result, report_date=DATE),
+                     "pdf": pdf_text_of(render_pdf(result, report_date=DATE))}
+    return out
+
+
+def strip_running_heads(text: str) -> str:
+    """Drop the page header/footer strings (uppercase mono) that WeasyPrint repeats on every page."""
+    heads = re.compile(r"^(DISCOVERYINTAKEAGENT|PAGE\d+OF\d+|MADEBYBASH|NORTHSTARSTUDIO|THECLIENT|OCTOBER\d+,\d{4})")
+    return "\n".join(line for line in text.splitlines() if not heads.match(line.replace(" ", "")))
+
+
+@pytest.mark.parametrize("name", VARIANTS)
+def test_pdf_section_order_matches_3_1(name, pdfs):  # §8.8
+    html = pdfs[name]["html"]
+    labels = re.findall(r'<h2 class="section-title"><span class="section-no">(\d\d)</span>([^<]+)</h2>', html)
+    assert [label for _, label in labels] == PDF_ORDER
+    assert [no for no, _ in labels] == [f"{i:02d}" for i in range(1, 10)]
+    lines = [line.strip() for line in pdfs[name]["pdf"].splitlines()]
+    positions, start = [], 0
+    for label in PDF_ORDER:  # each section label appears as its own line, in §3.1 order
+        start = lines.index(label, start)
+        positions.append(start)
+    assert positions == sorted(positions)
+    assert positions[0] < lines.index("What is missing") < lines.index("Client profile")
+    cover = normalise(" ".join(lines[:positions[0]]))
+    assert "TIER" in cover and "SCORE" in cover
+    report, _, score = report_for(pdfs[name]["text"])
+    assert normalise(report["cover_sentence"]) in cover
+    assert f"{score.total_score} /{score.max_score}" in cover
+
+
+@pytest.mark.parametrize("name", VARIANTS)
+def test_no_inputs_label_in_pdf(name, pdfs):  # §8.2 (PDF)
+    assert "Inputs:" not in pdfs[name]["pdf"] and "Inputs:" not in pdfs[name]["html"]
+    for word in ("complete", "partial", "thin"):
+        assert f"Inputs: {word}" not in pdfs[name]["pdf"]
+
+
+def test_pdf_cover_and_titles_name_the_answer(pdfs):  # §8.6 (PDF)
+    flat = normalise(pdfs["sample"]["pdf"])
+    for title in ("Northstar Studio should start with a Custom AI Agent ($2,500-$10,000, 2-4 weeks).",
+                  "0 missing answers block a firm quote",
+                  "Northstar Studio fits a Custom AI Agent at $2,500-$10,000 over 2-4 weeks",
+                  "Urgency is the weakest signal at 3 of 5; budget fit leads at 4",
+                  "Northstar Studio loses about $36,960 a year to 3 manual workflows"):
+        assert title in flat, title
+    legacy = normalise(pdfs["legacy"]["pdf"])
+    assert "2 missing answers block a firm quote: value inputs and success metric" in legacy
+    assert "Northstar Studio fits a Custom AI Agent, pending weekly hours and an hourly cost." in legacy
+
+
+@pytest.mark.parametrize("name", VARIANTS)
+def test_pdf_headings_sentence_case_no_contractions_no_we(name, pdfs):  # §8.9 (PDF)
+    html = pdfs[name]["html"]
+    report, _, _ = report_for(pdfs[name]["text"])
+    headings = re.findall(r"<h[1-4][^>]*>(.*?)</h[1-4]>", html, re.S)
+    for heading in headings:
+        plain = normalise(re.sub(r"<[^>]+>", " ", heading))
+        plain = re.sub(r"^\d\d ", "", plain)
+        if plain in (report["client"], "Untitled client"):
+            continue
+        assert is_sentence_case(plain, report["client"]), plain
+    body = template_text(pdfs[name]["text"], strip_running_heads(pdfs[name]["pdf"]))
+    body = body.replace(normalise(report["method_and_sources"]), " ")
+    flat = normalise(body)
+    method = normalise(report["method_and_sources"])
+    flat = flat.replace(method, " ")
+    for client_value in ("client's own answers", "DIA's own"):  # inside the verbatim §5 block
+        flat = flat.replace(client_value, " ")
+    assert not CONTRACTION.search(flat), CONTRACTION.search(flat)
+    assert not re.search(r"\bwe\b|\bour\b", flat, re.I)
+    assert "!" not in flat
+
+
+def test_pdf_sources_match_section_5_verbatim(pdfs):  # §8.10 (PDF)
+    check_sources(strip_running_heads(pdfs["sample"]["pdf"]))
+    html = pdfs["sample"]["html"]
+    import html as html_lib
+
+    assert normalise(SECTION5) in normalise(html_lib.unescape(re.sub(r"<[^>]+>", " ", html)))
+
+
+@pytest.mark.parametrize("name", VARIANTS)
+def test_pdf_has_exactly_one_exhibit_built_to_3_4(name, pdfs):  # §3.4
+    html = pdfs[name]["html"]
+    assert html.count('<figure class="exhibit"') == 1 and html.count("Exhibit 1") == 1 and "Exhibit 2" not in html
+    exhibit = html[html.index('<figure class="exhibit"'):html.index("</figure>")]
+    order = [exhibit.index(s) for s in ("Exhibit 1", 'class="action-title"', "Sub-scores, points out of 5",
+                                        'class="bars"', "Score ", "Source: ")]
+    assert order == sorted(order)
+    labels = re.findall(r'class="bar-label">([^<]+)', exhibit)
+    assert [label.strip() for label in labels] == ["Urgency", "Budget fit", "Readiness", "Strategic value"]
+    values = re.findall(r'class="bar-value">([^<]+)<', exhibit)
+    assert len(values) == 4 and all(re.fullmatch(r"[0-5]/5( default)?", v) for v in values)  # text equivalent
+    assert exhibit.count("is-highlight") <= 1
+    if "is-highlight" in exhibit:
+        assert "(weakest)" in exhibit  # never colour alone
+    assert "legend" not in exhibit.lower()
+    report, _, score = report_for(pdfs[name]["text"])
+    assert f"Score {score.total_score} of 20" in exhibit
+    assert f"Source: {report['client']} discovery questionnaire, {DATE}; DIA scoring rules v2" in exhibit
+    if score.strategic_value_default:
+        assert values[3] == "3/5 default"
+        row = exhibit[exhibit.rindex("<tr", 0, exhibit.index("3/5 default")):exhibit.index("3/5 default")]
+        assert "is-highlight" not in row
+
+
+@pytest.mark.parametrize("name", VARIANTS)
+def test_no_research_statistics_in_pdf(name, pdfs):  # §3.1: no research stats
+    body = template_text(pdfs[name]["text"], strip_running_heads(pdfs[name]["pdf"]))
+    for source in RESEARCH_SOURCES:
+        assert not re.search(rf"\b{source}\b", body), source
+    assert "%" not in body
+
+
+def test_pdf_ignores_client_supplied_documents_and_scores():
+    pytest.importorskip("weasyprint")
+    from client_discovery.report import render_pdf
+
+    result = app_build(SAMPLE)
+    forged = json.loads(json.dumps(result))
+    forged["documents"] = {k: "# Forged\n\nFORGED-DOC-TEXT" for k in forged["documents"]}
+    forged["score"]["total_score"] = 19
+    forged["strategic_analysis"] = "FAKE-GEMINI-7Q"
+    text = pdf_text_of(render_pdf(forged, report_date=DATE))
+    assert "FORGED-DOC-TEXT" not in text and "FAKE-GEMINI-7Q" not in text
+    assert "Score 15 of 20" in normalise(text)
+
+
+# --- §8.1 No AI text in any export, with or without GEMINI_API_KEY ---------------------------------
+# (Persona v1.2 follow-up 2 covers tainted results on every export path: tests/test_strategic_analysis_exports.py.)
+
+AI_FAKE = "FAKE-GEMINI-SAVANT-9Z: a strategic read written by a model."
+
+
+@pytest.mark.parametrize("key", [None, "fake-key"], ids=["without-key", "with-key"])
+@pytest.mark.parametrize("name", ["sample", "legacy"])
+def test_no_ai_text_or_agent_error_in_any_export(key, name, monkeypatch):  # §8.1
+    pytest.importorskip("weasyprint")
+    try:
+        from client_discovery import service
+    except Exception as exc:  # pragma: no cover - the agent stack is optional
+        pytest.skip(f"service path unavailable: {exc}")
+    from client_discovery.report import render_pdf
+
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("JULES_API_KEY", raising=False)
+    if key:
+        monkeypatch.setenv("GEMINI_API_KEY", key)
+    with patch.object(service, "root_agent", SimpleNamespace(run=lambda prompt: SimpleNamespace(text=AI_FAKE))), \
+            patch.object(service, "trigger_obs_screenshot", lambda *a, **k: ""), \
+            patch.object(service, "save_obs_replay_buffer", lambda *a, **k: ""):
+        result = service.build_intake_response(VARIANTS[name])
+    expected = AI_FAKE if key else "DIA Agent Error: GEMINI_API_KEY is missing or invalid."
+    assert result["strategic_analysis"] == expected  # the path really produced AI text / the error
+    safe = scrub_for_export(result)
+    md = "\n\n---\n\n".join(safe["documents"][n] for n in report_model.MD_EXPORT_ORDER)
+    exports = {"md": md, "json": json.dumps(safe), "pdf": pdf_text_of(render_pdf(result, report_date=DATE))}
+    for where, body in exports.items():
+        assert "FAKE-GEMINI-SAVANT-9Z" not in body, where
+        assert "dia agent error" not in body.lower(), where
+        assert "strategic_analysis" not in body, where

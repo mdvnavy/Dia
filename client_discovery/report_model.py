@@ -221,7 +221,7 @@ def build_report(intake: ClientIntake, score: OpportunityScore, issues: list[Val
         lines.append("The questionnaire lists no pain points.")
     if score.strategic_value_default:
         lines.append("Strategic value is set to 3 of 5 until weekly hours and an hourly cost are provided.")
-    why = ["Why this tier:"] + [
+    why = ["Why this tier:", ""] + [
         f"- {label} {getattr(score, key)}/5: {reasons.get(key, '')}." for key, label in SIGNALS[:3]
     ]
     next_step = actions[0] if actions else "Confirm scope on a kickoff call."
@@ -263,8 +263,9 @@ def build_report(intake: ClientIntake, score: OpportunityScore, issues: list[Val
         default = key == "strategic_value" and score.strategic_value_default
         bars.append({"key": key, "label": label, "value": value, "default": default,
                      "text": f"{value}/5 default" if default else f"{value}/5"})
-    highlight = next((b["key"] for b in bars if b["label"].lower() == why_title.split(" is the weakest")[0].lower()
-                      and " is the weakest" in why_title and not b["default"]), None)
+    # At most one bar is highlighted (the weakest), and it is also labelled in text, so colour never works alone.
+    highlight = next((b["key"] for b in bars if not b["default"] and why_title.startswith(f"{b['label']} is the weakest")),
+                     None)
     for bar in bars:
         bar["highlight"] = bar["key"] == highlight
     exhibit = {
