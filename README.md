@@ -151,9 +151,30 @@ python app.py   # forwarded port 8080
 | GET    | `/`                   | Web demo UI                               |
 | GET    | `/healthz`            | Cloud Run health check                    |
 | GET    | `/api/sample`         | Returns the sample questionnaire markdown |
-| GET    | `/api/agent/status`   | Reports whether a Gemini key is configured|
+| GET    | `/api/agent/status`   | Gemini key configured? + agent auth mode  |
 | POST   | `/api/process`        | Deterministic parse/score/generate        |
 | POST   | `/api/agent`          | Live Gemini ADK agent turn                |
+
+## Live agent access
+
+`/api/agent` spends Gemini quota and can reach MCP tools, so it is **secure by
+default** (see `agent_auth.py`):
+
+| Config | Who can call `/api/agent` |
+| ------ | ------------------------- |
+| `DIA_AGENT_TOKEN` set | Requests with `Authorization: Bearer <token>` (or `X-DIA-Agent-Token`). Everything else: 401. |
+| `DIA_IAP_AUDIENCE` set | Requests with a valid, verified IAP JWT (`X-Goog-IAP-JWT-Assertion`) for that audience. |
+| Neither (local dev) | Loopback clients only (`127.0.0.1` / `::1`). On Cloud Run (`K_SERVICE` set) every call is refused. |
+
+Local development needs no setup: run `python app.py` and use the UI on
+`http://127.0.0.1:8080`. Opening the app from another machine (e.g. a LAN IP
+or a Codespaces port forward) requires `DIA_AGENT_TOKEN`.
+
+`/api/agent` is also rate-limited per client IP (`DIA_AGENT_RATE_LIMIT`,
+default `10/60`; in-memory, per instance). MCP toolsets are attached only via
+`DIA_AGENT_MCP_MODE` (`none` by default, or `make`, `gcp`, `all`); words in a
+prompt never switch tools on. The deterministic `/api/process` path is
+unaffected by all of this.
 
 ## Submission hygiene
 
