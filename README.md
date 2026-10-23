@@ -47,6 +47,7 @@ The demo UI is dependency-free (vanilla JS + built-in browser APIs):
 ```bash
 python -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python -m pip install --no-deps -r requirements-security-overrides.txt
 .venv/bin/python app.py
 ```
 

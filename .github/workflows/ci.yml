@@ -17,6 +17,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          pip install --no-deps -r requirements-security-overrides.txt
       - name: Run tests
         run: python -m pytest -q
 
