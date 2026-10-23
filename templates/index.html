@@ -182,6 +182,17 @@
           </div>
         </div>
         <div id="intakeError" class="intake-error" role="alert" hidden></div>
+        <!-- dia-savant inputs addendum §3: pre-run inputs prompt. Client-side and deterministic; never blocks Run. -->
+        <section id="inputsPrompt" class="inputs-prompt" aria-labelledby="inputsPromptTitle" hidden>
+          <div class="inputs-prompt-head">
+            <h3 id="inputsPromptTitle">Before you run: a few inputs would sharpen this</h3>
+            <button id="inputsPromptDismiss" class="icon-button" type="button" aria-label="Dismiss input tips">×</button>
+          </div>
+          <p id="inputsPromptOld" class="inputs-prompt-old" hidden>This questionnaire has no "Workflows and value" section.</p>
+          <ul id="inputsPromptList"></ul>
+          <p class="inputs-prompt-foot">Work these out your way, add them to section 6, then run again. Your text stays here.</p>
+          <p class="inputs-prompt-foot">Prefer a hand? <span id="inputsPromptName">Bash Systems &amp; Services</span> offers business consulting.<span id="inputsPromptServices" hidden> <a id="inputsPromptLink" href="#" target="_blank" rel="noopener noreferrer">See services</a></span></p>
+        </section>
         <div class="actions under-prompt">
           <button id="uploadLink" class="text-link" type="button">Upload a file</button>
           <button id="uploadCancel" class="text-link" type="button" hidden>Cancel</button>
@@ -265,10 +276,19 @@
             <span>Recommended Tier</span>
             <strong id="tier">-</strong>
             <small id="score">Score pending</small>
+            <!-- Addendum v1.1.2 §7.3: one-line delta on a re-run; the full before/after sits below this card. -->
+            <small id="scoreDelta" class="score-delta" hidden></small>
+            <!-- dia-savant §3.5: input quality, on screen only (never in the PDF or Markdown). -->
+            <small id="inputsState" hidden></small>
+            <!-- Proto, on #39: a reopened cabinet intake scored before value at stake keeps its old score. -->
+            <small id="legacyScoreHint" class="legacy-score-hint" hidden>Scored before value at stake</small>
+            <p id="inputsNote" hidden></p>
           </div>
           <div class="issues">
             <h2 id="issuesHeading">Validation Issues</h2>
             <ul id="issues" aria-live="polite" aria-labelledby="issuesHeading"></ul>
+            <h2 id="flagsHeading" hidden>Flags to clear first</h2>
+            <ul id="flagActions" aria-labelledby="flagsHeading" hidden></ul>
             <!-- Follow-up drafter (persona-ux.md v1.2 §3): Guided mode, Gemini connected, and only when there are issues. -->
             <div class="followup" id="followupRow" hidden>
               <button id="draftFollowups" class="text-link" type="button" aria-describedby="followupLabel">Draft follow-up questions</button>
@@ -276,6 +296,12 @@
             </div>
           </div>
         </div>
+
+        <!-- Addendum §7.3 (v1.1.2): on screen only, never exported; below the recommended tier card (answer first). -->
+        <section id="beforeAfter" class="before-after" aria-labelledby="beforeAfterTitle" hidden>
+          <h3 id="beforeAfterTitle">Scored before / after</h3>
+          <dl></dl>
+        </section>
 
         <div class="response-area doc-card">
           <div class="doc-head">
@@ -291,6 +317,7 @@
             <button id="downloadPdf" type="button" disabled>Download PDF</button>
             <button id="downloadJson" type="button" disabled>Download JSON</button>
             <button id="copySection" type="button" disabled>Copy section</button>
+            <button id="rerunUpdated" class="text-link quiet" type="button" disabled>Re-run with updated answers</button>
             <button id="listenDocument" class="icon-button speech-only" type="button" aria-pressed="false" disabled>
               <svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
               <span class="speech-label">Listen</span>
@@ -344,7 +371,7 @@
     <footer class="footer-note">Press <kbd class="kbd-hint">⌘K</kbd> for actions</footer>
   </main>
 
-  <!-- Filing cabinet drawer: everything filed this session (max 15). -->
+  <!-- Filing cabinet drawer: intakes saved on this device (localStorage dia-cabinet-v2, max 15). -->
   <dialog id="cabinetDrawer" class="drawer cabinet-drawer" aria-labelledby="cabinetTitle">
     <div class="drawer-head">
       <div>
@@ -352,7 +379,14 @@
         <p id="cabinetSummary" class="drawer-sub"></p>
       </div>
       <button id="cabinetSelectMode" class="text-link" type="button">Select</button>
+      <button id="cabinetClear" class="text-link" type="button" hidden>Clear cabinet</button>
       <button id="cabinetClose" class="drawer-x" type="button" aria-label="Close filing cabinet">×</button>
+    </div>
+    <div id="cabinetClearConfirm" class="drawer-note drawer-confirm" role="alertdialog" aria-labelledby="cabinetClearTitle" aria-describedby="cabinetClearNote" hidden>
+      <p><strong id="cabinetClearTitle">Clear all saved intakes on this device?</strong></p>
+      <p id="cabinetClearNote">Export the ones you want to keep first.</p>
+      <button id="cabinetClearYes" type="button">Clear</button>
+      <button id="cabinetClearKeep" class="text-link" type="button">Keep</button>
     </div>
     <div id="cabinetSelectBar" class="drawer-select-bar" hidden>
       <label><input id="cabinetSelectAll" type="checkbox"> <span id="cabinetSelectAllLabel">Select all</span></label>

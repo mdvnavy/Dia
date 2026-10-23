@@ -106,9 +106,11 @@ loadSample.addEventListener("click", async () => {
   if (intakeBody.hidden) setIntakeCollapsed(false);
   autosizeComposer(questionnaire);
   statusText.textContent = "Sample loaded";
+  InputsPrompt.schedule();
 });
 
 runAgent.addEventListener("click", async () => {
+  InputsPrompt.endSession();  // hides on Run and does not come back for this intake (addendum §3.2)
   statusText.textContent = "Processing...";
   setBusy(runAgent, true);
   setExportAvailability(false);
@@ -122,9 +124,11 @@ runAgent.addEventListener("click", async () => {
     if (!response.ok) {
       throw new Error(payload.error || "Processing failed");
     }
+    const previousId = rerunOf;
     showResults(payload, questionnaire.value);
     statusText.textContent = "Complete - intake collapsed, ready to work";
     saveToCabinet(payload, questionnaire.value);
+    if (previousId) renderBeforeAfter(payload, previousId);
   } catch (error) {
     statusText.textContent = error.message;
     setExportAvailability(latestPayload !== null);
@@ -717,6 +721,9 @@ function showResults(payload, questionnaireText) {
   tier.textContent = payload.score.tier;
   score.textContent = `${payload.score.total_score}/${payload.score.max_score} · ${payload.score.timeline}`;
   renderIssues(payload.issues);
+  renderInputs(payload);
+  renderLegacyScoreHint(payload);
+  renderBeforeAfter(payload, null);
   refreshFollowupButton();
   renderDocument(activeDoc);
   setExportAvailability(true);
@@ -739,6 +746,60 @@ function renderIssues(items) {
   }
 }
 
+// Proto, on #39: intakes saved before dia-savant have no value_at_stake in their score. On reopen they are rescored
+// under the current rules (from their saved intake, the same input the PDF uses), so the screen and the PDF never
+// disagree; the hint then reads "Rescored under the current rules." If the rescore can't run (offline), the old
+// score stays on screen with "Scored before value at stake".
+const isLegacyScore = (payload) => Boolean(payload && payload.score && !Object.prototype.hasOwnProperty.call(payload.score, "value_at_stake"));
+function renderLegacyScoreHint(payload) {
+  const hint = document.querySelector("#legacyScoreHint");
+  if (!hint) return;
+  const rescored = Boolean(payload && payload.rescored);
+  hint.hidden = !(rescored || isLegacyScore(payload));
+  hint.textContent = rescored ? "Rescored under the current rules." : "Scored before value at stake";
+}
+
+async function rescoreEntry(item) {
+  const response = await fetch("/api/rescore", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ result: scrubForExport(item.result) }),
+  });
+  if (!response.ok) throw new Error("rescore failed");
+  const payload = await response.json();
+  const onScreen = latestPayload === item.result || (item.id && currentEntryId === item.id);
+  item.result = payload;
+  if (item.id && readCabinet().some((entry) => entry.id === item.id)) {
+    updateEntry(item.id, { result: payload, tier: payload.score.tier, score: payload.score.total_score, maxScore: payload.score.max_score });
+  }
+  if (onScreen) showResults(payload, item.questionnaire);
+  return payload;
+}
+
+// dia-savant §3.5: the Inputs label (complete, partial or thin) and one sentence on what to do. Screen only.
+const INPUTS_NOTES = {
+  complete: "Every answer needed for a firm quote is in; confirm scope on a kickoff call.",
+  partial: "The value at stake is computed, but the flags below need clearing before a firm quote.",
+  thin: "Ask for weekly hours, an hourly cost and the missing answers before quoting.",
+};
+function renderInputs(payload) {
+  const state = INPUTS_NOTES[payload.inputs_confidence] ? payload.inputs_confidence : null;
+  const inputsState = document.querySelector("#inputsState");
+  const inputsNote = document.querySelector("#inputsNote");
+  inputsState.hidden = inputsNote.hidden = !state;
+  inputsState.textContent = state ? `Inputs: ${state}` : "";
+  inputsNote.textContent = state ? INPUTS_NOTES[state] : "";
+  const list = document.querySelector("#flagActions");
+  const actions = Array.isArray(payload.flag_actions) ? payload.flag_actions : [];
+  list.innerHTML = "";
+  for (const action of actions) {
+    const item = document.createElement("li");
+    item.textContent = action;
+    list.appendChild(item);
+  }
+  list.hidden = document.querySelector("#flagsHeading").hidden = !actions.length;
+}
+
 function renderDocument(name) {
   output.textContent = documents[name] || "Run an intake to generate this document.";
   refreshDraftControls();
@@ -752,36 +813,54 @@ function setExportAvailability(isAvailable) {
   copySection.disabled = !isAvailable;
   listenDocument.disabled = !isAvailable;
   shareX.disabled = !isAvailable;
+  const rerun = document.querySelector("#rerunUpdated");
+  if (rerun) rerun.disabled = !isAvailable;
 }
 
 // Persona v1.2 rule 1: no AI text in client exports. Mirrors scrub_for_export in client_discovery/core.py:
-// drop unreviewed AI keys (strategic_analysis), cut anything appended after opportunity-analysis.md's
-// Score Reasons, and remove every line carrying a "DIA Agent Error", whatever produced it.
+// drop unreviewed AI keys (strategic_analysis), cut anything appended after opportunity-analysis.md's last
+// deterministic section, and remove every line carrying a "DIA Agent Error", whatever produced it.
+// dia-savant documents end with "Top workflows by value at stake" (its ### title, then one block of rows or
+// one sentence); older stored documents end with the Score Reasons bullets.
 const UNREVIEWED_AI_KEYS = new Set(["strategic_analysis"]);
+const TOP_WORKFLOWS = "\n## Top workflows by value at stake\n";
+const SCORE_REASONS = "\n## Score Reasons\n";
+function deterministicAnalysis(text) {
+  let at = text.indexOf(TOP_WORKFLOWS);
+  if (at !== -1) {
+    const head = text.slice(0, at + TOP_WORKFLOWS.length);
+    const kept = [];
+    let seenTitle = false;
+    let inBlock = false;
+    for (const line of text.slice(head.length).split("\n")) {
+      if (!seenTitle) { kept.push(line); seenTitle = line.startsWith("### "); continue; }
+      if (line.trim()) { inBlock = true; kept.push(line); } else if (inBlock) break; else kept.push(line);
+    }
+    return `${head}${kept.join("\n").replace(/\n+$/, "")}\n`;
+  }
+  at = text.indexOf(SCORE_REASONS);
+  if (at === -1) return text;
+  const head = text.slice(0, at + SCORE_REASONS.length);
+  const bullets = [];
+  for (const line of text.slice(head.length).split("\n")) { if (!line.startsWith("- ")) break; bullets.push(line); }
+  return `${head}${bullets.join("\n")}\n`;
+}
 function scrubForExport(value, key = null) {
   if (Array.isArray(value)) return value.map((item) => scrubForExport(item));
   if (value && typeof value === "object") {
     return Object.fromEntries(Object.entries(value).filter(([k]) => !UNREVIEWED_AI_KEYS.has(k)).map(([k, v]) => [k, scrubForExport(v, k)]));
   }
   if (typeof value !== "string") return value;
-  let text = value;
-  if (key === "opportunity-analysis.md") {
-    const at = text.indexOf("\n## Score Reasons\n");
-    if (at !== -1) {
-      const head = text.slice(0, at + "\n## Score Reasons\n".length);
-      const bullets = [];
-      for (const line of text.slice(head.length).split("\n")) { if (!line.startsWith("- ")) break; bullets.push(line); }
-      text = `${head}${bullets.join("\n")}\n`;
-    }
-  }
+  const text = key === "opportunity-analysis.md" ? deterministicAnalysis(value) : value;
   return text.split("\n").filter((line) => !line.toLowerCase().includes("dia agent error")).join("\n");
 }
+const MD_EXPORT_ORDER = ["opportunity-analysis.md", "client-profile.md", "proposal-draft.md"];
 const exportJson = (result) => JSON.stringify(scrubForExport(result), null, 2);
 
 function buildMarkdownExport(docs = documents) {
   const safe = scrubForExport(docs || {});
-  return tabs
-    .map((tab) => tab.dataset.doc)
+  // dia-savant §6: the Markdown export follows the PDF's answer-first order (the on-screen tabs keep theirs).
+  return MD_EXPORT_ORDER
     .map((name) => safe[name])
     .filter(Boolean)
     .join("\n\n---\n\n");
@@ -1115,6 +1194,7 @@ function attachDictation(button, textarea, { continuous = true, intercept, label
         if (textarea.value === lastWritten) write(""); // drop any unfinished interim words
         if (!ended.cancelled && finals) statusText.textContent = `${label} added`;
         if (!ended.cancelled) textarea.focus();
+        if (!ended.cancelled) textarea.dispatchEvent(new CustomEvent("dictationend"));
       },
     });
     rec = mine;
@@ -1512,6 +1592,8 @@ agentMessage.addEventListener("keydown", (event) => {
 
 function newIntake() {
   questionnaire.value = "";
+  rerunOf = null;
+  InputsPrompt.newSession();
   // Drop the previous run so stale results and exports cannot leak into the
   // new intake: back to the landing stage with exports disabled.
   latestPayload = null;
@@ -2247,9 +2329,16 @@ const toast = document.querySelector("#toast");
 const toastText = document.querySelector("#toastText");
 const toastActions = document.querySelector("#toastActions");
 let toastTimer = null;
+let toastDismiss = null;  // runs when the toast goes away without one of its actions (timer, ×, replaced, page left)
 
-function showToast(message, actions = [], { duration = 10000 } = {}) {
+function settleToast() {
+  const dismiss = toastDismiss;
+  toastDismiss = null;
+  dismiss?.();
+}
+function showToast(message, actions = [], { duration = 10000, onDismiss = null } = {}) {
   clearTimeout(toastTimer);
+  settleToast();
   toastText.textContent = message;
   toastActions.innerHTML = "";
   for (const action of actions) {
@@ -2257,15 +2346,21 @@ function showToast(message, actions = [], { duration = 10000 } = {}) {
     button.type = "button";
     button.className = "toast-action";
     button.textContent = action.label;
-    button.addEventListener("click", () => { hideToast(); action.run(); });
+    button.addEventListener("click", () => { toastDismiss = null; hideToast(); action.run(); });
     toastActions.appendChild(button);
   }
+  // A modal dialog (the cabinet drawer) makes the rest of the page inert, so the toast joins it while it is open;
+  // otherwise Remove's Undo could not be reached (v1.1.2: keep Remove's confirmation).
+  const host = [...document.querySelectorAll("dialog[open]")].filter((d) => d.matches(":modal")).pop() || document.body;
+  if (toast.parentElement !== host) host.appendChild(toast);
   toast.hidden = false;
+  toastDismiss = onDismiss;
   toastTimer = setTimeout(hideToast, duration);
 }
 function hideToast() {
   clearTimeout(toastTimer);
   toast.hidden = true;
+  settleToast();
 }
 document.querySelector("#toastClose").addEventListener("click", hideToast);
 toast.addEventListener("mouseenter", () => clearTimeout(toastTimer));
@@ -2424,6 +2519,7 @@ async function loadIntakeFiles(fileList) {
     if (intakeBody.hidden) setIntakeCollapsed(false);
     autosizeComposer(questionnaire);
     renderChips(parts);
+    InputsPrompt.schedule();
     questionnaire.focus();
     questionnaire.setSelectionRange(0, 0);
     questionnaire.scrollTop = 0;
@@ -2460,7 +2556,9 @@ questionnaire.addEventListener("paste", (event) => {
   if (files.length) {
     event.preventDefault();
     loadIntakeFiles(files);
+    return;
   }
+  InputsPrompt.schedule();  // text paste: the pre-run inputs prompt checks once the text settles
 });
 
 // Drag and drop (desktop): dashed outline on the composer, tray-active icon.
@@ -2494,14 +2592,78 @@ window.addEventListener("drop", (event) => {
   loadIntakeFiles(event.dataTransfer.files);
 });
 
-// --- Cabinet store (sessionStorage: wiped when the tab closes) --------------
-const CABINET_KEY = "dia-cabinet-v1";
+// --- Cabinet store (localStorage, inputs addendum §7.1 / flows §3.1 v9.0.1) -------
+// Approved by Ikenna: intakes survive closing the tab, so a user can come back and re-run. Items in the old
+// sessionStorage key are merged once (newest first, capped at CABINET_MAX, no duplicates), then that key is removed.
+// If localStorage is blocked, the cabinet falls back to sessionStorage.
+const CABINET_KEY = "dia-cabinet-v2";
+const CABINET_LEGACY_KEY = "dia-cabinet-v1";
 let cabinetStorageOk = true;
 let currentEntryId = null;
+let rerunOf = null;  // the card a "Re-run with updated answers" session started from (addendum §7.2)
+let cabinetBackend;  // undefined = not probed yet; null = no storage at all
 
-function readCabinet() {
+function probeStorage(kind) {
   try {
-    const items = JSON.parse(sessionStorage.getItem(CABINET_KEY) || "[]");
+    const store = window[kind];
+    const probe = "__dia_probe__";
+    store.setItem(probe, "1");
+    store.removeItem(probe);
+    return store;
+  } catch (error) {
+    return null;
+  }
+}
+function cabinetStore() {
+  if (cabinetBackend === undefined) cabinetBackend = probeStorage("localStorage") || probeStorage("sessionStorage");
+  return cabinetBackend;
+}
+const byNewest = (a, b) => String(b.savedAt || "").localeCompare(String(a.savedAt || ""));
+function migrateCabinet() {
+  const store = cabinetStore();
+  let legacy = null;
+  try { legacy = sessionStorage.getItem(CABINET_LEGACY_KEY); } catch (error) { return; }
+  if (legacy === null || !store) return;
+  let old = [];
+  try { old = JSON.parse(legacy); } catch (error) { old = []; }
+  if (!Array.isArray(old)) old = [];
+  const seen = new Set();
+  const merged = [...readCabinet(), ...old].filter((item) => item && item.id && !seen.has(item.id) && seen.add(item.id));
+  merged.sort(byNewest);
+  writeCabinet(merged.slice(0, CABINET_MAX));
+  if (cabinetStorageOk) { try { sessionStorage.removeItem(CABINET_LEGACY_KEY); } catch (error) { /* stays; merge is idempotent */ } }
+}
+
+// Remove with Undo: the removed entry stays in storage until its toast expires (timer, ×, another toast, or the
+// page is left), but every read already leaves it out, so the screen, the counts and a reload always agree.
+let pendingRemoval = null;  // { id, item, index } while the Undo toast is up
+function readCabinet() {
+  const items = storedCabinet();
+  return pendingRemoval ? items.filter((item) => item.id !== pendingRemoval.id) : items;
+}
+function commitRemoval(id = pendingRemoval?.id) {
+  if (!pendingRemoval || pendingRemoval.id !== id) return;
+  pendingRemoval = null;
+  const items = storedCabinet();
+  if (items.some((item) => item.id === id)) writeCabinet(items.filter((item) => item.id !== id));
+}
+function cancelRemoval(id) {
+  if (!pendingRemoval || pendingRemoval.id !== id) return false;
+  const { item, index } = pendingRemoval;
+  pendingRemoval = null;
+  const items = storedCabinet();
+  if (!items.some((entry) => entry.id === id)) {  // something rewrote storage meanwhile: put it back where it was
+    items.splice(Math.min(index, items.length), 0, item);
+    writeCabinet(items);
+  }
+  return true;
+}
+window.addEventListener("pagehide", () => commitRemoval());  // leaving the page ends the toast window
+function storedCabinet() {
+  const store = cabinetStore();
+  if (!store) { cabinetStorageOk = false; return []; }
+  try {
+    const items = JSON.parse(store.getItem(CABINET_KEY) || "[]");
     cabinetStorageOk = true;
     return Array.isArray(items) ? items : [];
   } catch (error) {
@@ -2510,10 +2672,12 @@ function readCabinet() {
   }
 }
 function writeCabinet(items) {
+  const store = cabinetStore();
   let list = items.slice(0, CABINET_MAX);
+  if (!store) { cabinetStorageOk = false; return list; }
   while (list.length) {
     try {
-      sessionStorage.setItem(CABINET_KEY, JSON.stringify(list));
+      store.setItem(CABINET_KEY, JSON.stringify(list));
       cabinetStorageOk = true;
       return list;
     } catch (error) {
@@ -2521,9 +2685,16 @@ function writeCabinet(items) {
       list = list.slice(0, -1); // storage full: drop the oldest until it fits
     }
   }
-  try { sessionStorage.removeItem(CABINET_KEY); } catch (error) { cabinetStorageOk = false; }
+  try { store.removeItem(CABINET_KEY); } catch (error) { cabinetStorageOk = false; }
   return list;
 }
+function clearCabinet() {
+  pendingRemoval = null;
+  const store = cabinetStore();
+  try { store?.removeItem(CABINET_KEY); } catch (error) { cabinetStorageOk = false; }
+  currentEntryId = null;
+}
+migrateCabinet();
 const slugify = (text) => (text || "intake").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "intake";
 const tierLetter = (tier) => ({ "Quick Win": "A", "Custom AI Agent": "B", "Full Integration": "C" }[tier] || (tier || "?").slice(0, 1).toUpperCase());
 const timeOf = (iso) => new Date(iso).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
@@ -2548,6 +2719,9 @@ function makeEntry(payload, questionnaireText) {
 function saveToCabinet(payload, questionnaireText) {
   const entry = makeEntry(payload, questionnaireText);
   const items = readCabinet();
+  // Re-run (addendum §7.2): link the new card to the original; if the original was evicted, drop the link silently.
+  if (rerunOf && items.some((item) => item.id === rerunOf)) entry.previousId = rerunOf;
+  rerunOf = null;
   if (items.length >= CABINET_MAX && CABINET_CAP_POLICY === "block") {
     showToast(`Not filed: your cabinet is full (${CABINET_MAX} of ${CABINET_MAX}). Export or remove one first.`, [{ label: "Open cabinet", run: () => CabinetDrawer.open() }]);
     return;
@@ -2555,7 +2729,7 @@ function saveToCabinet(payload, questionnaireText) {
   const evicted = items.length >= CABINET_MAX ? items[items.length - 1] : null;
   const saved = writeCabinet([entry, ...items.slice(0, CABINET_MAX - 1)]);
   if (!cabinetStorageOk) {
-    showToast("Couldn't file this intake. Your browser blocked session storage.");
+    showToast("Couldn't file this intake. Your browser blocked storage.");
     return;
   }
   currentEntryId = entry.id;
@@ -2588,21 +2762,22 @@ function updateEntry(id, patch) {
 }
 
 function removeEntry(id) {
-  const items = readCabinet();
-  const index = items.findIndex((item) => item.id === id);
-  if (index === -1) return;
-  const [removed] = items.splice(index, 1);
-  writeCabinet(items);
+  commitRemoval();  // an earlier removal whose toast is still up becomes final now
+  const visible = readCabinet();
+  const shownIndex = visible.findIndex((item) => item.id === id);
+  if (shownIndex === -1) return;
+  const stored = storedCabinet();
+  const index = stored.findIndex((item) => item.id === id);
+  const removed = stored[index];
+  pendingRemoval = { id, item: removed, index };
   CabinetDrawer.selected.delete(id);
-  refreshCabinetButton(items);
-  CabinetDrawer.render({ focusAfterRemove: index });
+  refreshCabinetButton();
+  CabinetDrawer.collapse(id, shownIndex);  // card and count go now; storage follows when the toast expires
   showToast(`Removed “${removed.title}”`, [{ label: "Undo", run: () => {
-    const now = readCabinet();
-    now.splice(Math.min(index, now.length), 0, removed);
-    writeCabinet(now);
+    if (!cancelRemoval(id)) return;
     refreshCabinetButton();
-    CabinetDrawer.render();
-  } }]);
+    CabinetDrawer.render({ focusId: id });
+  } }], { onDismiss: () => commitRemoval(id) });
 }
 
 // --- Cabinet button ----------------------------------------------------------
@@ -2764,6 +2939,8 @@ const CabinetDrawer = (() => {
   const exportCancel = document.querySelector("#cabinetExportCancel");
   const helper = document.querySelector("#cabinetHelper");
   const live = document.querySelector("#cabinetLive");
+  const clearButton = document.querySelector("#cabinetClear");
+  const clearConfirm = document.querySelector("#cabinetClearConfirm");
   const alertBox = document.querySelector("#cabinetAlert");
   const selected = new Set();
   let shown = CABINET_PAGE;
@@ -2790,11 +2967,13 @@ const CabinetDrawer = (() => {
         <button type="button" data-kind="pdf">PDF</button>
         <button type="button" data-kind="md">MD</button>
         <button type="button" data-kind="json">JSON</button>
+        <button type="button" class="card-rerun" aria-label="Re-run ${item.title.replace(/"/g, "&quot;")} with updated answers">Re-run</button>
         <button type="button" class="card-remove" aria-label="Remove ${item.title.replace(/"/g, "&quot;")}">Remove</button>
       </div>
       <p class="card-status" aria-live="polite"></p>`;
     article.querySelector(".card-title").textContent = item.title;
     article.querySelector(".card-meta").textContent = `${whenOf(item.savedAt)} · ${item.tier} · ${item.score}/${item.maxScore}`;
+    if (item.previousId) article.querySelector(".card-meta").textContent = `Re-run · ${article.querySelector(".card-meta").textContent}`;  // addendum §7.2
     if (item.exportedAt) article.querySelector(".card-exported").textContent = `✓ Exported ${dayOf(item.exportedAt)}`;
     const check = article.querySelector(".card-check input");
     article.querySelector(".card-check .visually-hidden").textContent = `Select ${item.title}, ${new Date(item.savedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
@@ -2808,6 +2987,7 @@ const CabinetDrawer = (() => {
     });
     article.querySelector(".card-reopen").addEventListener("click", () => reopenIntake(item));
     article.querySelector(".card-remove").addEventListener("click", () => removeEntry(item.id));
+    article.querySelector(".card-rerun").addEventListener("click", () => rerunIntake(item));
     for (const button of article.querySelectorAll("[data-kind]")) {
       button.addEventListener("click", () => exportOne(item, button.dataset.kind, { button, status: article.querySelector(".card-status") }));
     }
@@ -2815,14 +2995,52 @@ const CabinetDrawer = (() => {
     return li;
   }
 
-  function render({ revealFrom = null, focusAfterRemove = null } = {}) {
-    const items = readCabinet();
-    alertBox.textContent = cabinetStorageOk ? "" : "Couldn't open the cabinet. Your browser blocked session storage.";
+  function renderChrome(items) {  // the count, empty state and header buttons
+    alertBox.textContent = cabinetStorageOk ? "" : "Couldn't open the cabinet. Your browser blocked storage.";
     for (const id of [...selected]) if (!items.some((item) => item.id === id)) selected.delete(id);
     summary.textContent = items.length === 0 ? "" : items.length >= 13 ? `${items.length} of ${CABINET_MAX} slots used` : `${items.length} intake${items.length === 1 ? "" : "s"}`;
     empty.hidden = items.length > 0;
     full.hidden = items.length < CABINET_MAX;
     selectModeButton.hidden = items.length === 0;
+    clearButton.hidden = items.length === 0 || selectMode;
+    if (items.length === 0) clearConfirm.hidden = true;
+  }
+
+  // Remove: the count updates now and the card collapses (reduced motion: it just goes).
+  function collapse(id, focusAfterRemove) {
+    const li = [...list.children].find((node) => node.dataset.id === id);
+    if (!li || !drawer.open || prefersReducedMotion()) return render({ focusAfterRemove });
+    const items = readCabinet();
+    renderChrome(items);
+    updateSelection(items);
+    const hadFocus = li.contains(document.activeElement);
+    const others = [...list.children].filter((node) => node !== li && !node.classList.contains("is-removing"));
+    li.inert = true;
+    li.setAttribute("aria-hidden", "true");
+    if (hadFocus) {
+      const target = others[Math.min(focusAfterRemove, others.length - 1)];
+      (target?.querySelector(".card-reopen") || document.querySelector("#cabinetStart")).focus();
+    }
+    li.style.height = `${li.offsetHeight}px`;
+    void li.offsetHeight;  // start the transition from the measured height
+    li.classList.add("is-removing");
+    li.style.height = "0px";
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      if (!li.isConnected) return;  // already re-rendered (Undo, another change)
+      const focusInList = list.contains(document.activeElement);
+      const focusedId = document.activeElement?.closest?.("li")?.dataset.id;
+      render(focusInList && focusedId ? { focusId: focusedId } : {});
+    };
+    li.addEventListener("transitionend", (event) => { if (event.target === li && event.propertyName === "height") finish(); });
+    setTimeout(finish, 320);
+  }
+
+  function render({ revealFrom = null, focusAfterRemove = null, focusId = null } = {}) {
+    const items = readCabinet();
+    renderChrome(items);
     const visible = items.slice(0, Math.min(shown, CABINET_MAX));
     list.innerHTML = "";
     visible.forEach((item, index) => {
@@ -2837,6 +3055,7 @@ const CabinetDrawer = (() => {
       const cards = list.querySelectorAll(".card-reopen");
       (cards[Math.min(focusAfterRemove, cards.length - 1)] || document.querySelector("#cabinetStart")).focus();
     }
+    if (focusId !== null) [...list.children].find((node) => node.dataset.id === focusId)?.querySelector(".card-reopen")?.focus();
     return items;
   }
 
@@ -2864,6 +3083,27 @@ const CabinetDrawer = (() => {
   }
 
   selectModeButton.addEventListener("click", () => setSelectMode(!selectMode));
+  // Clear cabinet (flows §3.1 v9.0.1): a confirm in the drawer, focus on Keep. It empties dia-cabinet-v2.
+  clearButton.addEventListener("click", () => {
+    clearConfirm.hidden = false;
+    document.querySelector("#cabinetClearKeep").focus();
+  });
+  document.querySelector("#cabinetClearKeep").addEventListener("click", () => {
+    clearConfirm.hidden = true;
+    clearButton.focus();
+  });
+  document.querySelector("#cabinetClearYes").addEventListener("click", () => {
+    clearConfirm.hidden = true;
+    clearCabinet();
+    selected.clear();
+    refreshCabinetButton([]);
+    render();
+    live.textContent = "Cabinet cleared";
+    document.querySelector("#cabinetStart").focus();
+  });
+  clearConfirm.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); clearConfirm.hidden = true; clearButton.focus(); }
+  });
   selectAll.addEventListener("change", () => {
     const items = readCabinet();
     selected.clear();
@@ -2994,7 +3234,7 @@ const CabinetDrawer = (() => {
     }
   }
 
-  return { open, close, render, isOpen: () => drawer.open, selected, exportSelected: exportSelectedImpl, setSelectMode };
+  return { open, close, render, collapse, isOpen: () => drawer.open, selected, exportSelected: exportSelectedImpl, setSelectMode };
 })();
 
 const exportSelected = () => CabinetDrawer.exportSelected();
@@ -3026,12 +3266,110 @@ function reopenIntake(item) {
     return;
   }
   CabinetDrawer.close({ restoreFocus: false });
+  rerunOf = null;
+  InputsPrompt.endSession();
   questionnaire.value = item.questionnaire;
   showResults(item.result, item.questionnaire);
   currentEntryId = item.id;
   statusText.textContent = `Reopened ${item.title}`;
+  if (isLegacyScore(item.result)) {
+    rescoreEntry(item).then(() => { statusText.textContent = `Reopened ${item.title}. Rescored under the current rules.`; })
+      .catch(() => { /* offline: the saved score stays, with its "Scored before value at stake" hint */ });
+  }
   const heading = document.querySelector(".score-card span");
   if (heading) { heading.tabIndex = -1; heading.focus({ preventScroll: true }); heading.scrollIntoView({ block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" }); }
+}
+
+// Re-run with updated answers (addendum §7.2, flows §5.2): the stored questionnaire goes back into the composer,
+// expanded and editable, with the caret at the section-6 heading (or the end). The original card is never changed;
+// Run files a new card linked by previousId.
+function rerunIntake(item) {
+  const unsaved = questionnaire.value.trim() && questionnaire.value !== lastRunQuestionnaire && questionnaire.value !== item.questionnaire;
+  if (unsaved && !window.confirm("Replace what's in the composer?\nYour unrun text will be lost.")) return;
+  if (typeof item.questionnaire !== "string") {
+    showToast("This intake couldn't be reopened. Its saved data is damaged.", [{ label: "Remove it", run: () => removeEntry(item.id) }]);
+    return;
+  }
+  CabinetDrawer.close({ restoreFocus: false });
+  questionnaire.value = item.questionnaire;
+  if (intakeBody.hidden) setIntakeCollapsed(false);
+  autosizeComposer(questionnaire);
+  questionnaire.dispatchEvent(new Event("input"));
+  InputsPrompt.newSession();
+  rerunOf = item.id || null;
+  const heading = item.questionnaire.search(/^##\s*6\.?\s/m);
+  const caret = heading >= 0 ? heading : item.questionnaire.length;
+  questionnaire.focus();
+  questionnaire.setSelectionRange(caret, caret);
+  statusText.textContent = `Editing a copy of ${item.title}. The original stays in the cabinet.`;
+  InputsPrompt.schedule();
+}
+
+// Scored before / after (addendum §7.3): on screen only, after a re-run whose previous result is still stored.
+// Question numbers mirror client_discovery.core.QUESTION_NUMBERS (the one questionnaire map; a test pins the parity).
+// Older questionnaires without section 6 have no numbered questions, so their labels carry no number.
+const QUESTION_NUMBERS = {
+  workflow_tasks: 1, hourly_cost: 2, success_metric: 3, process_owner: 4, systems_access: 5, data_readiness: 6,
+  exceptions: 7, sensitive_data: 8, past_attempts: 9, maintenance: 10, finance_signals: 11,
+};
+const BA_LABELS = {
+  workflow_tasks: "manual tasks", hourly_cost: "hourly cost", success_metric: "success metric",
+  process_owner: "process owner", systems_access: "systems", data_readiness: "data", exceptions: "exceptions",
+  sensitive_data: "regulated data", past_attempts: "previous attempts", maintenance: "maintenance",
+  finance_signals: "finance", budget: "budget", pain_points: "pain points", goals: "goals",
+};
+function answerLabel(key, numbered) {
+  return numbered && QUESTION_NUMBERS[key] ? `Q${QUESTION_NUMBERS[key]} ${BA_LABELS[key]}` : BA_LABELS[key];
+}
+const flagWords = (flag) => flag.toLowerCase().replace(/_/g, " ");
+function valueWords(payload) {
+  if (!payload.score || payload.score.value_at_stake === null || payload.score.value_at_stake === undefined) return "not computed";
+  return `${payload.value_at_stake_text || `about $${Number(payload.score.value_at_stake).toLocaleString("en-US")}`} a year`;
+}
+function beforeAfterRows(previous, current) {
+  if (isLegacyScore(previous)) return null;
+  const ps = previous.score, cs = current.score;
+  const sv = (s) => `${s.strategic_value}${s.strategic_value_default ? " (default)" : ""}`;
+  const pf = previous.flags || ps.flags || [], cf = current.flags || cs.flags || [];
+  const changed = Object.keys(BA_LABELS).filter((key) => JSON.stringify((previous.intake || {})[key] ?? "") !== JSON.stringify((current.intake || {})[key] ?? ""));
+  return [
+    ["Score", `${ps.total_score} → ${cs.total_score} of ${cs.max_score}`],
+    ["Strategic value", `${sv(ps)} → ${sv(cs)}`],
+    ["Value at stake", `${valueWords(previous)} → ${valueWords(current)}`],
+    ["Inputs", `${previous.inputs_confidence || "unknown"} → ${current.inputs_confidence || "unknown"}`],
+    ["Flags cleared", pf.filter((f) => !cf.includes(f)).map(flagWords).join(", ") || "none"],
+    ["New flags", cf.filter((f) => !pf.includes(f)).map(flagWords).join(", ") || "none"],
+    ["Answers changed", changed.map((key) => answerLabel(key, Boolean((current.intake || {}).workflows_section))).join(", ") || "none"],
+  ];
+}
+function renderBeforeAfter(current, previousId) {
+  const box = document.querySelector("#beforeAfter");
+  if (!box) return;
+  const delta = document.querySelector("#scoreDelta");
+  const previous = previousId ? readCabinet().find((item) => item.id === previousId) : null;
+  box.hidden = !previous;
+  if (delta) delta.hidden = true;
+  if (!previous) return;
+  const rows = beforeAfterRows(previous.result || {}, current);
+  if (rows && delta) {  // compact one-line delta inside the tier card (v1.1.2)
+    delta.textContent = `Was ${previous.result.score.total_score}, now ${current.score.total_score}`;
+    delta.hidden = false;
+  }
+  const list = box.querySelector("dl");
+  list.replaceChildren();
+  if (!rows) {
+    const note = document.createElement("dd");
+    note.textContent = "Scored with older rules, so no comparison.";
+    list.appendChild(note);
+    return;
+  }
+  for (const [label, value] of rows) {
+    const dt = document.createElement("dt");
+    dt.textContent = label;
+    const dd = document.createElement("dd");
+    dd.textContent = value;
+    list.append(dt, dd);
+  }
 }
 
 async function fetchPdf(item, signal) {
@@ -3048,6 +3386,13 @@ async function fetchPdf(item, signal) {
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
     throw new Error(payload.error || "PDF rendering failed on the server.");
+  }
+  // Screen and PDF must never disagree: when the PDF's figures differ from the saved ones (older rules), the saved
+  // result is rescored and the screen updated to match.
+  const pdfScore = response.headers.get("X-DIA-Score");
+  const saved = item.result && item.result.score;
+  if (pdfScore && saved && pdfScore !== `${saved.tier}|${saved.total_score}/${saved.max_score}|${saved.timeline}`) {
+    await rescoreEntry(item).catch(() => {});
   }
   return response.blob();
 }
@@ -3096,7 +3441,7 @@ downloadPdf.addEventListener("click", async () => {
   downloadPdf.setAttribute("aria-busy", "true");
   flashStatus(exportStatus, "Building PDF…");
   try {
-    const item = { title: latestPayload.intake?.company_name || "intake", questionnaire: lastRunQuestionnaire, result: latestPayload, savedAt: new Date().toISOString() };
+    const item = { id: currentEntryId, title: latestPayload.intake?.company_name || "intake", questionnaire: lastRunQuestionnaire, result: latestPayload, savedAt: new Date().toISOString() };
     downloadBlob(`dia-${slugify(item.title)}.pdf`, await fetchPdf(item));
     if (currentEntryId) updateEntry(currentEntryId, { exportedAt: new Date().toISOString() });
     flashStatus(exportStatus, "PDF downloaded");
@@ -3145,3 +3490,221 @@ const LetterheadClock = (() => {
   schedule();
   return { render };
 })();
+
+// --- Pre-run inputs prompt (dia-savant inputs addendum v1.1.1 §3, flows §2.9 v9.0.1) ----------------------
+// Client-side and deterministic: it mirrors client_discovery/core.py (QUESTION_ALIASES, _extract_table_rows,
+// parse_workflows, parse_hourly_rate, _has_number, _blank) and inputs.input_gaps, and never calls the server,
+// so Off mode's "Nothing leaves this browser except the deterministic run" stays true. tests/test_inputs.py keeps
+// these lists equal to the Python ones.
+const SECTION6_ALIASES = {
+  workflow_tasks: ["manual tasks"],
+  hourly_cost: ["hourly cost", "salary band", "loaded rate"],
+  success_metric: ["the one number", "success metric"],
+  process_owner: ["owns the process", "process owner"],
+  systems_access: ["systems involved", "login or api access"],
+  data_readiness: ["where does the data live", "data live", "how clean"],
+  exceptions: ["what goes wrong today", "exceptions and hand-offs"],
+  sensitive_data: ["regulated or sensitive"],
+  past_attempts: ["previous ai", "automation attempts"],
+  maintenance: ["who maintains"],
+  finance_signals: ["finance only", "days overdue"],
+};
+const QUESTION_ALIASES = {
+  ...SECTION6_ALIASES,
+  company_name: ["company name"],
+  website: ["website"],
+  industry: ["industry / niche", "industry", "niche"],
+  size: ["company size", "size"],
+  years_in_business: ["years in business"],
+  location: ["location"],
+  tools: ["what tools/software do you use today?", "what tools/software do you use", "tools/software do you use", "tools"],
+  budget: ["budget range", "budget"],
+  decision_maker: ["final decision-maker", "decision maker", "decision-maker"],
+  start_date: ["preferred start date", "start date"],
+  tech_person: ["in-house tech person", "tech person"],
+  compliance: ["compliance requirements", "compliance"],
+  notes: ["anything else we should know", "notes"],
+};
+// Copy mirrors client_discovery/inputs.py INPUTS (label, on-screen prompt, why), in the fixed §2 order.
+const INPUT_PROMPTS = {
+  hours: ["Hours per task", "Which three tasks take the most hours each week?", "Hours turn the value at stake into a figure."],
+  hourly_cost: ["Hourly cost", "What does an hour of that person's time cost the business, all-in?", "Hours times cost gives the yearly value at stake."],
+  success_metric: ["Success metric", "What one number would show this worked, and what is it today?", "A number agreed now makes the result easy to check later."],
+  people: ["People involved", "Who does each of those tasks, and how many people share them?", "It shows who the change affects."],
+  systems: ["Systems", "Which systems does each task touch, and who can grant access?", "Access is where scope surprises usually start."],
+};
+const DIA_NUMBER = "\\d[\\d,]*(?:\\.\\d+)?";
+const toNumber = (text) => Number(text.replace(/,/g, ""));
+const isBlankAnswer = (text) => ["", "n/a", "none", "tbd", "your answer", "-"].includes((text || "").trim().toLowerCase());
+
+function questionnaireRows(content) {
+  const rows = [];
+  for (const line of content.split(/\r\n|\r|\n/)) {
+    const stripped = line.trim();
+    if (!(stripped.startsWith("|") && stripped.endsWith("|")) || stripped.includes("---")) continue;
+    const cells = stripped.replace(/^\|+|\|+$/g, "").split("|").map((cell) => cell.trim());
+    if (cells.length < 2 || cells[0].toLowerCase() === "question") continue;
+    rows.push([cells[0], cells.slice(1).join(" | ")]);
+  }
+  return rows;
+}
+function parseIntakeFields(content) {
+  const values = {};
+  let known = false;
+  for (const [question, answer] of questionnaireRows(content)) {
+    const normalized = question.trim().toLowerCase().replace(/\s+/g, " ");
+    for (const [field, aliases] of Object.entries(QUESTION_ALIASES)) {
+      if (aliases.some((alias) => normalized.includes(alias))) {
+        values[field] = answer.trim();
+        known = true;
+        break;
+      }
+    }
+  }
+  const heading = /^##\s*6\.?\s/m.test(content);
+  const workflowsSection = heading || Object.keys(SECTION6_ALIASES).some((field) => values[field]);
+  return { values, known, heading, workflowsSection };
+}
+function workflowParts(text) {
+  return (text || "").split(/;|<br\s*\/?>|\n/i).map((part) => part.trim())
+    .filter((part) => part && !["n/a", "none", "your answer"].includes(part.toLowerCase())).slice(0, 3);
+}
+function parseWorkflowsJs(text) {
+  return workflowParts(text).map((part) => {
+    const lower = part.toLowerCase();
+    const hours = lower.match(new RegExp(`(${DIA_NUMBER})\\s*(?:h\\b|hrs?\\b|hours?\\b)`));
+    const people = lower.match(/(\d+)\s*(?:people|persons?|staff)\b/);
+    return { hours: hours ? toNumber(hours[1]) : null, people: people ? Number(people[1]) : null };
+  });
+}
+function parseHourlyRateJs(text) {
+  const t = (text || "").toLowerCase().replace(/–/g, "-");
+  const found = [...t.matchAll(new RegExp(`(${DIA_NUMBER})\\s*(k\\b)?`, "g"))].map((m) => toNumber(m[1]) * (m[2] ? 1000 : 1));
+  if (!found.length) return null;
+  if (/\/\s*h|\bhour|\bhr\b|\bhrs?\b|hourly|per hour/.test(t) && found[0] < 1000) return found[0];
+  const annual = found.filter((n) => n >= 1000).slice(0, 2);
+  if (annual.length) return annual.reduce((a, b) => a + b, 0) / annual.length / 2080;
+  return found[0] > 0 ? found[0] : null;
+}
+// Mirrors inputs.input_gaps. Systems: the scorer's SCOPE_RISK_SYSTEMS never fires on a blank answer, so blank is enough.
+function detectInputGaps(content) {
+  const { values, known, heading, workflowsSection } = parseIntakeFields(content || "");
+  const looksLikeQuestionnaire = known || heading;
+  const tasks = parseWorkflowsJs(values.workflow_tasks);
+  const gaps = [];
+  if (!tasks.length || tasks.some((task) => task.hours === null)) gaps.push("hours");
+  if (parseHourlyRateJs(values.hourly_cost) === null) gaps.push("hourly_cost");
+  if (!/\d/.test(values.success_metric || "")) gaps.push("success_metric");
+  if (workflowsSection) {
+    if (tasks.length && tasks.some((task) => task.people === null)) gaps.push("people");
+    if (isBlankAnswer(values.systems_access)) gaps.push("systems");
+  }
+  return { looksLikeQuestionnaire, workflowsSection, gaps };
+}
+
+const InputsPrompt = (() => {
+  const section = document.querySelector("#inputsPrompt");
+  const list = document.querySelector("#inputsPromptList");
+  const oldLine = document.querySelector("#inputsPromptOld");
+  const dismissButton = document.querySelector("#inputsPromptDismiss");
+  const servicesWrap = document.querySelector("#inputsPromptServices");
+  const servicesLink = document.querySelector("#inputsPromptLink");
+  const describedBy = questionnaire.getAttribute("aria-describedby") || "intakeNote dropHint";
+  const DEBOUNCE_MS = 800;
+  let timer = null;
+  let used = false;     // shown, dismissed or run in this intake: at most once per intake
+  let showing = false;
+
+  function render(state) {
+    oldLine.hidden = state.workflowsSection;
+    list.replaceChildren(...state.gaps.map((key) => {
+      const [label, prompt, why] = INPUT_PROMPTS[key];
+      const item = document.createElement("li");
+      item.dataset.input = key;
+      const strong = document.createElement("strong");
+      strong.textContent = `${label}. `;
+      const why_ = document.createElement("small");
+      why_.className = "inputs-prompt-why";
+      why_.textContent = why;
+      item.append(strong, prompt, document.createElement("br"), why_);
+      return item;
+    }));
+  }
+  function hide() {
+    showing = false;
+    section.hidden = true;
+    questionnaire.setAttribute("aria-describedby", describedBy);
+  }
+  function evaluate() {
+    timer = null;
+    if (used || questionnaire.readOnly) return;
+    const state = detectInputGaps(questionnaire.value);
+    if (!state.looksLikeQuestionnaire || !state.gaps.length) return;
+    used = true;
+    showing = true;
+    render(state);
+    section.hidden = false;
+    questionnaire.setAttribute("aria-describedby", `${describedBy} inputsPromptTitle`);
+    const n = state.gaps.length;
+    statusText.textContent = `${n} key input${n === 1 ? " is" : "s are"} missing. Tips are below the composer.`;
+  }
+  function schedule() {
+    if (used) return;
+    clearTimeout(timer);
+    timer = setTimeout(evaluate, DEBOUNCE_MS);
+  }
+  function liveUpdate() {
+    if (!showing) {
+      if (timer) schedule();  // still settling after a trigger: restart the debounce
+      return;
+    }
+    const state = detectInputGaps(questionnaire.value);
+    if (!state.gaps.length) { hide(); return; }  // all filled: removes itself, no announcement
+    render(state);
+  }
+  function dismiss() {
+    hide();
+    questionnaire.focus();
+  }
+  function endSession() {
+    clearTimeout(timer);
+    timer = null;
+    used = true;
+    hide();
+  }
+  function newSession() {
+    clearTimeout(timer);
+    timer = null;
+    used = false;
+    hide();
+  }
+  function setServicesUrl(url) {
+    servicesWrap.hidden = !url;
+    if (url) servicesLink.href = url;
+    else servicesLink.removeAttribute("href");
+  }
+  dismissButton.addEventListener("click", dismiss);
+  section.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); dismiss(); }
+  });
+  questionnaire.addEventListener("input", liveUpdate);
+  questionnaire.addEventListener("dictationend", schedule);
+  // A cleared composer ends the intake: the next text starts a new session.
+  questionnaire.addEventListener("input", () => { if (!questionnaire.value.trim()) newSession(); });
+  setServicesUrl(null);
+  return { schedule, endSession, newSession, setServicesUrl, evaluateNow: evaluate };
+})();
+
+// The services link (decision 1): its own endpoint, kept apart from the Donate config.
+fetch("/api/consulting")
+  .then((response) => (response.ok ? response.json() : {}))
+  .then((config) => InputsPrompt.setServicesUrl(typeof config.consultingUrl === "string" && config.consultingUrl.startsWith("https://") ? config.consultingUrl : null))
+  .catch(() => InputsPrompt.setServicesUrl(null));
+
+// Export bar: Re-run with updated answers (addendum §7.2).
+const rerunUpdated = document.querySelector("#rerunUpdated");
+rerunUpdated.addEventListener("click", () => {
+  const entry = readCabinet().find((item) => item.id === currentEntryId);
+  if (entry) { rerunIntake(entry); return; }
+  rerunIntake({ id: null, title: latestPayload?.intake?.company_name || "this intake", questionnaire: lastRunQuestionnaire || questionnaire.value });
+});
