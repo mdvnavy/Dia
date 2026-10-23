@@ -243,7 +243,6 @@ body[data-agent="open"] .viewport { justify-content: flex-start; }
   stroke-width: 2;
   stroke-linecap: round;
   stroke-linejoin: round;
-  transition: transform 200ms ease;
 }
 
 .nav-brand[aria-expanded="true"] svg { transform: rotate(180deg); }
@@ -263,7 +262,6 @@ body[data-agent="open"] .viewport { justify-content: flex-start; }
   border: 1px solid var(--border);
   border-radius: 12px;
   box-shadow: var(--shadow-lifted);
-  animation: fadeInDropdown 200ms ease forwards;
 }
 
 .nav-dropdown.show { display: flex; }
@@ -389,7 +387,6 @@ body[data-agent="open"] .center-stage { margin-top: 3rem; }
   display: inline-block;
   cursor: default;
   user-select: none;
-  transition: filter 300ms ease, font-size 250ms ease;
 }
 
 .title-brand.liquid-active { filter: url(#liquidFilter); }
@@ -458,13 +455,11 @@ body[data-stage="results"] .subtitle { font-size: 15px; margin-bottom: 1.75rem; 
   backdrop-filter: blur(36px) saturate(200%);
   -webkit-backdrop-filter: blur(36px) saturate(200%);
   box-shadow: var(--pill-shadow), inset 0 2px 2px var(--glass-inset), inset 0 -2px 3px var(--glass-mid);
-  transition: all 250ms cubic-bezier(0.2, 0, 0, 1);
 }
 
 .prompt-bar:focus-within, .prompt-bar:hover {
   outline: 1.5px solid rgba(var(--accent-rgb), 0.5);
   box-shadow: var(--pill-shadow-hover), inset 0 2px 3px var(--glass-inset), inset 0 -2px 4px var(--glass-mid);
-  transform: translateY(-2px);
 }
 
 /* The textarea itself has no outline, so the pill's outline is the focus indicator. */
@@ -511,7 +506,6 @@ body[data-stage="results"] .subtitle { font-size: 15px; margin-bottom: 1.75rem; 
   background: linear-gradient(135deg, var(--send-from) 0%, var(--send-to) 100%);
   color: var(--on-accent);
   box-shadow: 0 6px 16px rgba(var(--accent-rgb), 0.35), inset 0 2px 2px rgba(255, 255, 255, 0.6), inset 0 -2px 3px rgba(0, 0, 0, 0.3);
-  transition: all 180ms cubic-bezier(0.2, 0, 0, 1);
 }
 
 .action-btn:hover,
@@ -520,7 +514,6 @@ body[data-stage="results"] .subtitle { font-size: 15px; margin-bottom: 1.75rem; 
   color: var(--on-accent);
   background: linear-gradient(135deg, var(--send-hover-from) 0%, var(--send-hover-to) 100%);
   box-shadow: 0 8px 24px rgba(var(--accent-rgb), 0.55), 0 0 20px rgba(var(--accent-rgb), 0.45), inset 0 2px 3px #ffffff, inset 0 -2px 4px rgba(0, 0, 0, 0.4);
-  transform: scale(1.08);
 }
 
 .action-btn svg {
@@ -613,9 +606,9 @@ button.recording { border-color: var(--good); color: var(--good); }
 .agent, .results { display: none; }
 
 body[data-stage="results"] .agent,
-body[data-agent="open"] .agent { display: block; animation: slideUp 300ms ease forwards; }
+body[data-agent="open"] .agent { display: block; }
 
-body[data-stage="results"] .results { display: block; animation: slideUp 300ms ease forwards; }
+body[data-stage="results"] .results { display: block; }
 
 .agent { margin-top: 2.5rem; }
 
@@ -845,7 +838,6 @@ body[data-stage="results"] .footer-note { margin-top: 2rem; }
   border-radius: 28px;
 }
 
-.palette[open] { animation: fadeInDropdown 160ms ease forwards; }
 
 .palette-search {
   display: flex;
@@ -894,6 +886,21 @@ body[data-stage="results"] .footer-note { margin-top: 2rem; }
 .palette-item small { color: var(--muted); font: 12px var(--mono); }
 .palette-item[aria-selected="true"] { background: rgba(var(--accent-rgb), 0.16); color: var(--accent-ink); box-shadow: inset 0 0 0 1px var(--focus-ring); }
 .palette-empty { padding: 18px 12px; color: var(--muted); font-size: 14px; text-align: center; }
+
+/* ---------- Motion: only for users who have not asked for reduced motion ---------- */
+@media (prefers-reduced-motion: no-preference) {
+  .nav-brand svg { transition: transform 200ms ease; }
+  .nav-dropdown { animation: fadeInDropdown 200ms ease forwards; }
+  .title-brand { transition: filter 300ms ease, font-size 250ms ease; }
+  .prompt-bar { transition: all 250ms cubic-bezier(0.2, 0, 0, 1); }
+  .prompt-bar:focus-within, .prompt-bar:hover { transform: translateY(-2px); }
+  .action-btn { transition: all 180ms cubic-bezier(0.2, 0, 0, 1); }
+  .action-btn:hover, .action-btn:focus-visible { transform: scale(1.08); }
+  body[data-stage="results"] .agent,
+  body[data-agent="open"] .agent,
+  body[data-stage="results"] .results { animation: slideUp 300ms ease forwards; }
+  .palette[open] { animation: fadeInDropdown 160ms ease forwards; }
+}
 
 /* ---------- Mobile ---------- */
 @media (max-width: 600px) {
