@@ -1519,6 +1519,8 @@ const commands = [
   { id: "icons-zelda", label: "Icon style: Zelda", run: () => setIconStyle("zelda") },
   { id: "icons-pixel", label: "Icon style: Dia pixel", run: () => setIconStyle("dia-pixel") },
   { id: "help", label: "Learn how to use DIA", run: openHelp },
+  // What's new (spec v0.3 §6): static/whats-new.js owns the panel; opening it counts as seen.
+  { id: "whats-new", label: "What's new", hint: "Release notes", keywords: "release notes updates changelog new", run: () => window.DiaWhatsNew?.open() },
   { id: "donate", label: "Donate", hint: "Opens in a new tab", enabled: () => Boolean(donateUrl), run: openDonate },
   { id: "donate-interac", label: "Donate by Interac e-Transfer", hint: `Copies ${INTERAC_EMAIL}`, run: donateInterac },
 ];
@@ -1536,7 +1538,7 @@ function renderPalette() {
   visibleCommands = commands.filter(
     (command) =>
       isEnabled(command) &&
-      `${command.label} ${command.hint || ""}`.toLowerCase().includes(query)
+      `${command.label} ${command.hint || ""} ${command.keywords || ""}`.toLowerCase().includes(query)
   );
   if (activeIndex >= visibleCommands.length) activeIndex = 0;
   paletteList.replaceChildren();
