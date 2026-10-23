@@ -81,9 +81,12 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
             self.send_json({"questionnaire": read_sample_questionnaire()})
             return
         if path == "/api/agent/status":
+            from agent_auth import configured_mode
             from agent_runtime import is_configured
 
-            self.send_json({"configured": is_configured()})
+            self.send_json(
+                {"configured": is_configured(), "auth": configured_mode()}
+            )
             return
 
         file_path = PUBLIC_FILES.get(path)
@@ -157,7 +160,30 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
             logger.warning("OBS capture skipped: %s", error)
 
     def handle_agent(self) -> None:
+        from agent_auth import agent_rate_limiter, authorize, client_ip
         from agent_runtime import AgentNotConfigured, is_configured, run_agent
+
+        # Rate-limit first (so failed auth attempts are throttled too), then
+        # authenticate, and only then read the body or touch Gemini.
+        allowed, retry_after = agent_rate_limiter.check(
+            client_ip(self.headers, self.client_address[0])
+        )
+        if not allowed:
+            self.send_json(
+                {"error": "rate limit exceeded; try again shortly"},
+                HTTPStatus.TOO_MANY_REQUESTS,
+                extra_headers={"Retry-After": str(retry_after)},
+            )
+            return
+
+        decision = authorize(self.headers, self.client_address[0])
+        if not decision.allowed:
+            self.send_json(
+                {"error": decision.reason},
+                HTTPStatus.UNAUTHORIZED,
+                extra_headers={"WWW-Authenticate": 'Bearer realm="dia-agent"'},
+            )
+            return
 
         try:
             payload = self.read_json()
@@ -218,12 +244,17 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
         return payload
 
     def send_json(
-        self, payload: dict[str, object], status: HTTPStatus = HTTPStatus.OK
+        self,
+        payload: dict[str, object],
+        status: HTTPStatus = HTTPStatus.OK,
+        extra_headers: dict[str, str] | None = None,
     ) -> None:
         body = json.dumps(payload, indent=2).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        for name, value in (extra_headers or {}).items():
+            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(body)
 
