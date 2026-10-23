@@ -134,7 +134,8 @@ def test_palette_runs_intake_and_new_intake_resets_to_landing(page):
     page.keyboard.type("new intake")
     page.keyboard.press("Enter")
     assert page.evaluate("document.body.dataset.stage") == "landing"
-    assert page.inner_text("#breadcrumbStage") == "Discovery intake · Questionnaire"
+    # Letterhead band (Glyph/Ikenna): the visible crumb is the stage only; text-transform makes inner_text upper-case.
+    assert page.text_content("#breadcrumbStage") == "Questionnaire"
     assert page.inner_text("#tier") == "-"
     assert page.inner_text("#score") == "Score pending"
     assert page.evaluate("document.querySelectorAll('#issues li').length") == 0

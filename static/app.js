@@ -936,8 +936,11 @@ const breadcrumbStage = document.querySelector("#breadcrumbStage");
 // "results" reveals Ask DIA and the generated documents below the composer.
 function setStage(stage) {
   document.body.dataset.stage = stage;
-  breadcrumbStage.textContent =
-    stage === "results" ? "Discovery intake · Results" : "Discovery intake · Questionnaire";
+  // Letterhead band: the visible crumb is the stage only; "Discovery intake · " stays in a visually hidden span.
+  const stageLabel = stage === "results" ? "Results" : "Questionnaire";
+  breadcrumbStage.textContent = stageLabel;
+  const menuStage = document.querySelector("#menuStage");
+  if (menuStage) menuStage.textContent = `Discovery intake · ${stageLabel}`;
   autosizeComposer(agentMessage);
 }
 
@@ -1886,7 +1889,8 @@ const CabinetFan = (() => {
     const above = rect.top - 12;
     if (below < height && above > below) {
       cabinetDock.dataset.drop = "up";
-      cabinetDock.style.setProperty("--fan-up-top", `${-(height + 12)}px`);
+      // Keep the top card at least 8px inside the window (eats into the 12px gap first on short screens).
+      cabinetDock.style.setProperty("--fan-up-top", `${Math.max(-(height + 12), 8 - rect.top)}px`);
     } else {
       delete cabinetDock.dataset.drop;
       cabinetDock.style.removeProperty("--fan-up-top");
@@ -2293,3 +2297,38 @@ downloadPdf.addEventListener("click", async () => {
 
 refreshCabinetButton();
 window.matchMedia("(prefers-reduced-motion: reduce)").addEventListener?.("change", () => refreshCabinetButton());
+
+
+// --- Letterhead clock: live local 12-hour time above today's date, centred in the top band ---
+// Ticks on the minute boundary (setTimeout chain, so no drift), re-syncs when the tab becomes visible.
+// No seconds and no animation, so there is nothing for reduced motion to switch off.
+const LetterheadClock = (() => {
+  const timeEl = document.querySelector("#lhTime");
+  const dateEl = document.querySelector("#lhDate");
+  if (!timeEl || !dateEl) return null;
+  const fmt = new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
+  let timer = 0;
+  const pad = (n) => String(n).padStart(2, "0");
+  function offset(d) {
+    const m = -d.getTimezoneOffset();
+    return `${m >= 0 ? "+" : "-"}${pad(Math.floor(Math.abs(m) / 60))}:${pad(Math.abs(m) % 60)}`;
+  }
+  function render() {
+    const now = new Date();
+    const day = dayOf(now.toISOString());
+    const hm = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+    timeEl.textContent = fmt.format(now);
+    timeEl.dateTime = `${day}T${hm}${offset(now)}`;
+    dateEl.textContent = day;
+    dateEl.dateTime = day;
+    return now;
+  }
+  function schedule() {
+    clearTimeout(timer);
+    const now = render();
+    timer = setTimeout(schedule, 60000 - (now.getSeconds() * 1000 + now.getMilliseconds()) + 20);
+  }
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) schedule(); });
+  schedule();
+  return { render };
+})();

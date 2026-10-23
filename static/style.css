@@ -1075,3 +1075,190 @@ html:not([data-theme="light"]) .icon-style-option:focus-visible { outline-color:
   .icon-style-control { display: flex; width: 100%; }
   .icon-style-option { flex: 1; justify-content: center; min-height: 44px; }
 }
+
+
+/* ==========================================================================
+   Web letterhead band. Source: glyph/web-letterhead.css (2026-10-23 04:06), verbatim below,
+   then DIA additions (centred clock + date, send-button silver). Inlined here rather than
+   a new /static file so the running preview picks it up without a server restart.
+   ========================================================================== */
+/* DIA web letterhead band: the PDF's tucked-letterhead system, ported to the top bar.
+ * Plain CSS. Uses the app's own tokens from static/style.css (--bg, --text, --muted,
+ * --border, --raised, --mono, --sans); nothing here adds a new colour.
+ *
+ * PDF  -> web
+ *   10mm corner inset (half the 20mm page margin)  -> --lh-inset, equal to the page's own
+ *        side padding (.viewport: 1rem mobile, 2rem desktop), so the band sits in the page
+ *        margin and the content column (900px nav / 720px composer) stays well inside it.
+ *   7pt mono caps, 0.1em tracking, muted          -> 11px JetBrains Mono 500, caps, 0.1em, --muted
+ *   0.5pt silver hairline spanning the insets     -> 1px --border rule from inset to inset
+ *
+ * The band escapes .viewport's padding with negative margins, so the markup can stay
+ * where it is (first child of <main class="viewport">).
+ */
+
+:root {
+  --lh-inset: clamp(16px, 2.5vw, 32px);   /* 16px at <=640px, 32px at >=1280px */
+  --lh-band: 52px;                        /* band height; hairline sits on its bottom edge */
+  --lh-target: 28px;                      /* desktop hit target (>= 24px) */
+  --lh-gap: 20px;                         /* space between corner items */
+  --lh-type: 500 11px/1 var(--mono);
+  --lh-track: 0.1em;
+  --lh-ink: var(--muted);                 /* corner text */
+  --lh-ink-hover: var(--text);
+  --lh-rule: var(--border);               /* hairline */
+  --lh-ring: #c3c8cf;                     /* dark: app --control-focus, >= 3:1 on #0c0c0e */
+}
+html[data-theme="light"] {
+  --lh-ring: #7C828A;                     /* light: same ring as the cabinet fan-out */
+}
+@media (max-width: 600px) {
+  :root { --lh-band: 56px; --lh-target: 44px; --lh-gap: 4px; }
+}
+
+/* ---- Band ---- */
+.top-nav.lh {
+  align-self: stretch;
+  width: auto;
+  max-width: none;
+  /* .viewport padding is 2.5rem 2rem (1.25rem 1rem on mobile); pull the band up to the
+     top edge and out to the inset. */
+  margin: -2.5rem calc(var(--lh-inset) - 2rem) 0;
+  height: var(--lh-band);
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: nowrap;
+  gap: var(--lh-gap);
+  border-bottom: 1px solid var(--lh-rule);
+  font: var(--lh-type);
+  letter-spacing: var(--lh-track);
+  text-transform: uppercase;
+  color: var(--lh-ink);
+}
+@media (max-width: 600px) {
+  .top-nav.lh { margin: -1.25rem calc(var(--lh-inset) - 1rem) 0; }
+}
+
+.lh-corner { display: flex; align-items: center; gap: var(--lh-gap); min-width: 0; }
+.lh-corner--left { gap: 10px; }
+
+/* Every interactive corner item: same type, quiet by default, ink on hover. */
+.lh-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--lh-target);
+  padding: 0 4px;
+  margin: 0 -4px;                         /* keeps text flush with the inset */
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--lh-ink);
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+.lh-control:hover { color: var(--lh-ink-hover); }
+.lh-control:focus-visible,
+.lh-control.is-focus {                    /* .is-focus: mock only, to show the ring in a still */
+  outline: 2px solid var(--lh-ring);
+  outline-offset: 2px;
+  color: var(--lh-ink-hover);
+}
+.lh-control svg {
+  width: 14px; height: 14px; flex: none;
+  fill: none; stroke: currentColor; stroke-width: 2;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+
+/* Left: menu trigger (was "DIA ▾") reads as the PDF band label. */
+.lh-trigger { color: var(--text); }
+.lh-trigger svg { width: 12px; height: 12px; }
+.lh-trigger[aria-expanded="true"] svg { transform: rotate(180deg); }
+
+/* Left, second item: the stage (was the breadcrumb). Quiet, not interactive. */
+.lh-sep { color: var(--lh-rule); }
+.lh-stage { white-space: nowrap; }
+.lh-tip.info-tip {                        /* existing ? button, now 24px so it meets the target */
+  width: 24px; height: 24px; margin: 0 0 0 -4px; padding: 0;
+  border: 1px solid var(--lh-rule); border-radius: 50%;
+  justify-content: center; font-size: 10px; letter-spacing: 0;
+}
+
+/* Right: date, Search actions, theme. */
+.lh-date { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.lh-search kbd.kbd-hint {
+  padding: 2px 5px;
+  border-bottom-width: 1px;
+  font: 500 10px/1.3 var(--mono);
+  letter-spacing: 0.04em;
+  text-transform: none;
+}
+.lh-search .lh-search-icon { display: none; }
+.lh-theme { width: var(--lh-target); justify-content: center; padding: 0; margin: 0 -6px 0 0; }
+.lh-theme svg { width: 15px; height: 15px; }
+
+/* Menu: anchored to the band, flush with the left inset. */
+.lh .nav-dropdown { top: calc(100% + 1px); margin-top: 8px; text-transform: none; letter-spacing: 0; }
+.lh-menu-context { display: none; }       /* stage + full-name lines, mobile only */
+
+/* ---- Mobile collapse (<= 600px) ---- */
+@media (max-width: 600px) {
+  .lh-sep, .lh-stage, .lh-tip, .lh-date { display: none; }
+  .lh-control { padding: 0 8px; margin: 0 -8px; }
+  .lh-search { width: var(--lh-target); justify-content: center; padding: 0; margin: 0; }
+  .lh-search .lh-search-label, .lh-search kbd { display: none; }
+  .lh-search .lh-search-icon { display: block; width: 18px; height: 18px; }
+  .lh-theme { margin: 0 -10px 0 0; }
+  .lh-theme svg { width: 18px; height: 18px; }
+  .lh .nav-dropdown { width: min(280px, calc(100vw - 2 * var(--lh-inset))); }
+  .lh .dropdown-item { min-height: 44px; }
+  .lh-menu-context {
+    display: block;
+    padding: 8px 14px 10px;
+    margin-bottom: 4px;
+    border-bottom: 1px solid var(--border);
+    color: var(--muted);
+    font: 500 10px/1.6 var(--mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .lh-menu-context .lh-menu-stage { color: var(--text); }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .lh-trigger svg { transition: transform 200ms ease; }
+  .lh-control { transition: color 140ms linear; }
+}
+
+
+/* ---- DIA additions (Ikenna): live clock above the date, centred in the band ---- */
+.top-nav.lh { position: relative; }
+.lh-centre {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  text-align: center; line-height: 1; white-space: nowrap; pointer-events: none;
+}
+.lh-time { color: var(--text); font-variant-numeric: tabular-nums; }
+.lh-centre .lh-date { color: var(--lh-ink); font-size: 10px; }
+.top-nav.lh .lh-tip { opacity: 1; }
+/* The date no longer lives on the right, so the right corner is Search actions + theme only. */
+@media (max-width: 600px) {
+  /* Mobile: keep the time, compact and centred in the space between the corners; the date is hidden (Glyph §5). */
+  .lh-centre { position: static; transform: none; flex: 1 1 auto; min-width: 0; }
+}
+@media (max-width: 374px) { .lh-centre { display: none; } }   /* under 375px there is no clear gap beside the trigger + two 44px icons */
+
+/* Send button: silvery grey in BOTH themes (Ikenna). Light already uses the silver send tokens;
+   dark gets the same silver so its gold accent no longer tints the fill or the glow. */
+html:not([data-theme="light"]) .action-btn {
+  --accent-rgb: 163, 169, 177;
+  --send-from: #E6E8EB;
+  --send-to: #B8BDC4;
+  --send-hover-from: #CDD1D6;
+  --send-hover-to: #9EA4AC;
+  --on-accent: #16150f;
+}

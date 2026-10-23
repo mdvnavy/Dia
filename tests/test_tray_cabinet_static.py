@@ -100,3 +100,28 @@ def test_cabinet_sits_at_far_right_of_composer_row():
     css = (ROOT / "static" / "style.css").read_text(encoding="utf-8")
     assert ".dock-row .cabinet { margin-left: auto; }" in css
     assert '.cabinet[data-drop="up"] .fan' in css
+
+
+def test_letterhead_band_keeps_ids_order_and_adds_centred_clock():
+    """Glyph's web letterhead + Ikenna's centred live clock: same ids/ARIA/tab order, clock not announced."""
+    html = (ROOT / "templates" / "index.html").read_text(encoding="utf-8")
+    header = html[html.index("<header"):html.index("</header>")]
+    assert 'class="top-nav lh"' in header
+    order = [m for m in re.findall(r'id="(navBrandMenu|appInfo|lhClock|paletteTrigger|themeToggle)"', header)]
+    assert order == ["navBrandMenu", "appInfo", "lhClock", "paletteTrigger", "themeToggle"]
+    assert 'aria-haspopup="menu" aria-expanded="false" aria-controls="navDropdown"' in header
+    assert "Discovery Intake Agent" in header and 'id="navDropdown" class="nav-dropdown" role="menu"' in header
+    clock = re.search(r'<div class="lh-centre"[^>]*>', header).group(0)
+    assert 'role="timer"' in clock and 'aria-live="off"' in clock and "tabindex" not in clock
+    assert '<time class="lh-time" id="lhTime"' in header and '<time class="lh-date" id="lhDate"' in header
+    assert '<span id="breadcrumbStage">Questionnaire</span>' in header
+    js = (ROOT / "static" / "app.js").read_text(encoding="utf-8")
+    assert 'hour12: true' in js and "60000 - (now.getSeconds() * 1000 + now.getMilliseconds())" in js
+    assert '"Discovery intake · Results"' not in js
+
+
+def test_send_button_is_silver_in_dark_theme():
+    css = (ROOT / "static" / "style.css").read_text(encoding="utf-8")
+    block = css[css.index('html:not([data-theme="light"]) .action-btn {'):]
+    block = block[:block.index("}")]
+    assert "--accent-rgb: 163, 169, 177" in block and "--send-from: #E6E8EB" in block
