@@ -8,7 +8,7 @@ the **OBS capture side** *additively*. None of the twin's files (`app.py`, `char
 
 | File | Change | Notes |
 |------|--------|-------|
-| `client_discovery/core.py` | +283 | Adds `trigger_obs_screenshot()`, `save_obs_replay_buffer()`, `refine_with_jules()`, `_resolve_obs_credentials()`. `generate_documents()` gains an **optional** 3rd arg `strategic_analysis=None` — existing 2-arg calls still work. |
+| `client_discovery/core.py` | +283 | Adds `trigger_obs_screenshot()`, `save_obs_replay_buffer()`, `refine_with_jules()`, `_resolve_obs_credentials()`. `generate_documents()` is deterministic only (2 args). Persona v1.2 rule 1: `service.py` returns `strategic_analysis` beside the documents, never inside them, and `scrub_for_export()` keeps it and any "DIA Agent Error" out of every export. |
 | `client_discovery/service.py` | new | `build_intake_response()` + `read_sample_questionnaire()`. Bundles intake → (optional) Gemini agent → (optional) Jules → OBS capture. See overlap note below. |
 | `client_discovery/config.py` | new | `load_config()` — reads env (incl. OBS creds). Raises `ValueError` if `GEMINI_API_KEY` missing and `TESTING != "true"`. |
 | `requirements.txt` | +3 | `requests`, `obsws-python`, `obswebsocket` (capture deps; superset of yours). |

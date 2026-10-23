@@ -22,12 +22,22 @@ WIDTHS = [(1280, 800), (768, 900), (390, 844)]
 def base_url():
     os.environ.pop("MEMORY_SHEET_ID", None)
     os.environ.pop("OBS_CAPTURE", None)
+    # These tests check the layout of the Ask DIA UI when it is on. Since hotfix #41 Ask DIA is OFF
+    # unless ASK_DIA_ENABLED is explicitly true, so turn it on for this module and restore after.
+    previous = os.environ.get("ASK_DIA_ENABLED")
+    os.environ["ASK_DIA_ENABLED"] = "true"
     server = ThreadingHTTPServer(("127.0.0.1", 0), ClientDiscoveryHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    yield f"http://127.0.0.1:{server.server_address[1]}"
-    server.shutdown()
-    server.server_close()
+    try:
+        yield f"http://127.0.0.1:{server.server_address[1]}"
+    finally:
+        server.shutdown()
+        server.server_close()
+        if previous is None:
+            os.environ.pop("ASK_DIA_ENABLED", None)
+        else:
+            os.environ["ASK_DIA_ENABLED"] = previous
 
 
 @pytest.fixture(scope="module")
@@ -505,8 +515,9 @@ def test_status_above_the_bar_and_note_below(open_page, width, height):
     status, note, bar = box(p, "#status"), box(p, "#intakeNote"), box(p, "#intakeComposer")
     assert status["b"] <= bar["y"]
     assert note["y"] >= bar["b"]
-    assert p.text_content("#intakeNote") == ("Intake scoring is deterministic and needs no API key. "
-                                             "Only Ask DIA sends your text to Gemini.")
+    # Persona v1.2 split the note into trust-on / trust-off spans; only the one for the current mode shows.
+    assert p.inner_text("#intakeNote").strip() == ("Scoring is deterministic. "
+                                                   "Only Ask DIA and its suggestions send text to Gemini.")
     under = box(p, ".intake-stage .under-prompt")
     assert note["y"] >= under["b"]  # where Ready used to be, under the links
 
