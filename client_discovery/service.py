@@ -40,9 +40,10 @@ def build_intake_response(questionnaire: str) -> dict[str, object]:
 
     # Resolve strategic analysis
     strategic_analysis = None
-    gemini_api_key = os.environ.get("GEMINI_API_KEY")
-    if not gemini_api_key:
-        strategic_analysis = "DIA Agent Error: GEMINI_API_KEY is missing or invalid."
+    from vertex_config import VERTEX_ENV_HINT, is_vertex_configured
+
+    if not is_vertex_configured():
+        strategic_analysis = f"DIA Agent Error: Vertex AI is not configured. {VERTEX_ENV_HINT}"
     else:
         try:
             # Construct a unified, structured prompt for the cognitive agent root_agent.run
