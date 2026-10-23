@@ -265,10 +265,15 @@
             <span>Recommended Tier</span>
             <strong id="tier">-</strong>
             <small id="score">Score pending</small>
+            <!-- dia-savant §3.5: input quality, on screen only (never in the PDF or Markdown). -->
+            <small id="inputsState" hidden></small>
+            <p id="inputsNote" hidden></p>
           </div>
           <div class="issues">
             <h2 id="issuesHeading">Validation Issues</h2>
             <ul id="issues" aria-live="polite" aria-labelledby="issuesHeading"></ul>
+            <h2 id="flagsHeading" hidden>Flags to clear first</h2>
+            <ul id="flagActions" aria-labelledby="flagsHeading" hidden></ul>
             <!-- Follow-up drafter (persona-ux.md v1.2 §3): Guided mode, Gemini connected, and only when there are issues. -->
             <div class="followup" id="followupRow" hidden>
               <button id="draftFollowups" class="text-link" type="button" aria-describedby="followupLabel">Draft follow-up questions</button>

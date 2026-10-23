@@ -673,6 +673,7 @@ function showResults(payload, questionnaireText) {
   tier.textContent = payload.score.tier;
   score.textContent = `${payload.score.total_score}/${payload.score.max_score} · ${payload.score.timeline}`;
   renderIssues(payload.issues);
+  renderInputs(payload);
   refreshFollowupButton();
   renderDocument(activeDoc);
   setExportAvailability(true);
@@ -693,6 +694,30 @@ function renderIssues(items) {
     item.textContent = `${issue.severity.toUpperCase()}: ${issue.message}`;
     issues.appendChild(item);
   }
+}
+
+// dia-savant §3.5: the Inputs label (complete, partial or thin) and one sentence on what to do. Screen only.
+const INPUTS_NOTES = {
+  complete: "Every answer needed for a firm quote is in; confirm scope on a kickoff call.",
+  partial: "The value at stake is computed, but the flags below need clearing before a firm quote.",
+  thin: "Ask for weekly hours, an hourly cost and the missing answers before quoting.",
+};
+function renderInputs(payload) {
+  const state = INPUTS_NOTES[payload.inputs_confidence] ? payload.inputs_confidence : null;
+  const inputsState = document.querySelector("#inputsState");
+  const inputsNote = document.querySelector("#inputsNote");
+  inputsState.hidden = inputsNote.hidden = !state;
+  inputsState.textContent = state ? `Inputs: ${state}` : "";
+  inputsNote.textContent = state ? INPUTS_NOTES[state] : "";
+  const list = document.querySelector("#flagActions");
+  const actions = Array.isArray(payload.flag_actions) ? payload.flag_actions : [];
+  list.innerHTML = "";
+  for (const action of actions) {
+    const item = document.createElement("li");
+    item.textContent = action;
+    list.appendChild(item);
+  }
+  list.hidden = document.querySelector("#flagsHeading").hidden = !actions.length;
 }
 
 function renderDocument(name) {

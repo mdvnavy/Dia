@@ -30,6 +30,15 @@ def read_sample_questionnaire() -> str:
     )
 
 
+def _savant_extras(intake, score, issues) -> dict[str, object]:
+    """dia-savant §6 JSON fields, as in app.build_intake_response."""
+    from client_discovery.report_model import build_report
+
+    report = build_report(intake, score, issues)
+    return {"value_at_stake": score.value_at_stake, "flags": list(score.flags), "flag_actions": list(report["actions"]),
+            "sources": report["sources"], "inputs_confidence": report["inputs_confidence"]}
+
+
 def build_intake_response(questionnaire: str) -> dict[str, object]:
     if not questionnaire.strip():
         raise ValueError("questionnaire is required")
@@ -89,5 +98,6 @@ def build_intake_response(questionnaire: str) -> dict[str, object]:
         "issues": [asdict(issue) for issue in issues],
         "score": asdict(score),
         "documents": documents,
+        **_savant_extras(intake, score, issues),
         "strategic_analysis": strategic_analysis,
     }

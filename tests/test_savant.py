@@ -632,3 +632,73 @@ def test_no_ai_text_or_agent_error_in_any_export(key, name, monkeypatch):  # §8
         assert "FAKE-GEMINI-SAVANT-9Z" not in body, where
         assert "dia agent error" not in body.lower(), where
         assert "strategic_analysis" not in body, where
+
+
+# --- §8.6 On screen: Inputs label, flags to clear first, JSON fields, cabinet chip ------------------
+
+from tests.test_persona_v12 import base_url, browser, context, open_page, run_intake  # noqa: E402,F401
+
+
+def test_json_carries_value_flags_sources_and_inputs_confidence():  # §6
+    result = app_build(SAMPLE)
+    assert result["value_at_stake"] == 36960 and result["flags"] == ["TRUST_REPAIR"]
+    assert result["inputs_confidence"] == "partial"
+    assert result["sources"][0].startswith("Data: Northstar Studio discovery questionnaire, received ")
+    assert result["sources"][1:] == list(report_model.WORKS)
+    assert result["flag_actions"] == [report_model.FLAG_ACTIONS["TRUST_REPAIR"]]
+    assert app_build(LEGACY)["inputs_confidence"] == "thin"
+    assert app_build(questionnaire(q9="None"))["inputs_confidence"] == "complete"
+    assert "strategic_analysis" not in result
+
+
+def test_inputs_sentences_match_between_python_and_js():
+    js = (ROOT / "static/app.js").read_text(encoding="utf-8")
+    for state, sentence in report_model.INPUTS_SENTENCES.items():
+        assert f'{state}: "{sentence}"' in js
+
+
+@pytest.mark.parametrize("name, state", [("sample", "partial"), ("clean", "complete"), ("legacy", "thin"), ("thin", "thin")])
+def test_screen_shows_inputs_label_with_exactly_one_state(name, state, context, base_url):  # §8.2 (screen)
+    page = open_page(context, base_url)
+    run_intake(page, VARIANTS[name])
+    label = page.inner_text("#inputsState")
+    assert page.is_visible("#inputsState") and page.is_visible("#inputsNote")
+    assert re.fullmatch(r"inputs: (complete|partial|thin)", label.strip().lower()), label
+    assert label.strip().lower() == f"inputs: {state}"
+    assert page.inner_text("#inputsNote") == report_model.INPUTS_SENTENCES[state]
+    actions = page.eval_on_selector_all("#flagActions li", "els => els.map(e => e.textContent)")
+    assert actions == app_build(VARIANTS[name])["flag_actions"]
+    assert page.is_visible("#flagsHeading") == bool(actions)
+    # Exports never carry the label.
+    md = page.evaluate("buildMarkdownExport()")
+    assert "Inputs:" not in md
+    assert re.findall(r"(?m)^## (.+)$", md) == MIN_ORDER
+    assert page.errors == []
+
+
+def test_stored_result_without_savant_fields_hides_the_label(context, base_url):
+    page = open_page(context, base_url)
+    run_intake(page, SAMPLE)
+    page.evaluate("() => { const p = JSON.parse(JSON.stringify(latestPayload)); delete p.inputs_confidence; delete p.flag_actions; showResults(p, ''); }")
+    assert page.is_hidden("#inputsState") and page.is_hidden("#flagActions")
+
+
+def test_max_score_20_and_cabinet_score_chip_unchanged(context, base_url):  # §8.11
+    import subprocess as sp
+
+    page = open_page(context, base_url)
+    page.evaluate("() => localStorage.clear()")
+    run_intake(page, SAMPLE)
+    page.evaluate("() => CabinetDrawer.open()")
+    page.wait_for_selector(".drawer-card .card-meta")
+    meta = page.inner_text(".drawer-card .card-meta")
+    assert re.search(r" · Custom AI Agent · 15/20$", meta), meta
+    # The chip's rendering line is byte-for-byte what it was before dia-savant (b91cd5a).
+    line = 'article.querySelector(".card-meta").textContent = `${whenOf(item.savedAt)} · ${item.tier} · ${item.score}/${item.maxScore}`;'
+    assert line in (ROOT / "static/app.js").read_text(encoding="utf-8")
+    try:
+        before = sp.run(["git", "show", "b91cd5a:static/app.js"], cwd=ROOT, capture_output=True, text=True, check=True).stdout
+    except (sp.CalledProcessError, FileNotFoundError):
+        before = line
+    assert line in before
+    assert page.errors == []

@@ -11,6 +11,7 @@ import re
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
+from client_discovery.report_model import build_report
 from client_discovery.core import (
     generate_documents,
     parse_questionnaire_markdown,
@@ -99,12 +100,19 @@ def build_intake_response(questionnaire: str) -> dict[str, object]:
     issues = validate_intake(intake)
     score = score_opportunity(intake)
     documents = generate_documents(intake, score)
+    report = build_report(intake, score, issues)
 
     return {
         "intake": asdict(intake),
         "issues": [asdict(issue) for issue in issues],
         "score": asdict(score),
         "documents": documents,
+        # dia-savant §6: deterministic extras for the JSON export and the screen (no AI text).
+        "value_at_stake": score.value_at_stake,
+        "flags": list(score.flags),
+        "flag_actions": list(report["actions"]),
+        "sources": report["sources"],
+        "inputs_confidence": report["inputs_confidence"],
     }
 
 

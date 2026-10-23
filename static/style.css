@@ -1269,6 +1269,7 @@ html[data-assistant="off"] [data-command="ask"] { display: none !important; }
 html[data-assistant="expert"] body:not([data-agent="open"]) .agent { display: none; }
 .followup { display: flex; flex-direction: column; align-items: center; gap: 2px; margin-top: 12px; }
 .followup[hidden] { display: none; }
+.issues [hidden], .score-card [hidden] { display: none; }
 .ai-label { color: var(--muted); font: 500 11px/1.4 var(--mono); letter-spacing: 0; text-transform: none; }
 .response-header .ai-label { margin-left: 8px; }
 .ai-text { border-left: 1px solid var(--muted); padding-left: 12px; }
