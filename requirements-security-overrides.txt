@@ -1,0 +1,8 @@
+# Security overrides installed AFTER requirements.txt (see Dockerfile).
+# google-adk 2.12.0 (latest) still caps opentelemetry-api/sdk at <=1.42.1, but
+# 1.42.1 carries CVE-2026-114603 / GHSA-xcq7-p3pf-p88h (TraceState.from_header
+# O(N^2) regex), fixed in 1.45.1. The full test suite passes with 1.45.1.
+# Drop this file once google-adk relaxes its upper bound.
+opentelemetry-api==1.45.1
+opentelemetry-sdk==1.45.1
+opentelemetry-semantic-conventions==0.66b1
