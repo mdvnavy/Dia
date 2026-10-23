@@ -279,8 +279,13 @@ def _widen_timeline(timeline: str) -> str:
 
 
 def _budget_top(budget: str) -> int | None:
-    numbers = [int(x) for x in re.findall(r"\d+", budget.replace(",", ""))]
-    return max(numbers) if numbers else None
+    """Top of a budget answer in dollars: '$5k-$10k' -> 10000, '$2.5K' -> 2500, '$1.2M' -> 1200000, '$5,000' -> 5000.
+    Decimals stay whole and k/M suffixes are applied before the maximum is taken (Codex review on PR #39)."""
+    t = (budget or "").lower().replace("–", "-").replace("—", "-")
+    scale = {"k": 1_000, "m": 1_000_000}
+    numbers = [_to_number(m.group(1)) * scale.get(m.group(2) or "", 1)
+               for m in re.finditer(rf"({_NUMBER})\s*(k|m)?(?![a-z])", t)]
+    return round(max(numbers)) if numbers else None
 
 
 def _plural(n: int, word: str) -> str:
@@ -338,13 +343,20 @@ def score_opportunity(intake: ClientIntake) -> OpportunityScore:
         urgency = min(5, urgency + 1)
         urgency_reason += f", and the manual work matches a known time sink ({sink})"
     workflows.sort(key=lambda row: (-(row["value"] or 0), len(row["gaps"])))
-    valued = [row["value"] for row in workflows if row["value"] is not None]
-    value_at_stake = sum(valued) if valued else None
+    # Any listed task without a value makes the total incomplete: a partial sum would understate the value at stake
+    # and read as complete, so it is treated as missing (strategic value stays 3 with the flag; Codex review on #39).
+    # Each valued row still shows its own figure in Top workflows.
+    complete = bool(workflows) and all(row["value"] is not None for row in workflows)
+    value_at_stake = sum(row["value"] for row in workflows) if complete else None
     strategic_value = strategic_value_for(value_at_stake)
     strategic_default = value_at_stake is None
     if strategic_default:
         flags.append("VALUE_AT_STAKE_MISSING")
-        strategic_reason = "default until weekly hours and an hourly cost are provided"
+        strategic_reason = (
+            "default until weekly hours are provided for every listed task"
+            if workflows and rate and any(row["value"] is not None for row in workflows)
+            else "default until weekly hours and an hourly cost are provided"
+        )
     else:
         strategic_reason = f"value at stake of about ${value_at_stake:,} a year"
 

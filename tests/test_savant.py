@@ -757,3 +757,61 @@ def test_max_score_20_and_cabinet_score_chip_unchanged(context, base_url):  # §
         before = line
     assert line in before
     assert page.errors == []
+
+
+# --- Codex review on PR #39 --------------------------------------------------------------------------------------
+
+PARTIAL_Q1 = "Invoice entry - office manager, 6 hours a week, 1 person; Scheduling - founder"
+
+
+def with_budget(text: str, budget: str) -> str:
+    assert "| Budget range | $2,500-$10,000 |" in text
+    return text.replace("| Budget range | $2,500-$10,000 |", f"| Budget range | {budget} |")
+
+
+def test_a_listed_task_without_hours_makes_value_at_stake_missing_not_a_partial_total():
+    from client_discovery.report_model import inputs_confidence
+
+    intake = parse_questionnaire_markdown(questionnaire(q1=PARTIAL_Q1, q2="$50 an hour"))
+    s = score_opportunity(intake)
+    assert s.value_at_stake is None  # never the 6 x $50 x 48 subtotal presented as the whole
+    assert s.strategic_value == 3 and s.strategic_value_default
+    assert "VALUE_AT_STAKE_MISSING" in s.flags
+    assert "every listed task" in s.signal_reasons["strategic_value"]
+    assert [w["value"] for w in s.workflows] == [6 * 50 * 48, None]  # the valued row keeps its own figure
+    assert inputs_confidence(s, validate_intake(intake)) == "thin"  # was "complete" with the partial sum
+
+
+@pytest.mark.parametrize("budget, top", [
+    ("$5k-$10k", 10_000), ("$5K – $10K", 10_000), ("$2.5K", 2_500), ("$5,000-$10,000", 10_000),
+    ("$5-10k", 10_000), ("Around $1.2M", 1_200_000), ("$8000 over 10 months", 8_000), ("not sure", None),
+])
+def test_budget_top_reads_k_and_m_suffixes_and_decimals(budget, top):
+    from client_discovery.core import _budget_top
+
+    assert _budget_top(budget) == top
+
+
+def test_k_suffixed_budget_drives_the_roi_check_like_the_long_form():
+    for budget in ("$5k-$10k", "$5,000-$10,000"):
+        weak = score_of(with_budget(questionnaire(q1=ONE_TASK.format(h=1), q2="$50 an hour"), budget))  # $2,400
+        assert "ROI_WEAK" in weak.flags, budget
+        covered = score_of(with_budget(questionnaire(q1=ONE_TASK.format(h=10), q2="$50 an hour"), budget))  # $24,000
+        assert "ROI_WEAK" not in covered.flags, budget
+
+
+def test_method_text_states_the_configured_week_count(monkeypatch):
+    report, _, _ = report_for(SAMPLE)
+    assert "hourly rate × 48 weeks" in report["method_and_sources"]  # default: the approved §5 text, unchanged
+    monkeypatch.setenv("DIA_VALUE_WEEKS", "50")
+    report, _, score = report_for(SAMPLE)
+    assert "hourly rate × 50 weeks" in report["method_and_sources"]
+    assert "48 weeks" not in report["method_and_sources"]
+    row = next(w for w in score.workflows if w["value"] is not None)
+    assert row["value"] == round(row["hours"] * 50 * score_rate(SAMPLE))
+
+
+def score_rate(text: str) -> float:
+    from client_discovery.core import parse_hourly_rate
+
+    return parse_hourly_rate(parse_questionnaire_markdown(text).hourly_cost)

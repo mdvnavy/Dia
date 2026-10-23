@@ -32,6 +32,15 @@ The analysis and recommendation are DIA's own. These works shaped the layout, no
 conclusions. Their authors and publishers have not reviewed or endorsed DIA or this
 report. Names are trademarks of their owners."""
 
+def _weeks_label() -> str:
+    """The week count the scorer actually used, so the Method text matches the dollar figures (Codex review on #39).
+    The default (48) leaves the §5 text exactly as approved."""
+    from .core import value_weeks
+
+    weeks = value_weeks()
+    return str(int(weeks)) if float(weeks).is_integer() else f"{weeks:g}"
+
+
 WORKS = (
     "Minto, B. The Minto Pyramid Principle (answer-first structure).",
     "Zelazny, G. Say It With Charts, 4th ed., McGraw-Hill, 2001.",
@@ -345,7 +354,7 @@ def build_report(intake: ClientIntake, score: OpportunityScore, issues: list[Val
         f"- **Next step:** {next_step}",
     ])
 
-    method = METHOD_AND_SOURCES.format(client=client, date=date)
+    method = METHOD_AND_SOURCES.replace("× 48 weeks", f"× {_weeks_label()} weeks", 1).format(client=client, date=date)
 
     bodies = {
         "summary": (None, summary),
