@@ -295,9 +295,10 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
                 {
                     "configured": False,
                     "reply": (
-                        "Live Gemini agent is not configured. Set GEMINI_API_KEY "
-                        "(or GOOGLE_API_KEY) to enable it. The deterministic intake "
-                        "pipeline above still works without an API key."
+                        "Live Gemini agent is not configured. It runs on Vertex AI: set "
+                        "GOOGLE_GENAI_USE_VERTEXAI=TRUE, GOOGLE_CLOUD_PROJECT and "
+                        "GOOGLE_CLOUD_LOCATION. The deterministic intake pipeline above "
+                        "still works without it."
                     ),
                 }
             )

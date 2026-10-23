@@ -13,6 +13,7 @@ from client_discovery.core import (
     validate_intake,
 )
 from client_discovery import memory
+from vertex_config import is_vertex_configured, vertex_gemini
 
 REPO_ROOT = Path(__file__).resolve().parent
 
@@ -170,7 +171,8 @@ def build_agent(
     return LlmAgent(
         # Overridable so deploys can pin a model and local testing can dodge
         # per-model free-tier quotas without a code change.
-        model=os.environ.get("DIA_MODEL", "gemini-2.5-flash"),
+        # Always a Vertex AI client (house rule): never the API-key endpoint.
+        model=vertex_gemini(os.environ.get("DIA_MODEL", "gemini-2.5-flash")),
         name="dia_discovery_intake_agent",
         instruction="""
         You are DIA, the discovery intake agent for a startup services team.
@@ -212,7 +214,8 @@ def build_agent(
 # Module-level agent for ADK CLI / single-loop consumers (e.g. `adk run`).
 root_agent = build_agent()
 
-if not (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")):
+if not is_vertex_configured():
     logger.warning(
-        "GEMINI_API_KEY/GOOGLE_API_KEY is not set; ADK chat runs will fail until configured."
+        "Vertex AI is not configured (GOOGLE_GENAI_USE_VERTEXAI, GOOGLE_CLOUD_PROJECT, "
+        "GOOGLE_CLOUD_LOCATION); ADK chat runs will fail until it is. API keys are not used."
     )
