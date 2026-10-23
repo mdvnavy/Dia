@@ -120,3 +120,15 @@ def test_pdf_endpoint_requires_input():
     status, _, data = _post({})
     assert status == 400
     assert json.loads(data)["error"] == "questionnaire or result is required"
+
+
+def test_pdf_document_properties(result):
+    """Glyph nit (a): Author, Creator and Title are set on the PDF itself."""
+    pdf = report.render_pdf(result, report_date="October 23, 2026")
+    if not shutil.which("pdfinfo"):
+        pytest.skip("pdfinfo (poppler) not installed")
+    info = subprocess.run(["pdfinfo", "-"], input=pdf, capture_output=True, check=True).stdout.decode()
+    client = result["intake"]["company_name"]
+    assert re.search(rf"^Title:\s+{re.escape(client)} — Discovery Intake$", info, re.M)
+    assert re.search(r"^Author:\s+Bash Systems$", info, re.M)
+    assert re.search(r"^Creator:\s+Discovery Intake Agent$", info, re.M)

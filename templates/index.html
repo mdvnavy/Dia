@@ -12,6 +12,8 @@
   <link rel="stylesheet" href="/static/pixel-hover.css">
   <link rel="stylesheet" href="/static/fanout-pixel.css">
   <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/composer-icons.css">
+  <link rel="stylesheet" href="/static/composer.css">
   <script>
     // Apply the saved (or system) theme before first paint to avoid a flash.
     (function () {
@@ -65,6 +67,9 @@
             <button class="dropdown-item" role="menuitem" type="button" data-command="load-sample">Load sample</button>
             <button class="dropdown-item" role="menuitem" type="button" data-command="ask">Ask DIA</button>
             <button class="dropdown-item" role="menuitem" type="button" data-command="help">Learn how to use DIA</button>
+            <!-- Donate: href comes from DIA_DONATE_URL via /api/config; hidden while unset. -->
+            <a class="dropdown-item donate-link" id="navDonate" role="menuitem" aria-label="Donate (opens in a new tab)" href="#" target="_blank" rel="noopener noreferrer" hidden><span>Donate</span><span class="icon donate-icon" data-icon="menu-donate" aria-hidden="true"></span></a>
+            <button class="dropdown-item donate-link" role="menuitem" type="button" data-command="donate-interac"><span>Donate by Interac e-Transfer</span><span class="icon donate-icon" data-icon="menu-donate" aria-hidden="true"></span></button>
             <button class="dropdown-item" role="menuitem" type="button" data-command="palette">Command palette <kbd class="kbd-hint">⌘K</kbd></button>
           </div>
         </div>
@@ -126,31 +131,45 @@
         <input id="trayInput" type="file" multiple accept=".txt,.md,.markdown,.text,.csv,.tsv,.json,.rtf,.docx,.doc" hidden>
         <div id="fileChips" class="file-chips" hidden></div>
         <div id="intakeBody">
-          <div class="prompt-bar composer has-mic" id="intakeComposer">
-            <!-- Dictation mirrors the send circle (same size, silver accent, hover). Icon follows the Icon style setting. -->
-            <!-- Voice cluster: click = dictate; hover (120ms intent), focus, ArrowUp or long-press fans out the
-                 existing voice features. Fan items proxy #conversationMode / #listenAgent / #autoSpeak (one source of truth). -->
-            <div class="voice-cluster" id="voiceCluster">
-              <button id="intakeMic" class="action-btn dictate-btn" type="button" aria-label="Dictate" aria-pressed="false" aria-haspopup="menu" aria-expanded="false" aria-controls="voiceFan" aria-describedby="intakeMicHint" title="Dictate (click). Hover, focus or press ↑ for voice options">
-                <span class="icon" data-icon="mic" data-icon-off="mic" data-icon-on="mic-listening" data-icon-disabled="mic-disabled" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"> <rect x="9" y="2.5" width="6" height="11.5" rx="3"/> <path class="accent" style="stroke:var(--accent, #A3A9B1)" d="M10.75 6.75h2.5M10.75 9.75h2.5"/> <path d="M6 11a6 6 0 0 0 12 0"/> <path d="M12 17v3.5M9 20.5h6"/> </svg></span>
-              </button>
-              <div id="voiceFan" class="voice-fan" role="menu" aria-label="Voice options" aria-orientation="horizontal">
-                <button id="fanConversation" class="voice-item" type="button" role="menuitemcheckbox" aria-checked="false" aria-label="Conversation mode" title="Conversation mode" tabindex="-1">
-                  <span class="icon" data-icon="conversation" aria-hidden="true"></span>
-                </button>
-                <button id="fanListen" class="voice-item" type="button" role="menuitemcheckbox" aria-checked="false" aria-label="Listen to the latest answer" title="Listen to the latest answer" tabindex="-1">
-                  <span class="icon" data-icon="listen" data-icon-off="listen" data-icon-on="listen-stop" aria-hidden="true"></span>
-                </button>
-                <button id="fanAutoSpeak" class="voice-item" type="button" role="menuitemcheckbox" aria-checked="false" aria-label="Auto-speak replies" title="Auto-speak replies" tabindex="-1">
-                  <span class="icon" data-icon="autospeak-off" data-icon-off="autospeak-off" data-icon-on="autospeak-on" aria-hidden="true"></span>
-                </button>
-              </div>
-            </div>
-            <span id="intakeMicHint" class="visually-hidden">Speaks into the questionnaire box. Press again or Escape to stop. Arrow up opens voice options.</span>
-            <textarea id="questionnaire" class="prompt-input" rows="1" aria-label="Questionnaire Markdown" aria-describedby="intakeNote dropHint" spellcheck="false" placeholder="Paste a questionnaire, or drop a file here…"></textarea>
-            <button id="runAgent" class="action-btn" type="button" aria-label="Run intake" title="Run intake (Ctrl/⌘ + Enter)">
-              <span class="icon" data-icon="enter" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"> <path d="M18.5 4.5v7.5a3 3 0 0 1-3 3H6"/> <path d="M10 10.5 5.5 15l4.5 4.5"/> </svg></span>
+          <div class="prompt-bar composer has-mic has-cmp" id="intakeComposer" data-empty="true">
+            <!-- Composer v2 (glyph/composer-icons.md, flows v8.8 2.5-2.8): [+] textarea [mic] [Run], and a notch on the top edge.
+                 Notch: hover opens the voice fan after 120ms (pointer), tap toggles (touch), Enter/Space/ArrowDown open it on Listen,
+                 ArrowUp on Auto-speak, Esc closes. Fan items proxy #conversationMode / #listenAgent / #autoSpeak. -->
+            <button id="intakeVoiceNotch" class="cmp-notch" type="button" aria-label="Voice options" aria-haspopup="menu" aria-expanded="false" aria-controls="intakeVoiceFan">
+              <span class="icon icon-idle" data-icon="notch" aria-hidden="true"></span>
+              <span class="icon icon-open" data-icon="notch-open" aria-hidden="true"></span>
             </button>
+            <span class="cmp-tip cmp-tip-notch" role="tooltip" id="intakeNotchTip">Voice options</span>
+            <div class="voice-fan" role="menu" id="intakeVoiceFan" aria-label="Voice options" aria-orientation="horizontal">
+              <button id="intakeFanConversation" class="voice-item px-btn" type="button" role="menuitemcheckbox" aria-checked="false" tabindex="-1" style="--d:1" aria-label="Conversation mode: talk with DIA hands-free">
+                <span class="icon" data-icon="conversation" aria-hidden="true"></span>
+                <span class="voice-label" aria-hidden="true">Conversation mode</span>
+              </button>
+              <button id="intakeFanListen" class="voice-item px-btn" type="button" role="menuitem" data-speaking="false" tabindex="-1" style="--d:0" aria-label="Listen: read the latest reply aloud">
+                <span class="icon" data-icon="listen" data-icon-off="listen" data-icon-on="listen-stop" aria-hidden="true"></span>
+                <span class="voice-label" aria-hidden="true">Listen</span>
+              </button>
+              <button id="intakeFanAutoSpeak" class="voice-item px-btn" type="button" role="menuitemcheckbox" aria-checked="false" tabindex="-1" style="--d:1" aria-label="Auto-speak replies">
+                <span class="icon" data-icon="autospeak-off" data-icon-off="autospeak-off" data-icon-on="autospeak-on" aria-hidden="true"></span>
+                <span class="voice-label" aria-hidden="true">Auto-speak</span>
+              </button>
+            </div>
+            <button id="intakePlusButton" class="action-btn cmp-circle cmp-plus px-btn" type="button" aria-label="Actions" aria-haspopup="menu" aria-expanded="false" aria-controls="intakePlusMenu">
+              <span class="icon icon-idle" data-icon="plus" aria-hidden="true"></span>
+              <span class="icon icon-open" data-icon="plus-open" aria-hidden="true"></span>
+            </button>
+            <div class="plus-menu" role="menu" id="intakePlusMenu" aria-label="Actions"></div>
+            <textarea id="questionnaire" class="prompt-input" rows="1" aria-label="Questionnaire Markdown" aria-describedby="intakeNote dropHint" spellcheck="false" placeholder="Paste a questionnaire, or drop a file here…"></textarea>
+            <button id="intakeMic" class="action-btn cmp-circle cmp-mic dictate-btn px-btn" type="button" aria-pressed="false" aria-label="Start voice input" data-label-off="Start voice input" data-label-on="Stop voice input" aria-keyshortcuts="Control+Shift+Space Meta+Shift+Space">
+              <span class="icon" data-icon="mic" data-icon-off="mic" data-icon-on="mic-listening" data-icon-disabled="mic-disabled" aria-hidden="true"></span>
+            </button>
+            <span class="cmp-tip cmp-tip-mic" role="tooltip" id="intakeMicTip">Start voice input <kbd>⌘/Ctrl</kbd><kbd>Shift</kbd><kbd>Space</kbd></span>
+            <span class="visually-hidden" id="intakeMicNote" hidden>Voice input isn't supported in this browser. Try Chrome, Edge or Safari.</span>
+            <span class="cmp-run-slot">
+              <button id="runAgent" class="action-btn cmp-circle cmp-enter px-btn" type="button" aria-label="Run" aria-keyshortcuts="Control+Enter Meta+Enter" hidden>
+                <span class="icon" data-icon="enter" aria-hidden="true"></span>
+              </button>
+            </span>
           </div>
         </div>
         <div id="intakeError" class="intake-error" role="alert" hidden></div>
@@ -168,15 +187,46 @@
       <!-- Ask DIA: the live Gemini agent, in the same pill composer. -->
       <div class="prompt-wrapper agent" id="agentStage">
         <h2>Ask DIA <small id="agentStatus" class="agent-badge">checking...</small></h2>
-        <div class="prompt-bar composer">
-          <textarea id="agentMessage" class="prompt-input" rows="1" spellcheck="false" aria-label="Message for the Gemini agent" placeholder="Ask DIA, e.g. 'Score this intake and list missing fields.'"></textarea>
-          <button id="micButton" class="mic-btn speech-input-only" type="button" aria-pressed="false" aria-label="Dictate a message" title="Dictate">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 11a7 7 0 0 1-14 0M12 18v4M8 22h8"/></svg>
-          </button>
-          <button id="runChat" class="action-btn" type="button" aria-label="Send to Gemini" title="Send to Gemini (Enter)">
-            <span class="icon" data-icon="enter" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"> <path d="M18.5 4.5v7.5a3 3 0 0 1-3 3H6"/> <path d="M10 10.5 5.5 15l4.5 4.5"/> </svg></span>
-          </button>
-        </div>
+        <div class="prompt-bar composer has-mic has-cmp" id="agentComposer" data-empty="true">
+            <!-- Composer v2 (glyph/composer-icons.md, flows v8.8 2.5-2.8): [+] textarea [mic] [Run], and a notch on the top edge.
+                 Notch: hover opens the voice fan after 120ms (pointer), tap toggles (touch), Enter/Space/ArrowDown open it on Listen,
+                 ArrowUp on Auto-speak, Esc closes. Fan items proxy #conversationMode / #listenAgent / #autoSpeak. -->
+            <button id="agentVoiceNotch" class="cmp-notch" type="button" aria-label="Voice options" aria-haspopup="menu" aria-expanded="false" aria-controls="agentVoiceFan">
+              <span class="icon icon-idle" data-icon="notch" aria-hidden="true"></span>
+              <span class="icon icon-open" data-icon="notch-open" aria-hidden="true"></span>
+            </button>
+            <span class="cmp-tip cmp-tip-notch" role="tooltip" id="agentNotchTip">Voice options</span>
+            <div class="voice-fan" role="menu" id="agentVoiceFan" aria-label="Voice options" aria-orientation="horizontal">
+              <button id="agentFanConversation" class="voice-item px-btn" type="button" role="menuitemcheckbox" aria-checked="false" tabindex="-1" style="--d:1" aria-label="Conversation mode: talk with DIA hands-free">
+                <span class="icon" data-icon="conversation" aria-hidden="true"></span>
+                <span class="voice-label" aria-hidden="true">Conversation mode</span>
+              </button>
+              <button id="agentFanListen" class="voice-item px-btn" type="button" role="menuitem" data-speaking="false" tabindex="-1" style="--d:0" aria-label="Listen: read the latest reply aloud">
+                <span class="icon" data-icon="listen" data-icon-off="listen" data-icon-on="listen-stop" aria-hidden="true"></span>
+                <span class="voice-label" aria-hidden="true">Listen</span>
+              </button>
+              <button id="agentFanAutoSpeak" class="voice-item px-btn" type="button" role="menuitemcheckbox" aria-checked="false" tabindex="-1" style="--d:1" aria-label="Auto-speak replies">
+                <span class="icon" data-icon="autospeak-off" data-icon-off="autospeak-off" data-icon-on="autospeak-on" aria-hidden="true"></span>
+                <span class="voice-label" aria-hidden="true">Auto-speak</span>
+              </button>
+            </div>
+            <button id="agentPlusButton" class="action-btn cmp-circle cmp-plus px-btn" type="button" aria-label="Actions" aria-haspopup="menu" aria-expanded="false" aria-controls="agentPlusMenu">
+              <span class="icon icon-idle" data-icon="plus" aria-hidden="true"></span>
+              <span class="icon icon-open" data-icon="plus-open" aria-hidden="true"></span>
+            </button>
+            <div class="plus-menu" role="menu" id="agentPlusMenu" aria-label="Actions"></div>
+            <textarea id="agentMessage" class="prompt-input" rows="1" spellcheck="false" aria-label="Message for the Gemini agent" placeholder="Ask DIA, e.g. 'Score this intake and list missing fields.'"></textarea>
+            <button id="micButton" class="action-btn cmp-circle cmp-mic px-btn" type="button" aria-pressed="false" aria-label="Start voice input" data-label-off="Start voice input" data-label-on="Stop voice input" aria-keyshortcuts="Control+Shift+Space Meta+Shift+Space">
+              <span class="icon" data-icon="mic" data-icon-off="mic" data-icon-on="mic-listening" data-icon-disabled="mic-disabled" aria-hidden="true"></span>
+            </button>
+            <span class="cmp-tip cmp-tip-mic" role="tooltip" id="agentMicTip">Start voice input <kbd>⌘/Ctrl</kbd><kbd>Shift</kbd><kbd>Space</kbd></span>
+            <span class="visually-hidden" id="agentMicNote" hidden>Voice input isn't supported in this browser. Try Chrome, Edge or Safari.</span>
+            <span class="cmp-run-slot">
+              <button id="runChat" class="action-btn cmp-circle cmp-enter px-btn" type="button" aria-label="Send to Gemini" aria-keyshortcuts="Enter" hidden>
+                <span class="icon" data-icon="enter" aria-hidden="true"></span>
+              </button>
+            </span>
+          </div>
         <div class="actions under-prompt">
           <button id="conversationMode" class="chip-button speech-input-only" type="button" aria-pressed="false">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8z"/></svg>

@@ -37,6 +37,8 @@ PUBLIC_FILES = {
     "/static/cabinet-fan.css": BASE_DIR / "static" / "cabinet-fan.css",
     "/static/pixel-hover.css": BASE_DIR / "static" / "pixel-hover.css",
     "/static/fanout-pixel.css": BASE_DIR / "static" / "fanout-pixel.css",
+    "/static/composer-icons.css": BASE_DIR / "static" / "composer-icons.css",
+    "/static/composer.css": BASE_DIR / "static" / "composer.css",
     "/static/vendor/jszip.min.js": BASE_DIR / "static" / "vendor" / "jszip.min.js",
 }
 # Runtime sample lives outside tests/ so it ships in the Cloud Run image even
@@ -49,6 +51,28 @@ SAMPLE_PATHS = (
 
 ICON_DIR = BASE_DIR / "static" / "icons"
 ICON_PATH = re.compile(r"^/static/icons/((?:[a-z0-9-]{1,32}/)?[a-z0-9][a-z0-9@-]{0,63}\.(?:svg|png|webp|gif))$")
+
+
+# Ikenna's PayPal payment link (a plain GET opens the payment page). DIA_DONATE_URL overrides it; setting DIA_DONATE_URL to an empty value hides Donate.
+DEFAULT_DONATE_URL = "https://www.paypal.com/ncp/payment/PQGR9B44BEYLU"
+
+
+def donate_url() -> str | None:
+    """Single source for the Donate link: DIA_DONATE_URL (https only), defaulting to DEFAULT_DONATE_URL.
+    Empty or invalid = the item is hidden."""
+    raw = os.environ.get("DIA_DONATE_URL", DEFAULT_DONATE_URL).strip()
+    if not raw:
+        return None
+    parsed = urlparse(raw)
+    if parsed.scheme != "https" or not parsed.netloc or any(ch in raw for ch in "\"'<> \t\r\n"):
+        logger.warning("DIA_DONATE_URL ignored: it must be an absolute https:// URL")
+        return None
+    return raw
+
+
+def public_config() -> dict[str, object]:
+    """Client-visible settings (no secrets)."""
+    return {"donateUrl": donate_url()}
 
 
 def icon_file(path: str) -> Path | None:
@@ -97,6 +121,9 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/sample":
             self.send_json({"questionnaire": read_sample_questionnaire()})
+            return
+        if path == "/api/config":
+            self.send_json(public_config())
             return
         if path == "/api/agent/status":
             from agent_runtime import is_configured

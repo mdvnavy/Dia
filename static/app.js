@@ -777,6 +777,8 @@ function startRecognizer({ button, continuous = false, interimResults = false, o
     if (!button) return;
     button.setAttribute("aria-pressed", String(on));
     button.classList.toggle("listening", on);
+    const label = on ? button.dataset.labelOn : button.dataset.labelOff;
+    if (label) button.setAttribute("aria-label", label);
   };
   rec.onstart = () => {
     recognizing = true;
@@ -819,13 +821,18 @@ function listenOnce({ onTranscript, onError, button = micButton }) {
 // Without speech recognition the button stays focusable but aria-disabled, with a tooltip.
 function attachDictation(button, textarea, { continuous = true, intercept, label = "Dictation" } = {}) {
   if (!button || !textarea) return null;
-  const unsupported = "Dictation needs speech recognition, which this browser doesn't support. Try Chrome, Edge or Safari.";
+  // Unsupported (composer-icons.md section 3, flows 2.5c): aria-disabled, not disabled, so it stays focusable; the
+  // custom tooltip and aria-describedby carry the note. No native title (it would show a second tooltip).
+  const unsupported = "Voice input isn't supported in this browser. Try Chrome, Edge or Safari.";
   if (!SpeechRecognitionImpl) {
-    if (!button.disabled) {
-      button.setAttribute("aria-disabled", "true");
-      button.title = unsupported;
-      button.addEventListener("click", () => { statusText.textContent = unsupported; });
-    }
+    button.setAttribute("aria-disabled", "true");
+    button.removeAttribute("title");
+    const wrap = button.closest(".composer");
+    const note = wrap?.querySelector("[id$='MicNote']");
+    if (note) button.setAttribute("aria-describedby", note.id);
+    const tip = wrap?.querySelector(".cmp-tip-mic");
+    if (tip) tip.textContent = unsupported;
+    button.addEventListener("click", () => { statusText.textContent = unsupported; });
     return null;
   }
   let rec = null;
@@ -844,7 +851,8 @@ function attachDictation(button, textarea, { continuous = true, intercept, label
     base = textarea.value.replace(/\s+$/, "");
     finals = "";
     lastWritten = textarea.value;
-    statusText.textContent = "Listening… press Esc or the mic to stop";
+    stopSpeaking(); // starting dictation always stops read-aloud, so the mic doesn't hear DIA
+    statusText.textContent = "Listening…";
     const mine = startRecognizer({
       button,
       continuous,
@@ -868,10 +876,14 @@ function attachDictation(button, textarea, { continuous = true, intercept, label
         if (error === "aborted") return;
         statusText.textContent =
           error === "not-allowed" || error === "service-not-allowed"
-            ? "Microphone permission denied"
+            ? "Microphone blocked. Allow it in your browser's site settings, then try again."
             : error === "no-speech"
-              ? "No speech detected"
-              : `${label} failed (${error})`;
+              ? "Didn't catch anything. Try again."
+              : error === "audio-capture"
+                ? "Voice input stopped: no microphone found"
+                : error === "network"
+                  ? "Voice input stopped: connection problem"
+                  : `${label} failed (${error})`;
       },
       onEnd: (ended) => {
         if (ended !== rec) return;
@@ -883,7 +895,7 @@ function attachDictation(button, textarea, { continuous = true, intercept, label
     });
     rec = mine;
   }
-  function stop(message = `${label} stopped`) {
+  function stop(message = "Stopped listening") {
     if (!rec) return;
     statusText.textContent = message;
     rec.stop();
@@ -893,9 +905,9 @@ function attachDictation(button, textarea, { continuous = true, intercept, label
     if (rec) stop();
     else start();
   });
-  // Esc stops dictation first (capture phase, before other Esc handlers).
+  // Esc stops dictation (capture phase), but an open popover (voice fan, plus menu) closes first.
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && rec) {
+    if (event.key === "Escape" && rec && !Popovers.anyOpen()) {
       event.preventDefault();
       event.stopPropagation();
       stop();
@@ -1002,163 +1014,188 @@ if (SpeechRecognitionImpl) {
   });
 }
 
-// --- Composer voice cluster (#intakeMic) ---
-// Click = dictate (attachDictation above). Hover (120ms intent), keyboard focus, ArrowUp or a
-// 400ms long-press fans out the existing voice features. The fan items hold no state of their own:
-// each one clicks the Ask DIA control it mirrors (#conversationMode, #listenAgent, #autoSpeak) and
-// reflects that control's aria-pressed, so the panel and the composer share one source of truth.
-const VoiceCluster = (() => {
-  const cluster = document.querySelector("#voiceCluster");
-  const fan = document.querySelector("#voiceFan");
-  if (!cluster || !fan || !intakeMic) return null;
-  const HOVER_INTENT_MS = 120;
-  const HOVER_LEAVE_MS = 260;
-  const LONG_PRESS_MS = 400;
-  const entries = [
-    { item: fan.querySelector("#fanConversation"), source: conversationMode, supported: Boolean(SpeechRecognitionImpl),
-      missing: "Conversation mode needs speech recognition",
-      run: () => { if (!conversationActive) openAgent(); conversationMode.click(); } },
-    { item: fan.querySelector("#fanListen"), source: listenAgent, supported: ttsSupported,
-      missing: "Listen needs speech synthesis", run: () => listenAgent.click() },
-    { item: fan.querySelector("#fanAutoSpeak"), source: autoSpeak, supported: ttsSupported,
-      missing: "Auto-speak needs speech synthesis", run: () => autoSpeak.click() },
-  ];
-  // Unsupported features are hidden; the mic's tooltip says what is missing.
-  const missing = [];
-  entries.forEach((entry) => {
-    entry.item.hidden = !entry.supported;
-    if (!entry.supported) missing.push(entry.missing);
-  });
-  const live = entries.filter((entry) => entry.supported);
-  live.forEach((entry, index) => entry.item.style.setProperty("--i", String(index)));
-  if (missing.length) intakeMic.title = `${intakeMic.title.replace(/\.$/, "")}. ${missing.join("; ")}, which this browser doesn't support.`;
-  if (!live.length) {
-    ["aria-haspopup", "aria-expanded", "aria-controls"].forEach((name) => intakeMic.removeAttribute(name));
-    fan.remove();
-    return null;
-  }
+// --- Popovers: only one composer popover is open at a time (voice fans, plus menus, cabinet stack) ---
+const Popovers = (() => {
+  const list = [];
+  return {
+    register(popover) { list.push(popover); return popover; },
+    closeOthers(except) {
+      list.forEach((popover) => { if (popover !== except && popover.isOpen()) popover.hide(); });
+      if (except !== "cabinet" && CabinetFan.isOpen()) CabinetFan.close({ restoreFocus: false });
+    },
+    anyOpen: () => list.some((popover) => popover.isOpen()),
+  };
+})();
 
-  const sync = () => live.forEach(({ item, source }) => {
-    item.setAttribute("aria-checked", source.getAttribute("aria-pressed") === "true" ? "true" : "false");
+// --- Voice options fan: from the 36x12 notch on each composer's top edge (glyph composer-icons.md 5, flows v8.8 2.6a) ---
+// Pointer: hover on the notch opens it after --dia-delay-intent (120ms), not while dictation or Conversation mode is
+// running; leaving the notch and the fan closes it after --dia-delay-grace (200ms); a click toggles. Touch: a tap toggles.
+// Focus never opens it. Keyboard: Enter/Space/ArrowDown open it on Listen, ArrowUp on Auto-speak; arrows wrap,
+// Home/End jump, Esc closes and returns focus to the notch, Tab closes. Items hold no state: they click the Ask DIA
+// control they mirror (#conversationMode, #listenAgent, #autoSpeak) and reflect its aria-pressed.
+function createVoiceFan(prefix, { conversationRun, conversationNote = null }) {
+  const notch = document.querySelector(`#${prefix}VoiceNotch`);
+  const fan = document.querySelector(`#${prefix}VoiceFan`);
+  const tip = document.querySelector(`#${prefix}NotchTip`);
+  if (!notch || !fan) return null;
+  const token = (name, fallback) => parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name)) || fallback;
+  const entries = [
+    { item: fan.querySelector(`#${prefix}FanConversation`), source: conversationMode, supported: Boolean(SpeechRecognitionImpl),
+      note: "Not supported", run: conversationRun, closes: true },
+    { item: fan.querySelector(`#${prefix}FanListen`), source: listenAgent, supported: ttsSupported,
+      note: "Not supported", run: () => listenAgent.click(), closes: true },
+    { item: fan.querySelector(`#${prefix}FanAutoSpeak`), source: autoSpeak, supported: ttsSupported,
+      note: "Not supported", run: () => autoSpeak.click(), closes: false },
+  ];
+  // Unsupported items stay in place, aria-disabled with a note under the label, so the row keeps its shape.
+  entries.forEach((entry) => {
+    if (entry.supported) return;
+    entry.item.setAttribute("aria-disabled", "true");
+    const note = document.createElement("span");
+    note.className = "voice-note";
+    note.textContent = entry.note;
+    entry.item.querySelector(".voice-label").append(note);
+    entry.item.setAttribute("aria-label", `${entry.item.getAttribute("aria-label")} (${entry.note.toLowerCase()})`);
   });
+  if (!entries.some((entry) => entry.supported)) { notch.remove(); tip?.remove(); fan.remove(); return null; }
+
+  const [conv, listen, auto] = entries;
+  const sync = () => {
+    conv.item.setAttribute("aria-checked", String(conversationMode.getAttribute("aria-pressed") === "true"));
+    const speaking = listenAgent.getAttribute("aria-pressed") === "true";
+    listen.item.dataset.speaking = String(speaking);
+    if (listen.supported) {
+      listen.item.setAttribute("aria-label", speaking ? "Stop reading aloud" : "Listen: read the latest reply aloud");
+      listen.item.querySelector(".voice-label").firstChild.textContent = speaking ? "Stop" : "Listen";
+    }
+    auto.item.setAttribute("aria-checked", String(autoSpeak.getAttribute("aria-pressed") === "true"));
+  };
   const observer = new MutationObserver(sync);
-  live.forEach(({ source }) => observer.observe(source, { attributes: true, attributeFilter: ["aria-pressed"] }));
+  entries.forEach(({ source }) => observer.observe(source, { attributes: true, attributeFilter: ["aria-pressed"] }));
   sync();
 
   let open = false;
+  let openedByHover = false;
   let hoverTimer = 0;
   let leaveTimer = 0;
-  let pressTimer = 0;
-  let swallowClick = false;
-  let quietFocus = false;
-  const items = () => live.map((entry) => entry.item);
+  const items = () => entries.map((entry) => entry.item);
+  const inside = (node) => Boolean(node) && (notch.contains(node) || fan.contains(node));
+  const busyListening = () => document.querySelector(".cmp-mic[aria-pressed='true']") !== null || conversationActive;
   const clearTimers = () => { clearTimeout(hoverTimer); clearTimeout(leaveTimer); };
+  const api = {
+    isOpen: () => open,
+    show({ focus = null, viaHover = false } = {}) {
+      clearTimers();
+      if (!open) {
+        Popovers.closeOthers(api);
+        open = true;
+        openedByHover = viaHover;
+        notch.setAttribute("aria-expanded", "true");
+        sync();
+      }
+      if (focus !== null) {
+        const list = items();
+        list[(focus + list.length) % list.length].focus();
+      }
+    },
+    hide({ returnFocus = false } = {}) {
+      clearTimers();
+      if (open) {
+        open = false;
+        notch.setAttribute("aria-expanded", "false");
+      }
+      if (returnFocus) notch.focus();
+    },
+  };
 
-  function show({ focus = null } = {}) {
-    clearTimers();
-    if (!open) {
-      open = true;
-      fan.classList.add("open");
-      intakeMic.setAttribute("aria-expanded", "true");
-      sync();
-    }
-    if (focus !== null) {
-      const list = items();
-      list[(focus + list.length) % list.length].focus();
-    }
-  }
-  function hide({ returnFocus = false } = {}) {
-    clearTimers();
-    clearTimeout(pressTimer);
-    if (open) {
-      open = false;
-      fan.classList.remove("open");
-      intakeMic.setAttribute("aria-expanded", "false");
-    }
-    if (returnFocus) {
-      quietFocus = true; // returning focus must not re-open the fan
-      intakeMic.focus();
-      quietFocus = false;
-    }
-  }
-
-  // Hover intent (mouse only; touch uses long-press).
-  cluster.addEventListener("pointerenter", (event) => {
-    if (event.pointerType !== "mouse") return;
-    clearTimeout(leaveTimer);
-    if (!open) hoverTimer = setTimeout(() => show(), HOVER_INTENT_MS);
-  });
-  cluster.addEventListener("pointerleave", (event) => {
-    if (event.pointerType !== "mouse") return;
+  const enter = (event) => { if (event.pointerType !== "touch") clearTimeout(leaveTimer); };
+  const leave = (event) => {
+    if (event.pointerType === "touch") return;
     clearTimeout(hoverTimer);
-    if (fan.querySelector(":focus-visible")) return; // a keyboard user is inside the fan
-    leaveTimer = setTimeout(() => hide(), HOVER_LEAVE_MS);
+    if (inside(event.relatedTarget)) return;
+    if (open && !fan.querySelector(":focus-visible")) leaveTimer = setTimeout(() => api.hide(), token("--dia-delay-grace", 200));
+  };
+  notch.addEventListener("pointerenter", (event) => {
+    if (event.pointerType === "touch") return;
+    clearTimeout(leaveTimer);
+    if (!open && !busyListening()) hoverTimer = setTimeout(() => api.show({ viaHover: true }), token("--dia-delay-intent", 120));
   });
-
-  // Keyboard focus opens it; pointer focus (a mouse click) does not.
-  intakeMic.addEventListener("focus", () => {
-    if (!quietFocus && intakeMic.matches(":focus-visible")) show();
+  fan.addEventListener("pointerenter", enter);
+  notch.addEventListener("pointerleave", leave);
+  fan.addEventListener("pointerleave", leave);
+  // Click toggles. Enter/Space (detail 0) open on Listen. A mouse click on a notch that hover just opened keeps it open.
+  notch.addEventListener("click", (event) => {
+    if (event.detail === 0) { open ? api.hide() : api.show({ focus: 1 }); return; }
+    if (open && openedByHover) { openedByHover = false; return; }
+    open ? api.hide() : api.show();
   });
-  cluster.addEventListener("focusout", (event) => {
-    if (!cluster.contains(event.relatedTarget)) hide();
-  });
-
-  // Long-press on touch/pen opens the fan and swallows the click that follows (no dictation).
-  intakeMic.addEventListener("pointerdown", (event) => {
-    if (event.pointerType === "mouse") return;
-    clearTimeout(pressTimer);
-    pressTimer = setTimeout(() => { swallowClick = true; show(); }, LONG_PRESS_MS);
-  });
-  ["pointerup", "pointercancel", "pointerleave"].forEach((type) =>
-    intakeMic.addEventListener(type, () => clearTimeout(pressTimer)));
-  intakeMic.addEventListener("contextmenu", (event) => { if (swallowClick || open) event.preventDefault(); });
-  cluster.addEventListener("click", (event) => {
-    if (swallowClick && intakeMic.contains(event.target)) {
-      swallowClick = false;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-    }
-  }, true);
-  // Tap (or click) outside closes.
-  document.addEventListener("pointerdown", (event) => {
-    if (open && !cluster.contains(event.target)) hide();
-  });
-
-  intakeMic.addEventListener("keydown", (event) => {
-    if (event.key === "ArrowUp" || (open && event.key === "ArrowRight")) {
-      event.preventDefault();
-      show({ focus: 0 });
-    } else if (event.key === "Escape" && open) {
-      event.preventDefault();
-      hide({ returnFocus: true });
-    }
+  notch.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowDown") { event.preventDefault(); api.show({ focus: 1 }); }
+    else if (event.key === "ArrowUp") { event.preventDefault(); api.show({ focus: 2 }); }
+    else if (event.key === "Escape" && open) { event.preventDefault(); event.stopPropagation(); api.hide({ returnFocus: true }); }
   });
   fan.addEventListener("keydown", (event) => {
     const list = items();
     const index = list.indexOf(document.activeElement);
-    const step = { ArrowRight: 1, ArrowUp: 1, ArrowLeft: -1, ArrowDown: -1 }[event.key];
-    if (step) {
-      event.preventDefault();
-      if (step < 0 && index === 0) { hide({ returnFocus: true }); return; }
-      show({ focus: index + step });
-    } else if (event.key === "Home" || event.key === "End") {
-      event.preventDefault();
-      show({ focus: event.key === "Home" ? 0 : list.length - 1 });
-    } else if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      hide({ returnFocus: true });
-    } else if (event.key === "Tab") {
-      hide();
-    }
+    const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[event.key];
+    if (step) { event.preventDefault(); api.show({ focus: index + step }); }
+    else if (event.key === "Home" || event.key === "End") { event.preventDefault(); api.show({ focus: event.key === "Home" ? 0 : list.length - 1 }); }
+    else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); api.hide({ returnFocus: true }); }
+    else if (event.key === "Tab") api.hide();
   });
-  live.forEach((entry) => entry.item.addEventListener("click", () => {
+  fan.addEventListener("focusout", (event) => { if (open && event.relatedTarget && !inside(event.relatedTarget)) api.hide(); });
+  document.addEventListener("pointerdown", (event) => { if (open && !inside(event.target)) api.hide(); });
+  entries.forEach((entry) => entry.item.addEventListener("click", () => {
+    if (entry.item.getAttribute("aria-disabled") === "true") { statusText.textContent = `${entry.item.querySelector(".voice-label").firstChild.textContent}: ${entry.note.toLowerCase()} in this browser`; return; }
+    const keyboard = entry.item.matches(":focus-visible");
+    if (entry.closes) api.hide({ returnFocus: keyboard });
     entry.run();
     sync();
   }));
+  return Popovers.register(api);
+}
 
-  return { show, hide, isOpen: () => open };
-})();
+const VoiceFans = {
+  intake: createVoiceFan("intake", { conversationRun: () => { if (!conversationActive) openAgent(); conversationMode.click(); } }),
+  agent: createVoiceFan("agent", { conversationRun: () => conversationMode.click() }),
+};
+
+// Cmd/Ctrl+Shift+Space toggles voice input for the composer that has focus (intake when neither does).
+document.addEventListener("keydown", (event) => {
+  if (!(event.metaKey || event.ctrlKey) || !event.shiftKey || event.code !== "Space") return;
+  event.preventDefault();
+  const inAgent = document.activeElement?.closest?.("#agentComposer");
+  (inAgent ? micButton : intakeMic).click();
+});
+
+// --- Composer state: Run (enter) appears beside the mic only when the input has text ---
+// Programmatic writes (dictation, Load sample, uploads, New intake, cabinet reopen) go through the value setter,
+// so the textarea's value property is wrapped once per composer instead of patching every call site.
+function watchComposer(textarea) {
+  const bar = textarea.closest(".prompt-bar");
+  if (!bar) return;
+  const run = bar.querySelector(".cmp-enter");
+  // Run is `hidden` while the trimmed value is empty (flows 2.8); its slot stays reserved so the mic never moves.
+  // It never takes focus when it appears. If it had focus when hidden, focus moves to the textarea.
+  const update = () => {
+    const empty = textarea.value.trim() === "";
+    bar.dataset.empty = String(empty);
+    if (!run || run.hidden === empty) return;
+    const hadFocus = document.activeElement === run;
+    run.hidden = empty;
+    if (hadFocus && empty) textarea.focus();
+  };
+  const native = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value");
+  Object.defineProperty(textarea, "value", {
+    configurable: true,
+    get() { return native.get.call(this); },
+    set(next) { native.set.call(this, next); update(); },
+  });
+  textarea.addEventListener("input", update);
+  update();
+}
+watchComposer(questionnaire);
+watchComposer(agentMessage);
 
 // --- Share on X ---
 
@@ -1233,7 +1270,7 @@ function autosizeComposer(textarea) {
 questionnaire.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && !event.isComposing) {
     event.preventDefault();
-    if (!runAgent.disabled) runAgent.click();
+    if (!runAgent.disabled && questionnaire.value.trim()) runAgent.click();
   }
 });
 
@@ -1241,7 +1278,7 @@ questionnaire.addEventListener("keydown", (event) => {
 agentMessage.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
     event.preventDefault();
-    if (!runChat.disabled) runChat.click();
+    if (!runChat.disabled && agentMessage.value.trim()) runChat.click();
   }
 });
 
@@ -1329,12 +1366,12 @@ function focusComposer() {
 // Wordmark dropdown menu (Tia's "Tia ▾").
 const navBrandMenu = document.querySelector("#navBrandMenu");
 const navDropdown = document.querySelector("#navDropdown");
-const navItems = [...navDropdown.querySelectorAll(".dropdown-item")];
+const navItemsAll = () => [...navDropdown.querySelectorAll(".dropdown-item")].filter((el) => !el.hidden);
 
 function setNavMenu(open, { focusFirst = false } = {}) {
   navDropdown.classList.toggle("show", open);
   navBrandMenu.setAttribute("aria-expanded", String(open));
-  if (open && focusFirst) navItems[0].focus();
+  if (open && focusFirst) navItemsAll()[0].focus();
 }
 
 navBrandMenu.addEventListener("click", (event) => {
@@ -1343,6 +1380,7 @@ navBrandMenu.addEventListener("click", (event) => {
 });
 
 navDropdown.addEventListener("keydown", (event) => {
+  const navItems = navItemsAll();
   const index = navItems.indexOf(document.activeElement);
   if (event.key === "ArrowDown" || event.key === "ArrowUp") {
     event.preventDefault();
@@ -1390,6 +1428,35 @@ document.querySelectorAll("kbd.kbd-hint").forEach((kbd) => {
   if (kbd.textContent === "⌘K") kbd.textContent = `${modKey} K`;
 });
 
+// Donate: one config value (DIA_DONATE_URL on the server, served by /api/config). Unset = every Donate item hidden.
+let donateUrl = null;
+function openDonate() {
+  if (donateUrl) window.open(donateUrl, "_blank", "noopener,noreferrer");
+}
+// Second Support option: Interac e-Transfer. Copies the payee address and confirms in the top-centre toast.
+const INTERAC_EMAIL = "payments@bashsystems.net";
+async function donateInterac() {
+  let copied = true;
+  try {
+    if (navigator.clipboard && window.isSecureContext) await navigator.clipboard.writeText(INTERAC_EMAIL);
+    else copyTextFallback(INTERAC_EMAIL);
+  } catch (error) {
+    try { copyTextFallback(INTERAC_EMAIL); } catch (fallbackError) { copied = false; }
+  }
+  showToast(copied
+    ? `Copied ${INTERAC_EMAIL}. Send an Interac e-Transfer from your bank`
+    : `Couldn't copy. Send an Interac e-Transfer to ${INTERAC_EMAIL} from your bank`, [], { duration: 6000 });
+}
+fetch("/api/config")
+  .then((response) => (response.ok ? response.json() : {}))
+  .then((config) => {
+    const url = typeof config.donateUrl === "string" && /^https:\/\//.test(config.donateUrl) ? config.donateUrl : null;
+    donateUrl = url;
+    const link = document.querySelector("#navDonate");
+    if (link) { link.hidden = !url; if (url) link.href = url; }
+  })
+  .catch(() => { /* no config: Donate stays hidden */ });
+
 const clickable = (selector) => () => {
   const el = document.querySelector(selector);
   return Boolean(el) && !el.disabled && !el.hidden;
@@ -1423,6 +1490,8 @@ const commands = [
   { id: "icons-zelda", label: "Icon style: Zelda", run: () => setIconStyle("zelda") },
   { id: "icons-pixel", label: "Icon style: Dia pixel", run: () => setIconStyle("dia-pixel") },
   { id: "help", label: "Learn how to use DIA", run: openHelp },
+  { id: "donate", label: "Donate", hint: "Opens in a new tab", enabled: () => Boolean(donateUrl), run: openDonate },
+  { id: "donate-interac", label: "Donate by Interac e-Transfer", hint: `Copies ${INTERAC_EMAIL}`, run: donateInterac },
 ];
 
 let visibleCommands = [];
@@ -1515,6 +1584,230 @@ function runCommand(command) {
   closePalette({ restoreFocus: false });
   command.run();
 }
+
+// --- Plus menu (Actions): glyph composer-icons.md 6, flows v8.8 2.7 ---
+// Rows come from the palette's command registry (runCommand), grouped Add / Go to / View / Help, then Support (Donate,
+// only when DIA_DONATE_URL resolves) and All commands. Icon style is an inline 3-way menuitemradio row; it and Dark theme
+// keep the menu open, everything else closes it. Keyboard: Enter/Space/ArrowUp open on the first row, ArrowDown on the
+// last; Up/Down wrap (Left/Right inside the segmented row), Home/End, type-ahead, Esc returns focus to the plus, Tab
+// closes. A click or tap toggles; an outside click closes. Only one popover at a time (Popovers).
+const PLUS_GROUPS = [
+  { label: "Add", rows: [{ id: "upload", text: "Attach file", icon: "menu-attach" }, { id: "load-sample", text: "Load sample", icon: "menu-sample" }] },
+  { label: "Go to", rows: [
+    { id: "tray", text: "Tray", icon: "tray", run: () => trayButton.click() },
+    { id: "cabinet", text: "Cabinet", icon: "cabinet" },
+    { id: "ask", text: "Ask DIA", icon: "menu-ask", hideIn: "agent" },
+  ] },
+  { label: "View", rows: [{ kind: "icon-style" }, { id: "theme", text: "Dark theme", icon: "menu-theme", kind: "theme" }] },
+  { label: "Help", rows: [{ id: "help", text: "Learn how to use DIA", icon: "menu-help" }] },
+  { label: "Support", rows: [
+    { id: "donate", text: "Donate", icon: "menu-donate", kind: "link" },
+    { id: "donate-interac", text: "Donate by Interac e-Transfer", icon: "menu-donate" }, // copies the address; no ↗
+  ] },
+  { label: "Commands", rows: [{ id: "palette", text: "All commands", icon: "menu-commands", key: `${modKey === "⌘" ? "⌘" : "Ctrl "}K`, run: () => openPalette() }] },
+];
+const ICON_STYLE_OPTIONS = [["line", "Line"], ["zelda", "Zelda"], ["dia-pixel", "Dia pixel"]];
+function createPlusMenu(prefix) {
+  const button = document.querySelector(`#${prefix}PlusButton`);
+  const menu = document.querySelector(`#${prefix}PlusMenu`);
+  if (!button || !menu) return null;
+  let open = false;
+  const items = () => [...menu.querySelectorAll(".pm-item")];
+  const keepsOpen = (row) => row.kind === "theme";
+  const isDark = () => document.documentElement.dataset.theme !== "light";
+  function iconSpan(name) {
+    const icon = document.createElement("span");
+    icon.className = "icon pm-icon";
+    icon.dataset.icon = name;
+    icon.setAttribute("aria-hidden", "true");
+    return icon;
+  }
+  function makeItem(row) {
+    const command = commands.find((c) => c.id === row.id);
+    const el = document.createElement(row.kind === "link" ? "a" : "button");
+    el.className = "pm-item";
+    el.tabIndex = -1;
+    if (row.kind === "link") {
+      el.href = donateUrl;
+      el.target = "_blank";
+      el.rel = "noopener noreferrer";
+      el.setAttribute("role", "menuitem");
+      el.setAttribute("aria-label", `${row.text} (opens in a new tab)`);
+    } else {
+      el.type = "button";
+      el.setAttribute("role", row.kind === "theme" ? "menuitemcheckbox" : "menuitem");
+      if (row.kind === "theme") el.setAttribute("aria-checked", String(isDark()));
+    }
+    const label = document.createElement("span");
+    label.className = "pm-label";
+    label.textContent = row.text;
+    el.append(iconSpan(row.icon), label);
+    if (row.kind === "theme") {
+      const box = document.createElement("span");
+      box.className = "pm-check";
+      box.setAttribute("aria-hidden", "true");
+      el.append(box);
+    } else if (row.kind === "link") {
+      const ext = document.createElement("span");
+      ext.className = "pm-ext";
+      ext.setAttribute("aria-hidden", "true");
+      el.append(ext);
+    } else if (row.key) {
+      const key = document.createElement("kbd");
+      key.className = "pm-key";
+      key.textContent = row.key;
+      el.append(key);
+      el.setAttribute("aria-keyshortcuts", "Control+K Meta+K");
+    }
+    const disabled = command && !isEnabled(command) && row.kind !== "link";
+    if (disabled) {
+      el.setAttribute("aria-disabled", "true");
+      const note = document.createElement("span");
+      note.className = "pm-note";
+      note.textContent = "Not available yet";
+      el.append(note);
+    }
+    el.addEventListener("click", (event) => {
+      if (disabled) { event.preventDefault(); return; }
+      if (row.kind === "link") { hide(); return; } // the link itself opens the new tab (target=_blank, rel=noopener)
+      event.preventDefault();
+      if (keepsOpen(row)) {
+        runCommand(command);
+        el.setAttribute("aria-checked", String(isDark()));
+        renderIcons();
+        return;
+      }
+      hide({ returnFocus: true });
+      row.run ? row.run() : runCommand(command);
+    });
+    return el;
+  }
+  function iconStyleRows() {
+    const labelRow = document.createElement("div");
+    labelRow.className = "pm-label-row";
+    labelRow.setAttribute("aria-hidden", "true");
+    const text = document.createElement("span");
+    text.textContent = "Icon style";
+    labelRow.append(iconSpan("menu-icon-style"), text);
+    const seg = document.createElement("div");
+    seg.className = "pm-seg";
+    seg.setAttribute("role", "group");
+    seg.setAttribute("aria-label", "Icon style");
+    ICON_STYLE_OPTIONS.forEach(([value, name]) => {
+      const option = document.createElement("button");
+      option.type = "button";
+      option.className = "pm-item";
+      option.tabIndex = -1;
+      option.dataset.style = value;
+      option.setAttribute("role", "menuitemradio");
+      option.setAttribute("aria-checked", String(iconStyle === value));
+      option.setAttribute("aria-label", `Icon style: ${name}`);
+      option.textContent = name;
+      option.addEventListener("click", () => {
+        setIconStyle(value);
+        seg.querySelectorAll("[role=menuitemradio]").forEach((o) => o.setAttribute("aria-checked", String(o.dataset.style === value)));
+        option.focus();
+      });
+      seg.append(option);
+    });
+    return [labelRow, seg];
+  }
+  function render() {
+    menu.replaceChildren();
+    const rows = [];
+    PLUS_GROUPS.forEach((group) => {
+      const visible = group.rows.filter((row) => !(row.hideIn === prefix) && !(row.kind === "link" && !donateUrl));
+      if (!visible.length) return;
+      if (menu.childElementCount) {
+        const sep = document.createElement("div");
+        sep.className = "pm-sep";
+        sep.setAttribute("role", "separator");
+        menu.append(sep);
+      }
+      const box = document.createElement("div");
+      box.setAttribute("role", "group");
+      box.setAttribute("aria-label", group.label);
+      visible.forEach((row) => {
+        (row.kind === "icon-style" ? iconStyleRows() : [makeItem(row)]).forEach((node) => {
+          const wrap = document.createElement("div");
+          wrap.className = "pm-row";
+          wrap.setAttribute("role", "none");
+          wrap.append(node);
+          box.append(wrap);
+          rows.push(wrap);
+        });
+      });
+      menu.append(box);
+    });
+    // 15ms stagger, the bottom row (nearest the plus) first.
+    rows.forEach((wrap, index) => wrap.style.setProperty("--r", String(rows.length - 1 - index)));
+    renderIcons();
+  }
+  function focusItem(index) {
+    const list = items();
+    if (list.length) list[(index + list.length) % list.length].focus();
+  }
+  function show({ focus = null } = {}) {
+    if (!open) {
+      Popovers.closeOthers(api);
+      render();
+      open = true;
+      button.setAttribute("aria-expanded", "true");
+    }
+    if (focus !== null) focusItem(focus);
+  }
+  function hide({ returnFocus = false } = {}) {
+    if (!open) return;
+    open = false;
+    button.setAttribute("aria-expanded", "false");
+    if (returnFocus) button.focus();
+  }
+  const api = { isOpen: () => open, show, hide };
+  button.addEventListener("click", (event) => { open ? hide() : show({ focus: event.detail === 0 ? 0 : null }); });
+  button.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowUp") { event.preventDefault(); show({ focus: 0 }); }
+    else if (event.key === "ArrowDown") { event.preventDefault(); show({ focus: -1 }); }
+    else if (event.key === "Escape" && open) { event.preventDefault(); event.stopPropagation(); hide({ returnFocus: true }); }
+  });
+  menu.addEventListener("keydown", (event) => {
+    const list = items();
+    const current = document.activeElement;
+    const index = list.indexOf(current);
+    const inSeg = current?.closest(".pm-seg");
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const down = event.key === "ArrowDown";
+      if (inSeg) {
+        // leave the segmented row as one stop
+        const segItems = [...inSeg.querySelectorAll(".pm-item")];
+        const edge = down ? list.indexOf(segItems[segItems.length - 1]) + 1 : list.indexOf(segItems[0]) - 1;
+        focusItem(edge);
+      } else {
+        let next = index + (down ? 1 : -1);
+        const target = list[(next + list.length) % list.length];
+        const seg = target?.closest(".pm-seg");
+        if (seg) { const checked = seg.querySelector("[aria-checked=true]") || seg.querySelector(".pm-item"); checked.focus(); return; }
+        focusItem(next);
+      }
+    } else if ((event.key === "ArrowLeft" || event.key === "ArrowRight") && inSeg) {
+      event.preventDefault();
+      const segItems = [...inSeg.querySelectorAll(".pm-item")];
+      const i = segItems.indexOf(current) + (event.key === "ArrowRight" ? 1 : -1);
+      segItems[(i + segItems.length) % segItems.length].focus();
+    } else if (event.key === "Home" || event.key === "End") { event.preventDefault(); focusItem(event.key === "Home" ? 0 : -1); }
+    else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); hide({ returnFocus: true }); }
+    else if (event.key === "Tab") hide();
+    else if (event.key.length === 1 && /\S/.test(event.key) && !event.metaKey && !event.ctrlKey && !event.altKey) {
+      const letter = event.key.toLowerCase();
+      const order = [...list.slice(index + 1), ...list.slice(0, index + 1)];
+      const match = order.find((el) => el.textContent.trim().toLowerCase().startsWith(letter));
+      if (match) { event.preventDefault(); match.focus(); }
+    }
+  });
+  document.addEventListener("pointerdown", (event) => { if (open && !menu.contains(event.target) && !button.contains(event.target)) hide(); });
+  return Popovers.register(api);
+}
+const PlusMenus = { intake: createPlusMenu("intake"), agent: createPlusMenu("agent") };
 
 paletteInput.addEventListener("input", () => {
   activeIndex = 0;
@@ -1674,7 +1967,7 @@ function syncStateIcons(slots = document.querySelectorAll("[data-icon-on]")) {
   slots.forEach((slot) => {
     const button = slot.closest("button");
     if (!button) return;
-    const on = button.getAttribute("aria-pressed") === "true" || button.getAttribute("aria-checked") === "true";
+    const on = button.getAttribute("aria-pressed") === "true" || button.getAttribute("aria-checked") === "true" || button.dataset.speaking === "true";
     const disabled = button.getAttribute("aria-disabled") === "true" && slot.dataset.iconDisabled;
     const name = disabled ? slot.dataset.iconDisabled : on ? slot.dataset.iconOn : slot.dataset.iconOff;
     if (name && slot.dataset.icon !== name) { slot.dataset.icon = name; changed = true; }
@@ -1685,7 +1978,7 @@ function syncStateIcons(slots = document.querySelectorAll("[data-icon-on]")) {
   const stateObserver = new MutationObserver(() => syncStateIcons());
   document.querySelectorAll("[data-icon-on]").forEach((slot) => {
     const button = slot.closest("button");
-    if (button) stateObserver.observe(button, { attributes: true, attributeFilter: ["aria-pressed", "aria-checked", "aria-disabled"] });
+    if (button) stateObserver.observe(button, { attributes: true, attributeFilter: ["aria-pressed", "aria-checked", "aria-disabled", "data-speaking"] });
   });
   syncStateIcons();
 }
@@ -2174,6 +2467,7 @@ const CabinetFan = (() => {
     }
   }
   function openFan(items, { focusFirst = true } = {}) {
+    Popovers.closeOthers("cabinet");
     render(items);
     placeFan(Math.min(items.length, CABINET_PAGE));
     open = true;

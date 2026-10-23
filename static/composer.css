@@ -1,0 +1,54 @@
+/* App wiring for glyph/composer-icons.css v2 (loaded right after it). Glyph owns the look; this file only holds what
+ * the app needs on top (composer-icons.md section 9 "For Proto and Forge") plus the Donate row and the toast move. */
+
+/* Notch merges with the real glass bar: fill = the bar's top glass colour (section 9). */
+.prompt-bar.has-cmp { --notch-fill: var(--glass-top); }
+
+/* Multiline bar has a 24px radius (style.css), so the dock row follows it. */
+.intake-stage:has(.prompt-bar.multiline) .dock-row { --cmp-bar-radius: 24px; }
+
+/* Old busy spinner lives on .action-btn::after (style.css); hide the glyph while busy. */
+.action-btn .icon { --accent: currentColor; }
+.action-btn.busy .icon { display: none; }
+
+/* Plus menu rows are built by JS from the command registry (createPlusMenu). Line icons are inline 24-grid SVGs at 16. */
+.pm-item .pm-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pm-item .pm-note { justify-self: end; }
+.pm-group-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+/* Bottom sheet (<=600px) sits above the page and closes on an outside tap. */
+
+/* Donate (DIA_DONATE_URL): links styled like their sibling menu items; hidden while the URL is unset. */
+.dropdown-item[hidden], .pm-row[hidden] { display: none; }
+a.dropdown-item { text-decoration: none; cursor: pointer; }
+.donate-icon { display: inline-flex; width: 18px; height: 18px; flex: none; color: currentColor; }
+.donate-icon svg { width: 18px; height: 18px; }
+.donate-icon .px { width: 16px; height: 16px; image-rendering: pixelated; }
+
+/* "Filed in your cabinet" toast (Glyph nit b): it now sits top-centre, so it slides DOWN 12px into place
+   (cabinet-fan.css's dia-toast-in rises from below and is Glyph-synced, so the override lives here). Fade only when reduced. */
+.toast { animation: dia-toast-drop var(--dia-dur-toast-in, 300ms) var(--dia-ease-toast, ease) both; }
+@keyframes dia-toast-drop { from { opacity: 0; transform: translateY(-12px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .toast { animation-name: dia-toast-fade-only; }
+  @keyframes dia-toast-fade-only { from { opacity: 0; } to { opacity: 1; } }
+}
+
+/* Phones: the plus menu is a fixed bottom sheet (Glyph). The bar's own backdrop-filter / hover transform would make the
+ * bar the sheet's containing block, so on phones the glass moves to a ::before layer behind the bar's content. */
+@media (max-width: 600px) {
+  .prompt-bar.has-cmp {
+    z-index: 0; background: none; box-shadow: none; transform: none;
+    backdrop-filter: none; -webkit-backdrop-filter: none;
+  }
+  .prompt-bar.has-cmp::before {
+    content: ""; position: absolute; inset: -1.5px; z-index: -1; border-radius: inherit; pointer-events: none;
+    background: linear-gradient(135deg, var(--glass-top) 0%, var(--glass-mid) 45%, var(--glass-bot) 100%);
+    backdrop-filter: blur(36px) saturate(200%); -webkit-backdrop-filter: blur(36px) saturate(200%);
+    box-shadow: var(--pill-shadow), inset 0 2px 2px var(--glass-inset), inset 0 -2px 3px var(--glass-mid);
+  }
+  .prompt-bar.has-cmp:is(:hover, :focus-within) { box-shadow: none; transform: none; }
+  .prompt-bar.has-cmp:has(.cmp-plus[aria-expanded="true"]) { z-index: 30; }
+}
+
+/* The composer sits in a centred hero; menu text stays start-aligned (Glyph's "Icon style" label row). */
+.plus-menu { text-align: start; }

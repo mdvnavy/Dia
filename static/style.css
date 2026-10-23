@@ -340,6 +340,12 @@ body[data-agent="open"] .viewport { justify-content: flex-start; }
 .app-tip:focus-within .tip-bubble,
 .app-tip.open .tip-bubble { opacity: 1; visibility: visible; }
 
+/* Phones: centre the bubble under its "i" and let it wrap, so the hidden bubble can't widen the page (on mobile
+ * browsers that overflow grows the layout viewport, which also broke the plus menu's fixed bottom sheet). */
+@media (max-width: 600px) {
+  .tip-bubble { left: 50%; translate: -50% 0; white-space: normal; width: max-content; max-width: min(240px, calc(100vw - 24px)); }
+}
+
 .nav-actions { display: flex; align-items: center; gap: 10px; margin-left: auto; }
 
 /* Takes the slot Tia uses for the signed-in email. */
@@ -530,23 +536,6 @@ body[data-stage="results"] .subtitle { font-size: 15px; margin-bottom: 1.75rem; 
 .action-btn.busy::after { width: 18px; height: 18px; margin: 0; }
 .action-btn:disabled:hover { transform: none; }
 
-.mic-btn {
-  flex: none;
-  width: 40px;
-  height: 40px;
-  padding: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--muted);
-}
-
-.mic-btn:hover { border-color: var(--border); color: var(--text); }
-.mic-btn[aria-pressed="true"] { border-color: var(--good); color: var(--good); }
-.mic-btn svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 
 .actions {
   display: flex;
@@ -1039,7 +1028,8 @@ body.file-dragging #intakeComposer { outline: 2px dashed var(--control-focus); o
 
 /* Toast */
 .toast {
-  position: fixed; left: 50%; bottom: 24px; z-index: 60; translate: -50% 0; /* centring on `translate` so the slideUp toast keyframes (transform) don't fight it */
+  /* Glyph nit: top-centre, 64px below the top (plus the notch inset); centred on `translate` so the toast keyframes (transform) don't fight it. */
+  position: fixed; left: 50%; top: calc(64px + env(safe-area-inset-top, 0px)); bottom: auto; z-index: 60; translate: -50% 0;
   display: flex; align-items: center; gap: 10px; max-width: min(560px, calc(100vw - 32px));
   padding: 10px 10px 10px 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22); font-size: 14px;
@@ -1263,107 +1253,8 @@ html:not([data-theme="light"]) .action-btn {
   --on-accent: #16150f;
 }
 
-/* ==========================================================================
-   Home composer: dictation circle on the far left mirrors the send circle on the right
-   (same .action-btn size, silver accent and hover); send shows an enter/return icon.
-   Both icons follow the Icon style setting (line inline SVG, or 32px pixel sprites).
-   ========================================================================== */
-.prompt-bar.has-mic { padding-left: 12px; }                 /* the mic takes the old 32px text inset */
-.prompt-bar.has-mic .prompt-input { padding-left: 10px; }    /* placeholder keeps clear air after the mic */
-.action-btn .icon { --accent: currentColor; }                 /* line accents read as ink on the silver circle */
-.action-btn .icon svg { width: 20px; height: 20px; }
+/* Composer mic, Run (enter) and the voice-options notch: glyph/composer-icons.css (static/composer-icons.css)
+   plus the app wiring in static/composer.css, both loaded after this file. */
+.action-btn .icon { --accent: currentColor; }
 .action-btn .icon .px { width: 32px; height: 32px; }
 .action-btn.busy .icon { display: none; }
-.dictate-btn[aria-disabled="true"] { opacity: 0.45; cursor: not-allowed; filter: grayscale(1); }
-.dictate-btn[aria-disabled="true"]:hover,
-.dictate-btn[aria-disabled="true"]:focus-visible { transform: none; }
-/* Listening: ink ring + darker silver fill, with a soft pulse only when motion is welcome. */
-.dictate-btn[aria-pressed="true"] {
-  --send-from: #CDD1D6;
-  --send-to: #8E949C;
-  border-color: #16150f;
-  box-shadow: 0 0 0 3px rgba(22, 21, 15, 0.18), inset 0 2px 2px rgba(255, 255, 255, 0.6), inset 0 -2px 3px rgba(0, 0, 0, 0.3);
-}
-html:not([data-theme="light"]) .dictate-btn[aria-pressed="true"] { border-color: #eeeef2; box-shadow: 0 0 0 3px rgba(238, 238, 242, 0.28); }
-@media (prefers-reduced-motion: no-preference) {
-  .dictate-btn[aria-pressed="true"]::before {
-    content: ""; position: absolute; inset: -3px; border-radius: 50%;
-    border: 2px solid rgba(158, 164, 172, 0.9); pointer-events: none;
-    animation: dictate-pulse 1.4s cubic-bezier(0.16, 1, 0.3, 1) infinite;
-  }
-  @keyframes dictate-pulse { from { opacity: 0.9; transform: scale(1); } to { opacity: 0; transform: scale(1.45); } }
-}
-.dictate-btn { position: relative; }
-@media (max-width: 600px) {
-  .prompt-bar.has-mic { padding-left: 8px; }
-  .prompt-bar.has-mic .prompt-input { padding-left: 6px; }
-  .action-btn .icon svg { width: 17px; height: 17px; }
-  .action-btn .icon .px { width: 32px; height: 32px; }
-}
-
-/* ==========================================================================
-   Voice cluster: the composer mic fans out Conversation / Listen / Auto-speak up-right
-   (clear of the tray above-left and of the input). Motion uses the --dia-* tokens from
-   cabinet-fan.css: ~210ms EASE_OUT fade + slight translate, 30ms stagger; reduced motion
-   gets a plain opacity fade. Items mirror the Ask DIA controls' aria-pressed (VoiceCluster).
-   ========================================================================== */
-.voice-cluster { position: relative; flex: none; display: flex; }
-.voice-fan {
-  position: absolute;
-  left: calc(100% + 6px);
-  bottom: calc(100% + 16px);
-  z-index: 30;
-  display: flex;
-  gap: 8px;
-  visibility: hidden;
-  pointer-events: none;
-  transition: visibility 0s linear 240ms;
-}
-.voice-fan.open { visibility: visible; pointer-events: auto; transition-delay: 0s; }
-.voice-fan [hidden] { display: none !important; }
-.voice-item {
-  --send-from: #E6E8EB; --send-to: #B8BDC4; --send-hover-from: #CDD1D6; --send-hover-to: #9EA4AC;
-  width: 40px; height: 40px; padding: 0;
-  display: flex; align-items: center; justify-content: center;
-  border-radius: 50%;
-  border: 1.5px solid rgba(255, 255, 255, 0.7);
-  background: linear-gradient(135deg, var(--send-from) 0%, var(--send-to) 100%);
-  color: #16150f;
-  box-shadow: 0 4px 12px rgba(60, 66, 74, 0.22), inset 0 2px 2px rgba(255, 255, 255, 0.9), inset 0 -2px 3px rgba(60, 66, 74, 0.22);
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity var(--dia-dur-fade-reduced, 120ms) linear, background-color 120ms linear;
-}
-.voice-fan.open .voice-item { opacity: 1; }
-.voice-item .icon { --accent: currentColor; display: flex; }
-.voice-item .icon svg { width: 18px; height: 18px; }
-.voice-item .icon .px { width: 32px; height: 32px; image-rendering: pixelated; }
-.voice-item:hover, .voice-item:focus-visible {
-  background: linear-gradient(135deg, var(--send-hover-from) 0%, var(--send-hover-to) 100%);
-  border-color: #ffffff;
-}
-.voice-item:focus-visible { outline: 2px solid var(--control-focus); outline-offset: 2px; }
-.voice-item[aria-checked="true"] {
-  --send-from: #CDD1D6; --send-to: #8E949C;
-  border-color: #16150f;
-  box-shadow: 0 0 0 3px rgba(22, 21, 15, 0.18), inset 0 2px 2px rgba(255, 255, 255, 0.6), inset 0 -2px 3px rgba(0, 0, 0, 0.3);
-}
-html:not([data-theme="light"]) .voice-item { box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45), inset 0 2px 2px rgba(255, 255, 255, 0.6), inset 0 -2px 3px rgba(0, 0, 0, 0.3); }
-html:not([data-theme="light"]) .voice-item[aria-checked="true"] { border-color: #eeeef2; box-shadow: 0 0 0 3px rgba(238, 238, 242, 0.28); }
-@media (prefers-reduced-motion: no-preference) {
-  .voice-item {
-    transform: translate(-8px, 8px) scale(0.94);
-    transition:
-      opacity 210ms var(--dia-ease-out, cubic-bezier(0.16, 1, 0.3, 1)),
-      transform 210ms var(--dia-ease-out, cubic-bezier(0.16, 1, 0.3, 1));
-    transition-delay: 0s;
-  }
-  .voice-fan.open .voice-item {
-    transform: none;
-    transition-delay: calc(var(--i, 0) * var(--dia-stagger-open, 30ms));
-  }
-}
-@media (max-width: 600px) {
-  .voice-fan { left: calc(100% + 4px); bottom: calc(100% + 12px); gap: 6px; }
-  .voice-item { width: 38px; height: 38px; }
-}

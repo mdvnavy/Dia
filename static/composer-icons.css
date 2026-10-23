@@ -1,0 +1,345 @@
+/* Source: glyph/composer-icons.css (spec: glyph/composer-icons.md), verbatim except the Donate href note
+ * (the link is DIA_DONATE_URL, Ikenna's PayPal link). Loaded after style.css.
+ * App adaptations live in composer.css (loaded after this file). */
+/* DIA composer v2: [+]  textarea  [mic] [⏎ Run], notch on the top edge -> voice options fan, plus -> Actions menu.
+ * Glyph, 2026-10-23 05:30. Behaviour: Proto flows.md v8.8 §2.5 (dictation), §2.6 (layout), §2.6a (fan), §2.7 (plus menu),
+ * §2.8 (Run only with text). Load after style.css and fanout.css (reuses the --dia-* tokens; fallbacks inlined).
+ * Pixel styles also load pixel/pixel-hover.css. Spec + asset table: composer-icons.md.
+ *
+ * Markup (per composer; ids are prefixed per composer: intake* / agent*):
+ *   <div class="prompt-bar composer has-cmp">
+ *     <button class="cmp-notch" type="button" aria-label="Voice options" aria-haspopup="menu"
+ *             aria-expanded="false" aria-controls="agentVoiceFan">
+ *       <span class="icon icon-idle" data-icon="notch" aria-hidden="true"></span>
+ *       <span class="icon icon-open" data-icon="notch-open" aria-hidden="true"></span></button>
+ *     <span class="cmp-tip cmp-tip-notch" role="tooltip">Voice options</span>
+ *     <div class="voice-fan" role="menu" id="agentVoiceFan" aria-label="Voice options">
+ *       <button class="voice-item px-btn" role="menuitemcheckbox" aria-checked="false" tabindex="-1" style="--d:1"
+ *               aria-label="Conversation mode: talk with DIA hands-free">
+ *         <span class="icon icon-idle" data-icon="conversation" aria-hidden="true"></span>
+ *         <span class="voice-label" aria-hidden="true">Conversation mode</span></button>
+ *       <button class="voice-item px-btn" role="menuitem" tabindex="-1" style="--d:0" data-speaking="false"
+ *               aria-label="Listen: read the latest reply aloud">  … listen / listen-stop … label "Listen" ("Stop") </button>
+ *       <button class="voice-item px-btn" role="menuitemcheckbox" aria-checked="false" tabindex="-1" style="--d:1"
+ *               aria-label="Auto-speak replies">  … autospeak-off / autospeak-on … label "Auto-speak" </button>
+ *     </div>
+ *     <button class="action-btn cmp-circle cmp-plus px-btn" type="button" aria-label="Actions" aria-haspopup="menu"
+ *             aria-expanded="false" aria-controls="agentPlusMenu">
+ *       <span class="icon icon-idle" data-icon="plus"></span><span class="icon icon-open" data-icon="plus-open"></span></button>
+ *     <div class="plus-menu" role="menu" id="agentPlusMenu" aria-label="Actions">   (rows: see .pm-* below / composer-icons.md §6)
+ *       … groups Add | Go to | View | Help | Support, then the All commands footer row. Donate is a link:
+ *       <a class="pm-item" role="menuitem" tabindex="-1" href="(DIA_DONATE_URL)" target="_blank" rel="noopener noreferrer"
+ *          aria-label="Donate (opens in a new tab)"><span class="pm-icon">menu-donate</span><span class="pm-label">Donate</span>
+ *          <span class="pm-ext" aria-hidden="true"></span></a>
+ *     <textarea class="prompt-input" …></textarea>
+ *     <button class="action-btn cmp-circle cmp-mic px-btn" type="button" aria-pressed="false" aria-label="Start voice input"
+ *             aria-keyshortcuts="Control+Shift+Space Meta+Shift+Space">  … mic / mic-listening / mic-disabled … </button>
+ *     <span class="cmp-tip cmp-tip-mic" role="tooltip">Start voice input <kbd>⌘/Ctrl</kbd><kbd>Shift</kbd><kbd>Space</kbd></span>
+ *     <span class="cmp-run-slot"><button class="action-btn cmp-circle cmp-enter px-btn" type="button" aria-label="Run" hidden>
+ *       <span class="icon icon-idle" data-icon="enter"></span></button></span>
+ *   </div>
+ * Tab order (DOM): tray, cabinet (dock row) -> notch -> plus -> textarea -> mic -> Run (only when there is text).
+ * Fan and menu rows are tabindex=-1 (roving focus) and visibility:hidden while closed.
+ * Unsupported / unavailable = aria-disabled="true" (NOT disabled): stays focusable, keeps focus ring + note.
+ * No mustard (#DFA81C is drag-over only), no purple, no gradients, no glow.
+ */
+
+/* ---------- tokens ---------- */
+:root {
+  --cmp-circle: 46px;            /* = style.css .action-btn */
+  --cmp-circle-mobile: 38px;     /* = style.css .action-btn at <=600px */
+  --cmp-bar-radius: 35px;        /* = style.css .prompt-bar border-radius (27px <=600px) */
+  --cmp-item: 40px;              /* fan item circle */
+  --cmp-ring: #7C828A;           /* focus ring, both themes */
+  --cmp-listen-ring: #16150f;
+  --cmp-on-bg: #ffffff;          /* checked: white fill */
+  --cmp-on-edge: #16150f;
+  --cmp-dash: #9EA4AC;
+  --cmp-icon-accent: #5f6670;    /* line --accent inside silver circles */
+  --notch-fill: var(--surface, #fdfcfa);
+  --notch-edge: var(--border, #d9d4c9);
+  --notch-chev: #9EA4AC;         /* idle chevron: low contrast */
+  --notch-fill-open: var(--raised, #f0ede6);
+
+  /* motion: fanout.css v4 tokens reused; only the new ones are defined here */
+  --dia-delay-intent: 120ms;     /* notch hover intent (JS) */
+  --dia-delay-grace: 200ms;      /* leave grace for notch + fan (JS) */
+  --dia-dur-pulse: 1.6s;
+  --dia-ease-pulse: ease-in-out;
+  --dia-fan-rise: 8px;
+  --dia-dur-menu-open: 200ms;    /* plus menu */
+  --dia-dur-menu-close: 140ms;
+  --dia-stagger-menu: 15ms;
+  --dia-dur-run-in: 180ms;       /* Run fade + scale 0.9 -> 1 */
+}
+:root:not([data-theme="light"]) {
+  --cmp-listen-ring: #ffffff; --cmp-on-edge: #ffffff; --cmp-dash: #7C828A;
+  --notch-fill: #18181b; --notch-edge: var(--border, #2a2a2e); --notch-chev: #7C828A;
+}
+
+/* ---------- dock row: tray + cabinet start where the bar's corner curve ends ---------- */
+.dock-row { margin: 0 var(--cmp-bar-radius) 10px; }
+
+/* ---------- bar layout ---------- */
+.prompt-bar.has-cmp { position: relative; padding-left: 12px; padding-right: 12px; }   /* was 32 / 12 */
+.prompt-bar.has-cmp .prompt-input { margin-left: 6px; }          /* 12 + 46 plus + 8 gap + 6 = text at 72px */
+.prompt-bar.multiline :is(.cmp-plus, .cmp-mic, .cmp-run-slot) { align-self: flex-end; }
+/* Run's slot is ALWAYS reserved, so the mic never moves and the textarea's right edge always includes the slot. */
+.cmp-run-slot { flex: none; width: var(--cmp-circle); height: var(--cmp-circle); display: grid; place-items: center; }
+.cmp-enter[hidden] { display: none; }
+.cmp-circle { position: relative; }
+.cmp-circle .icon, .voice-item .icon, .cmp-notch .icon { display: grid; place-items: center; }
+.cmp-circle .icon svg { width: 24px; height: 24px; stroke-width: 1.5; }
+.cmp-circle, .voice-item { --accent: var(--cmp-icon-accent); }
+.cmp-circle .px, .voice-item .px { width: 32px; height: 32px; image-rendering: pixelated; }
+
+/* one icon per state */
+.cmp-mic .icon-listening, .cmp-mic .icon-disabled, .voice-item .icon-active, .cmp-plus .icon-open, .cmp-notch .icon-open { display: none; }
+.cmp-mic[aria-pressed="true"] .icon-idle { display: none; }
+.cmp-mic[aria-pressed="true"] .icon-listening { display: grid; }
+.cmp-mic[aria-disabled="true"] :is(.icon-idle, .icon-listening) { display: none; }
+.cmp-mic[aria-disabled="true"] .icon-disabled { display: grid; }
+.voice-item:is([data-speaking="true"], [aria-checked="true"]):has(.icon-active) .icon-idle { display: none; }
+.voice-item:is([data-speaking="true"], [aria-checked="true"]) .icon-active { display: grid; }
+.cmp-notch[aria-expanded="true"] .icon-idle { display: none; }
+.cmp-notch[aria-expanded="true"] .icon-open { display: grid; }
+/* plus: line rotates the + 45deg into an x (same shape as plus-open.svg); pixel swaps to the plus-open sprite */
+.cmp-plus .icon-idle svg { transition: rotate var(--dia-dur-menu-open) var(--dia-ease-out, cubic-bezier(0.16, 1, 0.3, 1)); }
+.cmp-plus[aria-expanded="true"] .icon-idle svg { rotate: 45deg; }
+:root:is([data-icon-style="zelda"], [data-icon-style="dia-pixel"]) .cmp-plus[aria-expanded="true"] .icon-idle { display: none; }
+:root:is([data-icon-style="zelda"], [data-icon-style="dia-pixel"]) .cmp-plus[aria-expanded="true"] .icon-open { display: grid; }
+.cmp-plus[aria-expanded="true"]:not(:hover) { background: #B8BDC4; border-color: #9EA4AC; }   /* pressed-in while open */
+
+/* ---------- focus: visible on every state, including aria-disabled ---------- */
+:is(.cmp-circle, .voice-item, .cmp-notch, .pm-item):focus-visible { outline: 2px solid var(--cmp-ring); outline-offset: 2px; }
+
+/* ---------- Run: hidden when empty; fades + scales in place when text appears ---------- */
+.cmp-enter:not([hidden]) { animation: cmp-run-in var(--dia-dur-run-in) var(--dia-ease-out, cubic-bezier(0.16, 1, 0.3, 1)) both; }
+@keyframes cmp-run-in { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: none; } }
+.cmp-enter .icon { transition: translate var(--dia-dur-lift, 160ms) var(--dia-ease-out, cubic-bezier(0.16, 1, 0.3, 1)); }
+:root:not([data-icon-style="zelda"], [data-icon-style="dia-pixel"]) .cmp-enter:is(:hover, :focus-visible) .icon { translate: -1px 0; }
+
+/* ---------- mic listening (aria-pressed="true") ---------- */
+:root:not([data-icon-style="zelda"], [data-icon-style="dia-pixel"]) .action-btn.cmp-mic[aria-pressed="true"] {
+  background: #16150f; border-color: #16150f; color: #ffffff; --cmp-icon-accent: #A3A9B1; box-shadow: none;
+}
+:root:not([data-theme="light"]):not([data-icon-style="zelda"], [data-icon-style="dia-pixel"]) .action-btn.cmp-mic[aria-pressed="true"] {
+  background: #ffffff; border-color: #ffffff; color: #16150f; --cmp-icon-accent: #5f6670;
+}
+.cmp-mic[aria-pressed="true"]::before {
+  content: ""; position: absolute; inset: -7px; border-radius: 50%;
+  border: 2px solid var(--cmp-listen-ring); pointer-events: none;
+  animation: cmp-pulse var(--dia-dur-pulse) var(--dia-ease-pulse) infinite;
+}
+@keyframes cmp-pulse { 0%, 100% { opacity: 0.2; transform: scale(0.94); } 50% { opacity: 0.75; transform: scale(1.06); } }
+
+/* ---------- aria-disabled ---------- */
+.cmp-circle[aria-disabled="true"], .voice-item[aria-disabled="true"] .icon {
+  cursor: not-allowed; border-style: dashed; border-color: var(--cmp-dash); box-shadow: none; transform: none;
+}
+.voice-item[aria-disabled="true"], .pm-item[aria-disabled="true"] { cursor: not-allowed; }
+.action-btn.cmp-circle[aria-disabled="true"]:hover { transform: none; box-shadow: none; border-color: var(--cmp-dash); }
+.voice-item[aria-disabled="true"] .icon > *, .pm-item[aria-disabled="true"] .pm-icon { opacity: 0.4; }
+.cmp-mic[aria-disabled="true"] .icon { opacity: 0.6; }
+.voice-item[aria-disabled="true"] .voice-label, .pm-item[aria-disabled="true"] .pm-label { color: var(--muted); }
+
+/* ---------- tooltips (hover after intent / focus; never on touch) ---------- */
+.cmp-tip {
+  position: absolute; bottom: calc(100% + 10px); z-index: 5; width: max-content; max-width: 320px;
+  padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface);
+  color: var(--text); font: 500 12px/1.45 var(--sans); box-shadow: var(--shadow-subtle);
+  opacity: 0; visibility: hidden; pointer-events: none;
+  transition: opacity var(--dia-dur-reveal, 160ms) linear, visibility 0s linear var(--dia-dur-reveal, 160ms);
+}
+.cmp-tip kbd { display: inline-block; margin-left: 3px; padding: 0 5px; border: 1px solid var(--border); border-radius: 4px;
+               background: var(--raised); font: 500 11px/18px var(--mono); color: var(--muted); }
+.cmp-tip-mic { right: calc(12px + var(--cmp-circle) + 8px); bottom: calc(100% + 18px); }   /* right-anchored over the mic, clear of the notch */
+.cmp-tip-notch { left: 50%; translate: -50% 0; bottom: calc(100% + 18px); }
+.cmp-mic:is(:hover, :focus-visible) + .cmp-tip, .cmp-notch:is(:hover, :focus-visible) + .cmp-tip {
+  opacity: 1; visibility: visible; transition-delay: var(--dia-delay-intent), 0s;
+}
+.cmp-notch[aria-expanded="true"] + .cmp-tip { opacity: 0; visibility: hidden; }
+
+/* ---------- notch: 36x12 tab centred on the bar's top edge ---------- */
+.cmp-notch {
+  position: absolute; left: 50%; top: -12px; translate: -50% 0; z-index: 2;   /* bottom overlaps the 1.5px top border */
+  width: 36px; height: 12px; padding: 0; border: 0; background: none; color: var(--notch-edge); cursor: pointer;
+  border-radius: 8px 8px 0 0; --accent: var(--notch-chev);
+}
+.cmp-notch .icon svg { width: 36px; height: 12px; display: block; }
+.cmp-notch .px { width: 36px; height: 12px; image-rendering: pixelated; display: block; }   /* 18x6 sprite at 2x */
+.cmp-notch::before { content: ""; position: absolute; inset: -12px -4px 0; }  /* hit area 44x24 (desktop) */
+.cmp-notch:hover { --notch-edge: #9EA4AC; --accent: var(--text); }
+.cmp-notch:focus-visible { --accent: var(--text); }
+.cmp-notch[aria-expanded="true"] { --notch-fill: var(--notch-fill-open); --notch-edge: #9EA4AC; --accent: var(--text); }
+@media (pointer: coarse) { .cmp-notch::before { inset: -28px -4px -4px; } }    /* 44x44 on touch */
+
+/* ---------- voice options fan: centred above the bar, horizontal row ---------- */
+.voice-fan {
+  position: absolute; left: 50%; bottom: calc(100% + 12px + 10px); translate: -50% 0; z-index: 4;
+  display: flex; gap: 4px; padding: 8px 8px 6px; border: 1px solid var(--border); border-radius: 20px;
+  background: var(--surface); box-shadow: var(--shadow-subtle);
+  opacity: 0; visibility: hidden; pointer-events: none;
+  transition: opacity var(--dia-dur-stack-close, 180ms) var(--dia-ease-in, cubic-bezier(0.55, 0, 0.75, 0.2)),
+              visibility 0s linear calc(var(--dia-dur-stack-close, 180ms) + var(--dia-stagger-close, 18ms));
+}
+.cmp-notch[aria-expanded="true"] ~ .voice-fan {
+  opacity: 1; visibility: visible; pointer-events: auto;
+  transition: opacity calc(var(--dia-dur-stack-open, 280ms) * 0.6) var(--dia-ease-out, cubic-bezier(0.16, 1, 0.3, 1)), visibility 0s;
+}
+.voice-item {
+  width: 92px; padding: 2px 2px 4px; display: flex; flex-direction: column; align-items: center; gap: 5px;
+  border: 0; border-radius: 12px; background: none; color: var(--text); cursor: pointer;
+  /* closed: sink 8px, outer items first (18ms stagger) */
+  transform: translateY(var(--dia-fan-rise)); opacity: 0;
+  transition: transform var(--dia-dur-stack-close, 180ms) var(--dia-ease-in, cubic-bezier(0.55, 0, 0.75, 0.2)),
+              opacity var(--dia-dur-stack-close, 180ms) var(--dia-ease-in, cubic-bezier(0.55, 0, 0.75, 0.2));
+  transition-delay: calc((1 - var(--d, 0)) * var(--dia-stagger-close, 18ms));
+}
+.cmp-notch[aria-expanded="true"] ~ .voice-fan .voice-item {
+  /* open: 280ms EASE_OUT, rise 8px, 30ms stagger centre-out (Listen sits over the notch, then its neighbours) */
+  transform: none; opacity: 1;
+  transition-duration: var(--dia-dur-stack-open, 280ms), calc(var(--dia-dur-stack-open, 280ms) * 0.6);
+  transition-timing-function: var(--dia-ease-out, cubic-bezier(0.16, 1, 0.3, 1));
+  transition-delay: calc(var(--d, 0) * var(--dia-stagger-open, 30ms));
+}
+.voice-item .icon {
+  position: relative; width: var(--cmp-item); height: var(--cmp-item); border-radius: 50%;
+  border: 1px solid #B8BDC4; background: #D9DCE0; color: #16150f; transition: background-color 140ms linear, border-color 140ms linear;
+}
+.voice-item:hover:not([aria-disabled="true"]) .icon { background: #CDD1D6; border-color: #9EA4AC; }
+.voice-item .icon svg { width: 20px; height: 20px; stroke-width: 1.5; }
+.voice-label { font: 500 11.5px/1.25 var(--sans); text-align: center; color: var(--text); pointer-events: none; }
+.voice-note { display: block; font-weight: 400; color: var(--muted); }
+/* checked (menuitemcheckbox): white fill + ink edge + check pip. Never mustard, never purple. */
+.voice-item[aria-checked="true"] .icon { background: var(--cmp-on-bg); border: 1.5px solid var(--cmp-on-edge); }
+.voice-item[aria-checked="true"] .icon::after {
+  content: ""; position: absolute; top: -3px; right: -3px; width: 14px; height: 14px; border-radius: 50%;
+  background: #16150f url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 14'%3E%3Cpath d='M3.5 7.2 6 9.5l4.5-5' fill='none' stroke='%23ffffff' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 14px no-repeat;
+}
+:root:not([data-theme="light"]) .voice-item[aria-checked="true"] .icon::after {
+  background: #ffffff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 14'%3E%3Cpath d='M3.5 7.2 6 9.5l4.5-5' fill='none' stroke='%2316150f' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 14px no-repeat;
+}
+
+/* ---------- plus menu (Actions): rises above the plus, left-aligned, 280px ---------- */
+.plus-menu {
+  position: absolute; left: 12px; bottom: calc(100% + 10px); z-index: 4; width: 280px;
+  padding: 6px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface);
+  box-shadow: var(--shadow-subtle);
+  opacity: 0; visibility: hidden; pointer-events: none; transform: translateY(var(--dia-fan-rise));
+  transition: opacity var(--dia-dur-menu-close) var(--dia-ease-in, cubic-bezier(0.55, 0, 0.75, 0.2)),
+              transform var(--dia-dur-menu-close) var(--dia-ease-in, cubic-bezier(0.55, 0, 0.75, 0.2)),
+              visibility 0s linear var(--dia-dur-menu-close);
+}
+.cmp-plus[aria-expanded="true"] + .plus-menu {
+  opacity: 1; visibility: visible; pointer-events: auto; transform: none;
+  transition: opacity calc(var(--dia-dur-menu-open) * 0.7) var(--dia-ease-out, cubic-bezier(0.16, 1, 0.3, 1)),
+              transform var(--dia-dur-menu-open) var(--dia-ease-out, cubic-bezier(0.16, 1, 0.3, 1)), visibility 0s;
+}
+.pm-row { opacity: 0; transform: translateY(4px);
+          transition: opacity var(--dia-dur-menu-close) linear, transform var(--dia-dur-menu-close) linear; }
+.cmp-plus[aria-expanded="true"] + .plus-menu .pm-row {
+  opacity: 1; transform: none;
+  transition: opacity var(--dia-dur-menu-open) var(--dia-ease-out, cubic-bezier(0.16, 1, 0.3, 1)),
+              transform var(--dia-dur-menu-open) var(--dia-ease-out, cubic-bezier(0.16, 1, 0.3, 1));
+  transition-delay: calc(var(--r, 0) * var(--dia-stagger-menu));     /* bottom row (nearest the plus) first */
+}
+.pm-sep { height: 1px; margin: 6px 4px; background: var(--border); }       /* role=separator: 6px gap + hairline + 6px */
+.pm-item {
+  width: 100%; height: 36px; padding: 0 10px; display: grid; grid-template-columns: 16px 1fr auto; align-items: center;
+  column-gap: 10px; border: 0; border-radius: 8px; background: none; color: var(--text); text-align: left;
+  font: 500 13px/1 var(--sans); cursor: pointer;
+}
+.pm-item:focus-visible { outline-offset: -2px; }
+.pm-item:is(:hover, :focus-visible):not([aria-disabled="true"]) { background: var(--raised); }
+.pm-icon { width: 16px; height: 16px; display: grid; place-items: center; --accent: #9EA4AC; }
+.pm-icon svg { width: 16px; height: 16px; stroke-width: 1.5; }          /* 24-grid line icons drawn at 16 */
+.pm-icon .px { width: 16px; height: 16px; image-rendering: pixelated; } /* 16x16 sprites at 1x */
+.pm-key { font: 500 11px/1 var(--mono); color: var(--muted); }
+/* Donate: a real link (<a role="menuitem" href target="_blank" rel="noopener noreferrer">), ↗ in the shortcut slot */
+a.pm-item { text-decoration: none; box-sizing: border-box; }
+.pm-ext { width: 12px; height: 12px; justify-self: end; background: var(--muted);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M4 2.75h5.25V8M9.25 2.75 2.75 9.25' fill='none' stroke='%23000' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 12px no-repeat;
+          mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M4 2.75h5.25V8M9.25 2.75 2.75 9.25' fill='none' stroke='%23000' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 12px no-repeat; }
+.pm-item:is(:hover, :focus-visible) .pm-ext { background: var(--text); }
+.pm-note { font: 400 11px/1 var(--sans); color: var(--muted); }
+/* Theme = menuitemcheckbox "Dark theme": check on the right when on */
+.pm-check { width: 16px; height: 16px; border: 1.5px solid var(--cmp-dash); border-radius: 4px; display: grid; place-items: center; }
+.pm-item[aria-checked="true"] .pm-check { background: var(--text); border-color: var(--text); }
+.pm-item[aria-checked="true"] .pm-check::after { content: ""; width: 7px; height: 4px; margin-top: -2px;
+  border: solid var(--surface); border-width: 0 0 1.5px 1.5px; rotate: -45deg; }
+/* Icon style: small label + an inline segmented row of 3 menuitemradio (not a submenu) */
+.pm-label-row { height: 26px; padding: 0 10px; display: grid; grid-template-columns: 16px 1fr; column-gap: 10px; align-items: center;
+                font: 500 12px/1 var(--sans); color: var(--muted); }
+.pm-seg { margin: 0 6px 4px 36px; padding: 2px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px;
+          border: 1px solid var(--border); border-radius: 9px; background: var(--raised); }
+.pm-seg .pm-item { height: 28px; padding: 0; display: block; text-align: center; font-size: 12px; border-radius: 7px; color: var(--muted); }
+.pm-seg .pm-item[aria-checked="true"] { background: var(--surface); color: var(--text); box-shadow: 0 0 0 1px #9EA4AC; }
+.pm-seg .pm-item:is(:hover, :focus-visible):not([aria-checked="true"]) { background: transparent; color: var(--text); }
+
+/* ---------- pixel styles (Zelda = a-*, Dia pixel = b-* / b-dark-*) ---------- */
+:root[data-icon-style="dia-pixel"]:not([data-theme="light"]) :is(.action-btn.cmp-circle, .voice-item .icon) {
+  background: #1c1c1f; border: 1.5px solid #A3A9B1; box-shadow: none; color: #eeeef2;
+}
+:root[data-icon-style="dia-pixel"]:not([data-theme="light"]) .action-btn.cmp-circle:hover:not([aria-disabled="true"]),
+:root[data-icon-style="dia-pixel"]:not([data-theme="light"]) .voice-item:hover:not([aria-disabled="true"]) .icon { background: #2a2a2e; border-color: #D9DCE0; }
+:root[data-icon-style="dia-pixel"]:not([data-theme="light"]) .cmp-plus[aria-expanded="true"]:not(:hover) { background: #2a2a2e; border-color: #D9DCE0; }
+:root[data-icon-style="dia-pixel"]:not([data-theme="light"]) .voice-item[aria-checked="true"] .icon { background: #4E5258; border: 1.5px solid #ffffff; }
+:root:is([data-icon-style="zelda"], [data-icon-style="dia-pixel"]) :is(.cmp-circle[aria-disabled="true"], .voice-item[aria-disabled="true"] .icon) { border-style: dashed; }
+:root:is([data-icon-style="zelda"], [data-icon-style="dia-pixel"]) .cmp-mic[aria-pressed="true"]::before {
+  border-radius: 50%; animation: cmp-px-pulse var(--dia-dur-pulse) steps(1, end) infinite;
+}
+@keyframes cmp-px-pulse { 0% { inset: -5px; opacity: 1; } 50% { inset: -8px; opacity: 0.45; } }
+/* pixel: same durations / staggers, stepped */
+:root:is([data-icon-style="zelda"], [data-icon-style="dia-pixel"]) :is(.voice-fan, .voice-item, .plus-menu, .pm-row) { transition-timing-function: steps(2, end); }
+:root:is([data-icon-style="zelda"], [data-icon-style="dia-pixel"]) .cmp-notch[aria-expanded="true"] ~ .voice-fan :is(.voice-item),
+:root:is([data-icon-style="zelda"], [data-icon-style="dia-pixel"]) .cmp-notch[aria-expanded="true"] ~ .voice-fan,
+:root:is([data-icon-style="zelda"], [data-icon-style="dia-pixel"]) .cmp-plus[aria-expanded="true"] + .plus-menu,
+:root:is([data-icon-style="zelda"], [data-icon-style="dia-pixel"]) .cmp-plus[aria-expanded="true"] + .plus-menu .pm-row { transition-timing-function: steps(3, end); }
+:root:is([data-icon-style="zelda"], [data-icon-style="dia-pixel"]) .cmp-enter:not([hidden]) { animation-timing-function: steps(2, end); }
+:root:is([data-icon-style="zelda"], [data-icon-style="dia-pixel"]) :is(.cmp-enter .icon, .cmp-plus .icon-idle svg) { transition: none; }
+/* pixel notch: the 18x6 sprite (2x) is outline + chevron only; the fill is the bar surface, clipped to the sprite's
+   pixel staircase so nothing leaks past the outline (Zelda uses one sprite in both themes, so the fill must come from CSS). */
+:root:is([data-icon-style="zelda"], [data-icon-style="dia-pixel"]) .cmp-notch .icon {   /* on the icon, not the button, so the hit area isn't clipped */
+  background: var(--notch-fill);
+  clip-path: polygon(6px 0, 30px 0, 30px 2px, 32px 2px, 32px 4px, 34px 4px, 34px 8px, 36px 8px, 36px 12px,
+                     0 12px, 0 8px, 2px 8px, 2px 4px, 4px 4px, 4px 2px, 6px 2px);
+}
+
+/* ---------- reduced motion: every popover + Run = the drawer's 120ms fade, no rise, no stagger ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .cmp-mic[aria-pressed="true"]::before,
+  :root:is([data-icon-style="zelda"], [data-icon-style="dia-pixel"]) .cmp-mic[aria-pressed="true"]::before {
+    animation: none; inset: -6px; opacity: 1; transform: none;
+  }
+  .voice-fan, .plus-menu, .voice-item, .pm-row,
+  .cmp-notch[aria-expanded="true"] ~ .voice-fan, .cmp-notch[aria-expanded="true"] ~ .voice-fan .voice-item,
+  .cmp-plus[aria-expanded="true"] + .plus-menu, .cmp-plus[aria-expanded="true"] + .plus-menu .pm-row {
+    transform: none !important;
+    transition: opacity var(--dia-dur-fade-reduced, 120ms) linear, visibility 0s linear var(--dia-dur-fade-reduced, 120ms) !important;
+    transition-delay: 0s !important;
+  }
+  .cmp-enter:not([hidden]) { animation: cmp-fade-in var(--dia-dur-fade-reduced, 120ms) linear both; }
+  @keyframes cmp-fade-in { from { opacity: 0; } to { opacity: 1; } }
+  .cmp-enter .icon, .cmp-plus .icon-idle svg, .cmp-tip { transition: none; }
+  .cmp-enter:is(:hover, :focus-visible) .icon { translate: none !important; }
+}
+
+/* ---------- mobile (<=600px): 38px circles, bottom-sheet plus menu ---------- */
+@media (max-width: 600px) {
+  :root { --cmp-bar-radius: 27px; }
+  .prompt-bar.has-cmp { padding-left: 8px; padding-right: 8px; }
+  .prompt-bar.has-cmp .prompt-input { margin-left: 2px; }          /* 8 + 38 + 8 + 2 = text at 56px */
+  .cmp-run-slot { width: var(--cmp-circle-mobile); height: var(--cmp-circle-mobile); }
+  .cmp-circle .icon svg { width: 20px; height: 20px; }
+  .cmp-tip { display: none; }
+  .voice-item { width: 84px; }
+  .plus-menu {                                                     /* bottom sheet */
+    position: fixed; left: 0; right: 0; bottom: 0; width: auto; z-index: 30;
+    padding: 8px 8px calc(12px + env(safe-area-inset-bottom, 0px)); border-radius: 16px 16px 0 0; border-bottom: 0;
+  }
+  .plus-menu::before { content: ""; display: block; width: 36px; height: 4px; margin: 0 auto 8px; border-radius: 2px; background: var(--border); }
+  .pm-item { height: 44px; font-size: 15px; }
+  .pm-seg { margin-left: 6px; }
+  .pm-seg .pm-item { height: 36px; font-size: 13px; }
+}

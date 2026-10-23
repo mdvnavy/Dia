@@ -121,7 +121,13 @@ def render_pdf(result: dict[str, Any], *, report_date: str | None = None) -> byt
         base_url=TEMPLATE_DIR.resolve().as_uri() + "/",
         url_fetcher=_safe_fetcher(),
     )
-    return document.write_pdf()
+    rendered = document.render()
+    # Glyph nit (a): document properties. WeasyPrint writes `generator` as the PDF Creator.
+    client = str((result.get("intake") or {}).get("company_name") or "").strip() or "Client"
+    rendered.metadata.title = f"{client} — Discovery Intake"
+    rendered.metadata.authors = ["Bash Systems"]
+    rendered.metadata.generator = "Discovery Intake Agent"
+    return rendered.write_pdf()
 
 
 def pdf_filename(result: dict[str, Any]) -> str:

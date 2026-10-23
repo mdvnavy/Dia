@@ -311,7 +311,7 @@
   to   { opacity: 1; transform: none; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .cabinet-list > li.is-new { animation-name: cabinet-reveal-fade; }
+  .cabinet-list > li.is-new { animation-name: cabinet-reveal-fade; animation-duration: var(--dia-dur-fade-reduced); animation-delay: 0ms; } /* joins drawer fade: 120ms, no rise, no stagger */
   @keyframes cabinet-reveal-fade { from { opacity: 0; } to { opacity: 1; } }
 }
 
