@@ -126,17 +126,28 @@ a.dropdown-item { text-decoration: none; cursor: pointer; }
 .has-cmp .voice-label { font-size: 12px; line-height: 1; text-align: start; }
 .has-cmp .voice-note { display: inline; margin-left: 4px; }
 .has-cmp .voice-note::before { content: "· "; }
+/* Phones: icon-only (each item keeps its aria-label; labels were aria-hidden already), 36px targets, so the panel is
+   ~120px wide and sits between the tray and cabinet buttons instead of over their tops. Same height budget (44px). */
 @media (max-width: 600px) {
-  .has-cmp .voice-item { width: auto; padding-right: 9px; gap: 5px; }
-  .has-cmp .voice-label { font-size: 11.5px; }
+  .has-cmp .voice-fan { gap: 2px; padding: 4px; border-radius: 22px; }
+  .has-cmp .voice-item { width: 36px; height: 36px; padding: 0; gap: 0; justify-content: center; border-radius: 18px; }
+  .has-cmp .voice-label { display: none; }
   .has-cmp .voice-item .icon svg { width: 16px; height: 16px; }
 }
 .intake-stage #status { transition: translate 120ms linear; }
 .intake-stage:has(#intakeVoiceNotch[aria-expanded="true"]) #status {
   translate: 0 -22px; transition: translate var(--dia-dur-run-in, 180ms) var(--dia-ease-out, cubic-bezier(0.16, 1, 0.3, 1));
 }
+/* Ask DIA: same idea as the landing status line. The heading sits 52px above the bar and, while the panel is open,
+   slides up 38px into the stage's 56px top margin, so the panel never covers "Ask DIA" or its badge. */
+.agent:has(> h2 + .prompt-bar.has-cmp) { margin-top: 56px; }   /* was 40px: room for the slide, ~18px air kept above */
+.agent > h2:has(+ .prompt-bar.has-cmp) { transition: translate 120ms linear; }
+.agent:has(#agentVoiceNotch[aria-expanded="true"]) > h2 {
+  translate: 0 -38px; transition: translate var(--dia-dur-run-in, 180ms) var(--dia-ease-out, cubic-bezier(0.16, 1, 0.3, 1));
+}
 @media (prefers-reduced-motion: reduce) {
-  .intake-stage #status, .intake-stage:has(#intakeVoiceNotch[aria-expanded="true"]) #status { transition: none; }
+  .intake-stage #status, .intake-stage:has(#intakeVoiceNotch[aria-expanded="true"]) #status,
+  .agent > h2, .agent:has(#agentVoiceNotch[aria-expanded="true"]) > h2 { transition: none; }
 }
 
 /* Clean close (no faint "shadow" left behind): the fan goes hidden in one short 120ms fade, then visibility,
@@ -187,7 +198,7 @@ a.dropdown-item { text-decoration: none; cursor: pointer; }
    the circles read larger than in light. Same geometry as light (0 4px 12px), dark-theme ink. Light is untouched. */
 html:not([data-theme="light"]) .action-btn.cmp-circle:not(:hover, :focus-visible, [aria-disabled="true"]) { box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45), inset 0 2px 2px rgba(255, 255, 255, 0.6), inset 0 -2px 3px rgba(0, 0, 0, 0.3); }
 /* Ask DIA: the floating handle needs clear air under the heading's badge. */
-.agent > h2 + .prompt-bar.has-cmp { margin-top: 34px; }
+.agent > h2 + .prompt-bar.has-cmp { margin-top: 52px; }
 
 /* Plus menu viewport guard (createPlusMenu placeMenu, Glyph review): flipped below the bar when there's more room
    there; otherwise it opens upward with its top clamped 8px below the 52px letterhead band and its height capped at

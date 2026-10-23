@@ -319,6 +319,57 @@ def test_open_voice_panel_leaves_status_and_description_uncovered(open_page, the
     p.mouse.move(2, 2)
 
 
+RECT = "e => { const r = e.getBoundingClientRect(); return {x: r.x, y: r.y, r: r.right, b: r.bottom, w: r.width, h: r.height}; }"
+
+
+@pytest.mark.parametrize("theme", ["light", "dark"])
+def test_open_voice_panel_clears_the_tray_and_cabinet_buttons_at_390(open_page, theme):
+    """Bash/Ikenna: at 390 the open panel stays between the dock buttons, inside the bar, off the status line."""
+    p = open_page(theme=theme, width=390, height=844)
+    p.click("#intakeVoiceNotch")
+    p.wait_for_function("getComputedStyle(document.querySelector('#intakeVoiceFan')).opacity === '1'")
+    p.wait_for_timeout(400)
+    fan, bar = p.eval_on_selector("#intakeVoiceFan", RECT), p.eval_on_selector("#intakeComposer", RECT)
+    for dock in ("#trayButton", "#cabinetButton"):
+        assert p.is_visible(dock)
+        assert not _overlaps(fan, p.eval_on_selector(dock, RECT)), (dock, fan)
+    assert fan["x"] >= bar["x"] and fan["r"] <= bar["r"], (fan, bar)
+    layout = p.evaluate(LAYOUT)
+    assert not _overlaps(layout["fan"], layout["status"]) and not _overlaps(layout["fan"], layout["lastLine"]), layout
+    # Icon-only, but every action still has its accessible name; targets stay 36px.
+    items = p.eval_on_selector_all("#intakeVoiceFan .voice-item", "els => els.map(e => [e.getAttribute('aria-label'), Math.round(e.getBoundingClientRect().width), Math.round(e.getBoundingClientRect().height)])")
+    assert len(items) == 3 and all(label and w >= 36 and h >= 36 for label, w, h in items), items
+    p.click("#intakeVoiceNotch")
+
+
+@pytest.mark.parametrize("theme", ["light", "dark"])
+@pytest.mark.parametrize("width,height", [(1280, 800), (390, 844)])
+def test_open_ask_dia_voice_panel_leaves_the_heading_uncovered(open_page, theme, width, height):
+    """Bash/Ikenna: the Ask DIA panel never covers that composer's heading (the heading slides up, like the status)."""
+    p = open_page(theme=theme, width=width, height=height)
+    p.evaluate("() => document.querySelector('.dropdown-item[data-command=\"ask\"]')?.click() || (document.body.dataset.agent = 'open')")
+    p.wait_for_selector("#agentVoiceNotch", state="visible")
+    p.eval_on_selector("#agentVoiceNotch", "e => e.scrollIntoView({block: 'center'})")
+    gap = "() => document.querySelector('#agentComposer').getBoundingClientRect().top - document.querySelector('#agentStage > h2').getBoundingClientRect().top"
+    closed_gap = p.evaluate(gap)   # measured against the bar: the page may scroll while the notch takes focus
+    p.click("#agentVoiceNotch")
+    p.wait_for_function("getComputedStyle(document.querySelector('#agentVoiceFan')).opacity === '1'")
+    p.wait_for_timeout(400)
+    fan, notch = p.eval_on_selector("#agentVoiceFan", RECT), p.eval_on_selector("#agentVoiceNotch", RECT)
+    h2, badge = p.eval_on_selector("#agentStage > h2", RECT), p.eval_on_selector("#agentStatus", RECT)
+    above = p.eval_on_selector(".intake-stage > .prompt-callout", RECT)
+    assert not _overlaps(fan, h2) and not _overlaps(fan, badge), (fan, h2)
+    assert h2["y"] >= above["b"] + 12, (h2, above)              # the slide stays in the stage's top margin, with air
+    assert notch["y"] - fan["b"] >= 10 and fan["x"] >= 0 and fan["r"] <= width, (fan, notch)
+    assert p.eval_on_selector("#agentStage > h2", "e => +getComputedStyle(e).opacity") == 1
+    p.keyboard.press("Escape")
+    p.mouse.move(2, 2)
+    assert p.get_attribute("#agentVoiceNotch", "aria-expanded") == "false"
+    p.wait_for_timeout(400)
+    p.wait_for_function("getComputedStyle(document.querySelector('#agentStage > h2')).translate === 'none'")
+    assert abs(p.evaluate(gap) - closed_gap) <= 2   # back in place (the bar keeps its 2px focus lift)
+
+
 def _hex(value):
     value = value.lstrip("#")
     return tuple(int(value[i:i + 2], 16) for i in (0, 2, 4))
