@@ -1,24 +1,25 @@
-"""Google Sign-In owner sessions, client identification and burst limiting.
+"""Google Sign-In sessions, the Ask DIA kill switch, and burst limiting.
 
-Interim policy for ``/api/agent`` (see ``agent_quota`` for the daily cap):
+Access policy (lockdown v2, Ikenna 2026-10-23: "No use without signing in"):
 
-* **Visitors** use Ask DIA anonymously, capped per calendar day by
-  ``agent_quota`` and by a short per-IP burst guard (``DIA_AGENT_RATE_LIMIT``,
-  default ``10/60``) that keeps scripted clients off the quota store.
-* **Owners** sign in with Google. The browser gets a Google ID token from
-  Google Identity Services and POSTs it once to ``/api/auth/session``. The
-  server verifies it (signature, ``aud`` = ``GOOGLE_CLIENT_ID``, ``iss``,
-  ``exp``, ``email_verified``) and sets a 12-hour HttpOnly session cookie
-  signed with ``DIA_SESSION_SECRET``. Emails in ``OWNER_EMAILS`` (comma list,
-  case-insensitive) are unlimited and skip the burst guard; any other
-  signed-in account is treated exactly like an anonymous visitor.
+* **Signed-out visitors** may read the public pages (landing, How it works,
+  static assets, ``/api/config``, health) and nothing else. Every functional
+  route answers ``401 {"error": "sign_in_required"}`` before doing any work.
+* **Signing in**: the browser gets a Google ID token from Google Identity
+  Services and POSTs it once to ``/api/auth/session``. The server verifies it
+  (signature, ``aud`` = ``GOOGLE_CLIENT_ID``, ``iss``, ``exp``,
+  ``email_verified``) and sets a short-lived HttpOnly session cookie, signed
+  with ``DIA_SESSION_SECRET`` and bound to the token's ``sub``.
+* **Identity** for quotas is the verified ``sub`` carried in the signed
+  cookie. Nothing else the client sends (body fields, headers, other cookies,
+  localStorage) is ever used to identify a user or an owner.
+* **Owners** are the comma-separated ``OWNER_EMAILS`` (trimmed, lowercased),
+  matched only against the verified token's email with ``email_verified``
+  true. Owners are uncapped. Owner status is re-derived on every request.
 
-Owner status is re-derived from ``OWNER_EMAILS`` on every request, so removing
-an address takes effect immediately; the cookie only carries the verified
-email. Sign-in is offered only when both ``GOOGLE_CLIENT_ID`` and a
-``DIA_SESSION_SECRET`` of at least ``MIN_SESSION_SECRET_LENGTH`` characters
-are set; otherwise the button is hidden and everyone gets the visitor cap.
-Neither the ID token nor the secret is ever logged or echoed.
+Replaying a raw ID token at ``/api/auth/session`` just mints another session
+for the same ``sub``, which shares the same quota, so a replay buys nothing.
+Neither the ID token nor any secret is ever logged or echoed.
 """
 
 from __future__ import annotations
@@ -37,14 +38,19 @@ from typing import Any, Callable, Mapping
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_RATE_LIMIT = "10/60"
 GOOGLE_ISSUERS = ("accounts.google.com", "https://accounts.google.com")
 SESSION_COOKIE = "dia_session"
-SESSION_TTL_SECONDS = 12 * 60 * 60
-SESSION_VERSION = "v1"
+DEFAULT_SESSION_TTL_SECONDS = 2 * 60 * 60
+MIN_SESSION_TTL_SECONDS = 5 * 60
+MAX_SESSION_TTL_SECONDS = 12 * 60 * 60
+SESSION_VERSION = "v2"
 MIN_SESSION_SECRET_LENGTH = 32
 # Leeway for clock skew between this instance and Google when checking exp.
 CLOCK_SKEW_SECONDS = 60
+_TRUE = frozenset({"1", "true", "yes", "on"})
+
+SIGN_IN_REQUIRED = "sign_in_required"
+SIGN_IN_MESSAGE = "Sign in with Google to use DIA."
 
 
 # --- kill switch ---------------------------------------------------------------
@@ -53,27 +59,17 @@ ASK_DIA_UNAVAILABLE_MESSAGE = (
     "Ask DIA is temporarily unavailable. The intake tools still work, "
     "so you can keep going and try Ask DIA again later."
 )
-ASK_DIA_RETRY_AFTER_SECONDS = 300
-_ENABLED_VALUES = frozenset({"1", "true", "yes", "on"})
-_DISABLED_VALUES = frozenset({"0", "false", "no", "off"})
+ASK_DIA_RETRY_AFTER_SECONDS = 3600
 
 
 def ask_dia_enabled() -> bool:
-    """``ASK_DIA_ENABLED`` kill switch for ``/api/agent`` (unset = enabled).
+    """``ASK_DIA_ENABLED`` kill switch for ``/api/agent``: OFF unless explicitly on.
 
-    Explicit falsy values switch Ask DIA off for everyone, owners included.
-    An unrecognised value (a typo such as ``flase``) also switches it off, so
-    a mistyped kill switch fails closed rather than leaving the endpoint open.
+    Same semantics as hotfix/ask-dia-off: only ``1``/``true``/``yes``/``on``
+    (any case) enable Ask DIA. Unset, empty, ``false`` or a typo all leave it
+    off, for owners too, so the switch always fails closed.
     """
-    raw = os.environ.get("ASK_DIA_ENABLED")
-    if raw is None or not raw.strip():
-        return True
-    value = raw.strip().lower()
-    if value in _ENABLED_VALUES:
-        return True
-    if value not in _DISABLED_VALUES:
-        logger.warning("unrecognised ASK_DIA_ENABLED value; treating Ask DIA as disabled")
-    return False
+    return os.environ.get("ASK_DIA_ENABLED", "").strip().lower() in _TRUE
 
 
 class SignInError(ValueError):
@@ -90,12 +86,9 @@ def google_client_id() -> str:
 
 
 def owner_emails() -> frozenset[str]:
+    """``OWNER_EMAILS``: comma-separated, trimmed and lowercased."""
     raw = os.environ.get("OWNER_EMAILS", "")
     return frozenset(part.strip().lower() for part in raw.split(",") if part.strip())
-
-
-def is_owner_email(email: str | None) -> bool:
-    return bool(email) and email.strip().lower() in owner_emails()
 
 
 def session_secret() -> bytes:
@@ -109,13 +102,34 @@ def session_secret() -> bytes:
     return secret.encode("utf-8")
 
 
+def session_ttl_seconds() -> int:
+    raw = os.environ.get("DIA_SESSION_TTL_SECONDS", "").strip()
+    try:
+        value = int(raw) if raw else DEFAULT_SESSION_TTL_SECONDS
+    except ValueError:
+        value = DEFAULT_SESSION_TTL_SECONDS
+    return max(MIN_SESSION_TTL_SECONDS, min(MAX_SESSION_TTL_SECONDS, value))
+
+
 def sign_in_enabled() -> bool:
     return bool(google_client_id() and session_secret())
 
 
 def configured_mode() -> str:
-    """``google`` when Google sign-in is fully configured, else ``visitors-only``."""
-    return "google" if sign_in_enabled() else "visitors-only"
+    """``google`` when Google sign-in is fully configured, else ``unconfigured``."""
+    return "google" if sign_in_enabled() else "unconfigured"
+
+
+def local_dev_open() -> bool:
+    """``DIA_LOCAL_DEV_NO_SIGN_IN``: local development / test escape hatch.
+
+    Lets a developer run DIA on their own machine without a Google OAuth
+    client. It is **ignored on Cloud Run** (``K_SERVICE`` set), so it can never
+    open the live service, and it is a server env var, so no client can set it.
+    """
+    if os.environ.get("K_SERVICE"):
+        return False
+    return os.environ.get("DIA_LOCAL_DEV_NO_SIGN_IN", "").strip().lower() in _TRUE
 
 
 # --- Google ID token verification ----------------------------------------------
@@ -140,6 +154,32 @@ class GoogleIdentity:
     email: str
     sub: str
     name: str = ""
+    email_verified: bool = True
+
+
+@dataclass(frozen=True)
+class Identity:
+    """Who is making this request, derived only from the signed session."""
+
+    sub: str
+    email: str
+    email_verified: bool
+    local_dev: bool = False
+
+    @property
+    def owner(self) -> bool:
+        return is_owner_identity(self)
+
+    @property
+    def uncapped(self) -> bool:
+        return self.local_dev or self.owner
+
+
+def is_owner_identity(identity: "Identity | GoogleIdentity | None") -> bool:
+    if identity is None or not getattr(identity, "email_verified", False):
+        return False
+    email = (identity.email or "").strip().lower()
+    return bool(email) and email in owner_emails()
 
 
 def verify_google_credential(
@@ -207,17 +247,25 @@ def make_session(identity: GoogleIdentity, *, now: Callable[[], float] = time.ti
     issued = int(now())
     body = _b64(
         json.dumps(
-            {"e": identity.email, "s": identity.sub, "iat": issued, "exp": issued + SESSION_TTL_SECONDS},
+            {
+                "s": identity.sub,
+                "e": identity.email,
+                "v": bool(identity.email_verified),
+                "aud": google_client_id(),
+                "iat": issued,
+                "exp": issued + session_ttl_seconds(),
+            },
             separators=(",", ":"),
         ).encode("utf-8")
     )
     return f"{SESSION_VERSION}.{body}.{_mac(secret, body)}"
 
 
-def read_session(value: str | None, *, now: Callable[[], float] = time.time) -> str | None:
-    """Return the signed-in email for a valid, unexpired session cookie value."""
+def read_session(value: str | None, *, now: Callable[[], float] = time.time) -> Identity | None:
+    """Return the identity for a valid, unexpired, untampered session cookie."""
     secret = session_secret()
-    if not value or not secret or not google_client_id():
+    client_id = google_client_id()
+    if not value or not secret or not client_id or len(value) > 4096:
         return None
     try:
         version, body, mac = value.split(".")
@@ -227,19 +275,29 @@ def read_session(value: str | None, *, now: Callable[[], float] = time.time) -> 
         return None
     try:
         data = json.loads(_unb64(body))
-        if not isinstance(data, dict) or int(data.get("exp", 0)) <= now():
+        if not isinstance(data, dict):
             return None
+        if int(data.get("exp", 0)) <= now():
+            return None
+        # A session minted for another OAuth client (or before a client ID
+        # rotation) is not accepted.
+        if data.get("aud") != client_id:
+            return None
+        sub = str(data.get("s") or "")
         email = str(data.get("e") or "").strip().lower()
+        verified = data.get("v") is True
     except (ValueError, TypeError):
         return None
-    return email or None
+    if not sub:
+        return None
+    return Identity(sub=sub, email=email, email_verified=verified)
 
 
 def session_cookie_header(value: str, secure: bool) -> str:
     parts = [
         f"{SESSION_COOKIE}={value}",
         "Path=/",
-        f"Max-Age={SESSION_TTL_SECONDS}",
+        f"Max-Age={session_ttl_seconds()}",
         "HttpOnly",
         "SameSite=Lax",
     ]
@@ -255,14 +313,32 @@ def clear_session_cookie_header(secure: bool) -> str:
     return "; ".join(parts)
 
 
-def session_email(headers: Mapping[str, str]) -> str | None:
-    from agent_quota import parse_cookie
+def parse_cookie(header: str | None, name: str) -> str | None:
+    if not header:
+        return None
+    for part in header.split(";"):
+        key, _, value = part.strip().partition("=")
+        if key == name:
+            return value.strip() or None
+    return None
 
-    return read_session(parse_cookie(headers.get("Cookie"), SESSION_COOKIE))
+
+LOCAL_DEV_IDENTITY = Identity(sub="local-dev", email="", email_verified=False, local_dev=True)
 
 
-def is_owner(headers: Mapping[str, str]) -> bool:
-    return is_owner_email(session_email(headers))
+def request_identity(headers: Mapping[str, str]) -> Identity | None:
+    """The caller's identity: the signed session cookie, else None.
+
+    With ``DIA_LOCAL_DEV_NO_SIGN_IN`` (never on Cloud Run) a request without a
+    valid session is treated as an uncapped local developer.
+    """
+    identity = read_session(parse_cookie(headers.get("Cookie"), SESSION_COOKIE))
+    if identity is None and local_dev_open():
+        return LOCAL_DEV_IDENTITY
+    return identity
+
+
+# --- client IP (for the sign-in burst guard only) -------------------------------
 
 
 def _on_cloud_run() -> bool:
@@ -270,17 +346,17 @@ def _on_cloud_run() -> bool:
 
 
 def client_ip(headers: Mapping[str, str], peer_ip: str) -> str:
-    """Best-effort client IP for limits.
+    """Best-effort client IP.
 
-    On Cloud Run the socket peer is Google's front end, and the real client is
-    the *right-most* ``X-Forwarded-For`` entry (Google appends the address it
-    saw; anything to the left was supplied by the client and can be forged).
-    Off Cloud Run, the socket peer is used unless ``DIA_TRUST_FORWARDED_FOR``
-    is set (e.g. behind your own proxy).
+    On Cloud Run the socket peer is Google's front end, which *appends* the
+    address it saw to ``X-Forwarded-For``. Everything to the left of that last
+    entry came from the client and can be forged, so only the **right-most**
+    entry is used. Off Cloud Run, the socket peer is used unless
+    ``DIA_TRUST_FORWARDED_FOR`` is set (e.g. behind your own proxy).
     """
     trust = _on_cloud_run() or os.environ.get(
         "DIA_TRUST_FORWARDED_FOR", ""
-    ).strip().lower() in {"1", "true", "yes", "on"}
+    ).strip().lower() in _TRUE
     if trust:
         forwarded = [
             part.strip()
@@ -292,10 +368,32 @@ def client_ip(headers: Mapping[str, str], peer_ip: str) -> str:
     return peer_ip
 
 
-def _parse_rate_limit(raw: str) -> tuple[int, float]:
-    raw = (raw or DEFAULT_RATE_LIMIT).strip()
+def hashed_ip(ip: str) -> str:
+    """Salted (``DIA_VISITOR_SALT``) hash of an IP, so raw IPs are never stored."""
+    import ipaddress
+
     try:
-        if raw in {"0", "off", "none"}:
+        address = ipaddress.ip_address(ip.strip())
+        if isinstance(address, ipaddress.IPv6Address):
+            # One subscriber usually owns a whole /64.
+            ip = (
+                str(address.ipv4_mapped)
+                if address.ipv4_mapped
+                else str(ipaddress.ip_network(f"{address}/64", strict=False))
+            )
+    except ValueError:
+        ip = ip.strip() or "unknown"
+    salt = (os.environ.get("DIA_VISITOR_SALT", "") or "dia-visitor-v1").encode("utf-8")
+    return "ip:" + hmac.new(salt, f"ip:{ip}".encode("utf-8"), hashlib.sha256).hexdigest()[:32]
+
+
+# --- burst limiting -------------------------------------------------------------
+
+
+def parse_rate_limit(raw: str, default: str) -> tuple[int, float]:
+    raw = (raw or default).strip()
+    try:
+        if raw.lower() in {"0", "off", "none"}:
             return 0, 0.0
         count, _, window = raw.partition("/")
         limit = int(count)
@@ -304,23 +402,34 @@ def _parse_rate_limit(raw: str) -> tuple[int, float]:
             raise ValueError
         return limit, seconds
     except ValueError:
-        logger.warning("invalid DIA_AGENT_RATE_LIMIT %r; using %s", raw, DEFAULT_RATE_LIMIT)
-        return _parse_rate_limit(DEFAULT_RATE_LIMIT)
+        logger.warning("invalid rate limit %r; using %s", raw, default)
+        return parse_rate_limit(default, default)
 
 
 class RateLimiter:
-    """Thread-safe in-memory sliding-window burst guard keyed by client IP."""
+    """Thread-safe in-memory sliding-window burst guard.
+
+    ``env`` names the variable holding ``count/seconds`` (``0``/``off``
+    disables it); ``default`` applies when it is unset.
+    """
 
     MAX_KEYS = 10_000
 
-    def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
+    def __init__(
+        self,
+        env: str = "DIA_BURST_LIMIT",
+        default: str = "3/10",
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._env = env
+        self._default = default
         self._clock = clock
         self._hits: dict[str, deque[float]] = {}
         self._lock = threading.Lock()
 
     def check(self, key: str) -> tuple[bool, int]:
         """Record a hit; return (allowed, retry_after_seconds)."""
-        limit, window = _parse_rate_limit(os.environ.get("DIA_AGENT_RATE_LIMIT", ""))
+        limit, window = parse_rate_limit(os.environ.get(self._env, ""), self._default)
         if limit == 0:
             return True, 0
         now = self._clock()
@@ -345,4 +454,15 @@ class RateLimiter:
             self._hits.clear()
 
 
-agent_rate_limiter = RateLimiter()
+# Per-user burst guards (keyed on the verified sub), one per bucket, so a burst
+# of generations doesn't block an Ask DIA question and vice versa.
+generation_burst = RateLimiter("DIA_BURST_LIMIT", "3/10")
+ask_burst = RateLimiter("DIA_BURST_LIMIT", "3/10")
+utility_burst = RateLimiter("DIA_UTILITY_BURST_LIMIT", "10/10")
+# Sign-in attempts: keyed on the salted IP hash (each may fetch Google certs).
+auth_burst = RateLimiter("DIA_AUTH_RATE_LIMIT", "10/60")
+
+
+def reset_limiters() -> None:
+    for limiter in (generation_burst, ask_burst, utility_burst, auth_burst):
+        limiter.reset()
