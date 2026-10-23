@@ -1307,3 +1307,7 @@ html[data-assistant="expert"] body:not([data-agent="open"]) .agent { display: no
 .score-card .score-delta { margin-top: 4px; font: 400 13px var(--sans); letter-spacing: 0; text-transform: none; }
 /* v1.1.2: while the cabinet drawer is open, the toast (Remove's Undo) lives inside it, pinned to its bottom edge. */
 .drawer > .toast { left: 16px; right: 16px; top: auto; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); translate: none; max-width: none; }
+/* Remove: the card collapses at once (the grid gap goes with it); reduced motion skips the collapse in JS. */
+.drawer-card.is-removing { overflow: hidden; opacity: 0; margin-top: -10px; pointer-events: none;
+  transition: height 180ms ease, opacity 120ms linear, margin-top 180ms ease; }
+@media (prefers-reduced-motion: reduce) { .drawer-card.is-removing { transition: none; } }

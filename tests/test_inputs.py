@@ -760,13 +760,127 @@ def test_card_rerun_accessible_name_includes_the_title_and_remove_keeps_undo(con
     assert rerun.count() == 1 and rerun.inner_text() == "Re-run"
     remove = page.get_by_role("button", name=f"Remove {title}", exact=True)
     assert remove.count() == 1
-    # Remove is unchanged: it removes, then confirms with an Undo toast that restores the card.
+    # Remove still confirms with an Undo toast that restores the card.
     remove.click()
     page.wait_for_selector("#toast:not([hidden])")
     assert page.inner_text("#toastText") == f"Removed “{title}”"
-    assert cabinet(page) == []
+    assert page.evaluate("readCabinet().length") == 0
     page.locator("#toastActions button", has_text="Undo").click()
-    assert [item["title"] for item in cabinet(page)] == [title]
+    assert [item["title"] for item in cabinet(page)] == [title] and page.evaluate("readCabinet().length") == 1
     page.evaluate("() => CabinetDrawer.open()")
     assert page.get_by_role("button", name=f"Re-run {title} with updated answers", exact=True).count() == 1
     assert page.errors == []
+
+
+# --- Remove: the card and the count go at once; storage follows when the toast expires --------------------------
+
+def _seed_three(context):
+    v1 = [_entry(1, "2026-10-20T10:00:00Z"), _entry(2, "2026-10-21T10:00:00Z"), _entry(3, "2026-10-22T10:00:00Z")]
+    context.add_init_script(
+        f"if (!sessionStorage.getItem('seeded')) {{ sessionStorage.setItem('seeded', '1');"
+        f" sessionStorage.setItem('dia-cabinet-v1', {json.dumps(json.dumps(v1))}); }}")
+
+
+def _shown(page):  # cards a user can see (a collapsing card is aria-hidden and inert)
+    return page.evaluate("""() => [...document.querySelectorAll('#cabinetList > li')]
+        .filter((li) => !li.classList.contains('is-removing') && !li.inert).map((li) => li.dataset.id)""")
+
+
+def _remove_now(page, card_id):  # clicks Remove and reads the drawer in the same task, before any animation frame
+    return page.evaluate("""id => {
+        const button = [...document.querySelectorAll('#cabinetList > li')].find((li) => li.dataset.id === id).querySelector('.card-remove');
+        button.focus();  // as a real click or keypress would
+        button.click();
+        return { summary: document.querySelector('#cabinetSummary').textContent,
+                 empty: !document.querySelector('#cabinetEmpty').hidden,
+                 inDom: [...document.querySelectorAll('#cabinetList > li')].map((li) => li.dataset.id),
+                 shown: [...document.querySelectorAll('#cabinetList > li')].filter((li) => !li.inert).map((li) => li.dataset.id),
+                 collapsing: [...document.querySelectorAll('#cabinetList > li.is-removing')].map((li) => li.dataset.id) };
+    }""", card_id)
+
+
+def test_remove_collapses_the_card_and_updates_the_count_at_once_and_undo_restores_both(context, base_url):
+    _seed_three(context)
+    page = open_page(context, base_url)
+    page.emulate_media(reduced_motion="no-preference")
+    page.evaluate("() => CabinetDrawer.open()")
+    assert _shown(page) == ["old-3", "old-2", "old-1"] and page.inner_text("#cabinetSummary") == "3 intakes"
+    now = _remove_now(page, "old-2")
+    assert now["summary"] == "2 intakes" and now["shown"] == ["old-3", "old-1"] and now["collapsing"] == ["old-2"]
+    assert page.evaluate("document.activeElement.closest('li')?.dataset.id") == "old-1"  # focus moves on, not lost
+    page.wait_for_function("![...document.querySelectorAll('#cabinetList > li')].some((li) => li.dataset.id === 'old-2')")
+    assert page.inner_text("#toastText") == "Removed “Legacy 2”"
+    # Storage keeps it until the toast expires; every read already leaves it out.
+    assert [item["id"] for item in cabinet(page)] == ["old-3", "old-2", "old-1"]
+    assert page.evaluate("readCabinet().map((i) => i.id)") == ["old-3", "old-1"]
+    # Undo: the card is back in its place and the count with it.
+    page.locator("#toastActions button", has_text="Undo").click()
+    assert _shown(page) == ["old-3", "old-2", "old-1"] and page.inner_text("#cabinetSummary") == "3 intakes"
+    assert [item["id"] for item in cabinet(page)] == ["old-3", "old-2", "old-1"]
+    assert page.evaluate("document.activeElement.closest('li')?.dataset.id") == "old-2"
+    page.wait_for_timeout(400)  # the late collapse callback must not undo the Undo
+    assert _shown(page) == ["old-3", "old-2", "old-1"]
+    assert page.errors == []
+
+
+def test_removal_is_final_when_the_toast_expires_or_the_page_is_left(context, base_url):
+    _seed_three(context)
+    page = open_page(context, base_url)
+    page.evaluate("() => CabinetDrawer.open()")
+    _remove_now(page, "old-3")
+    assert [item["id"] for item in cabinet(page)] == ["old-3", "old-2", "old-1"]
+    page.evaluate("hideToast()")  # the toast's timer (or ×) ends the window
+    assert [item["id"] for item in cabinet(page)] == ["old-2", "old-1"]
+    assert page.locator("#toastActions button").count() == 0 or page.is_hidden("#toast")
+    # A second Remove while a toast is up makes the first one final.
+    _remove_now(page, "old-2")
+    page.wait_for_timeout(50)
+    _remove_now(page, "old-1")
+    assert [item["id"] for item in cabinet(page)] == ["old-1"]  # old-2 final, old-1 pending
+    # Reload during the toast window: leaving the page ends the window, so screen, count and storage agree.
+    page.reload()
+    assert cabinet(page) == [] and page.evaluate("readCabinet().length") == 0
+    page.evaluate("() => CabinetDrawer.open()")
+    assert _shown(page) == [] and page.is_visible("#cabinetEmpty") and page.inner_text("#cabinetSummary") == ""
+    assert page.errors == []
+
+
+def test_removing_the_last_card_shows_the_empty_state_at_once_and_undo_brings_it_back(context, base_url):
+    page = open_page(context, base_url)
+    run_intake(page, SAMPLE)
+    card_id = cabinet(page)[0]["id"]
+    page.evaluate("() => CabinetDrawer.open()")
+    now = _remove_now(page, card_id)
+    assert now["summary"] == "" and now["empty"] and now["shown"] == []
+    assert page.evaluate("document.activeElement.id") == "cabinetStart"
+    assert page.is_hidden("#cabinetClear")
+    page.locator("#toastActions button", has_text="Undo").click()
+    assert _shown(page) == [card_id] and page.inner_text("#cabinetSummary") == "1 intake" and page.is_hidden("#cabinetEmpty")
+    assert page.errors == []
+
+
+def test_reduced_motion_removes_the_card_instantly(context, base_url):
+    _seed_three(context)
+    page = open_page(context, base_url)
+    page.emulate_media(reduced_motion="reduce")
+    page.evaluate("() => CabinetDrawer.open()")
+    now = _remove_now(page, "old-2")
+    assert now["inDom"] == ["old-3", "old-1"] and now["collapsing"] == [] and now["summary"] == "2 intakes"
+    page.locator("#toastActions button", has_text="Undo").click()
+    assert _shown(page) == ["old-3", "old-2", "old-1"] and page.inner_text("#cabinetSummary") == "3 intakes"
+    assert page.errors == []
+
+
+def test_removal_becomes_final_when_the_toast_timer_runs_out(context, base_url):
+    _seed_three(context)
+    page = context.new_page()
+    page.clock.install()
+    page.goto(base_url)
+    page.wait_for_function("typeof CabinetDrawer !== 'undefined'")
+    page.evaluate("() => CabinetDrawer.open()")
+    _remove_now(page, "old-1")
+    page.clock.run_for(9_000)
+    assert [item["id"] for item in cabinet(page)] == ["old-3", "old-2", "old-1"] and page.is_visible("#toast")
+    page.clock.run_for(1_500)
+    assert page.is_hidden("#toast") and [item["id"] for item in cabinet(page)] == ["old-3", "old-2"]
+    assert _shown(page) == ["old-3", "old-2"] and page.inner_text("#cabinetSummary") == "2 intakes"

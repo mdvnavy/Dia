@@ -2300,9 +2300,16 @@ const toast = document.querySelector("#toast");
 const toastText = document.querySelector("#toastText");
 const toastActions = document.querySelector("#toastActions");
 let toastTimer = null;
+let toastDismiss = null;  // runs when the toast goes away without one of its actions (timer, ×, replaced, page left)
 
-function showToast(message, actions = [], { duration = 10000 } = {}) {
+function settleToast() {
+  const dismiss = toastDismiss;
+  toastDismiss = null;
+  dismiss?.();
+}
+function showToast(message, actions = [], { duration = 10000, onDismiss = null } = {}) {
   clearTimeout(toastTimer);
+  settleToast();
   toastText.textContent = message;
   toastActions.innerHTML = "";
   for (const action of actions) {
@@ -2310,7 +2317,7 @@ function showToast(message, actions = [], { duration = 10000 } = {}) {
     button.type = "button";
     button.className = "toast-action";
     button.textContent = action.label;
-    button.addEventListener("click", () => { hideToast(); action.run(); });
+    button.addEventListener("click", () => { toastDismiss = null; hideToast(); action.run(); });
     toastActions.appendChild(button);
   }
   // A modal dialog (the cabinet drawer) makes the rest of the page inert, so the toast joins it while it is open;
@@ -2318,11 +2325,13 @@ function showToast(message, actions = [], { duration = 10000 } = {}) {
   const host = [...document.querySelectorAll("dialog[open]")].filter((d) => d.matches(":modal")).pop() || document.body;
   if (toast.parentElement !== host) host.appendChild(toast);
   toast.hidden = false;
+  toastDismiss = onDismiss;
   toastTimer = setTimeout(hideToast, duration);
 }
 function hideToast() {
   clearTimeout(toastTimer);
   toast.hidden = true;
+  settleToast();
 }
 document.querySelector("#toastClose").addEventListener("click", hideToast);
 toast.addEventListener("mouseenter", () => clearTimeout(toastTimer));
@@ -2596,7 +2605,32 @@ function migrateCabinet() {
   if (cabinetStorageOk) { try { sessionStorage.removeItem(CABINET_LEGACY_KEY); } catch (error) { /* stays; merge is idempotent */ } }
 }
 
+// Remove with Undo: the removed entry stays in storage until its toast expires (timer, ×, another toast, or the
+// page is left), but every read already leaves it out, so the screen, the counts and a reload always agree.
+let pendingRemoval = null;  // { id, item, index } while the Undo toast is up
 function readCabinet() {
+  const items = storedCabinet();
+  return pendingRemoval ? items.filter((item) => item.id !== pendingRemoval.id) : items;
+}
+function commitRemoval(id = pendingRemoval?.id) {
+  if (!pendingRemoval || pendingRemoval.id !== id) return;
+  pendingRemoval = null;
+  const items = storedCabinet();
+  if (items.some((item) => item.id === id)) writeCabinet(items.filter((item) => item.id !== id));
+}
+function cancelRemoval(id) {
+  if (!pendingRemoval || pendingRemoval.id !== id) return false;
+  const { item, index } = pendingRemoval;
+  pendingRemoval = null;
+  const items = storedCabinet();
+  if (!items.some((entry) => entry.id === id)) {  // something rewrote storage meanwhile: put it back where it was
+    items.splice(Math.min(index, items.length), 0, item);
+    writeCabinet(items);
+  }
+  return true;
+}
+window.addEventListener("pagehide", () => commitRemoval());  // leaving the page ends the toast window
+function storedCabinet() {
   const store = cabinetStore();
   if (!store) { cabinetStorageOk = false; return []; }
   try {
@@ -2626,6 +2660,7 @@ function writeCabinet(items) {
   return list;
 }
 function clearCabinet() {
+  pendingRemoval = null;
   const store = cabinetStore();
   try { store?.removeItem(CABINET_KEY); } catch (error) { cabinetStorageOk = false; }
   currentEntryId = null;
@@ -2698,21 +2733,22 @@ function updateEntry(id, patch) {
 }
 
 function removeEntry(id) {
-  const items = readCabinet();
-  const index = items.findIndex((item) => item.id === id);
-  if (index === -1) return;
-  const [removed] = items.splice(index, 1);
-  writeCabinet(items);
+  commitRemoval();  // an earlier removal whose toast is still up becomes final now
+  const visible = readCabinet();
+  const shownIndex = visible.findIndex((item) => item.id === id);
+  if (shownIndex === -1) return;
+  const stored = storedCabinet();
+  const index = stored.findIndex((item) => item.id === id);
+  const removed = stored[index];
+  pendingRemoval = { id, item: removed, index };
   CabinetDrawer.selected.delete(id);
-  refreshCabinetButton(items);
-  CabinetDrawer.render({ focusAfterRemove: index });
+  refreshCabinetButton();
+  CabinetDrawer.collapse(id, shownIndex);  // card and count go now; storage follows when the toast expires
   showToast(`Removed “${removed.title}”`, [{ label: "Undo", run: () => {
-    const now = readCabinet();
-    now.splice(Math.min(index, now.length), 0, removed);
-    writeCabinet(now);
+    if (!cancelRemoval(id)) return;
     refreshCabinetButton();
-    CabinetDrawer.render();
-  } }]);
+    CabinetDrawer.render({ focusId: id });
+  } }], { onDismiss: () => commitRemoval(id) });
 }
 
 // --- Cabinet button ----------------------------------------------------------
@@ -2930,8 +2966,7 @@ const CabinetDrawer = (() => {
     return li;
   }
 
-  function render({ revealFrom = null, focusAfterRemove = null } = {}) {
-    const items = readCabinet();
+  function renderChrome(items) {  // the count, empty state and header buttons
     alertBox.textContent = cabinetStorageOk ? "" : "Couldn't open the cabinet. Your browser blocked storage.";
     for (const id of [...selected]) if (!items.some((item) => item.id === id)) selected.delete(id);
     summary.textContent = items.length === 0 ? "" : items.length >= 13 ? `${items.length} of ${CABINET_MAX} slots used` : `${items.length} intake${items.length === 1 ? "" : "s"}`;
@@ -2940,6 +2975,43 @@ const CabinetDrawer = (() => {
     selectModeButton.hidden = items.length === 0;
     clearButton.hidden = items.length === 0 || selectMode;
     if (items.length === 0) clearConfirm.hidden = true;
+  }
+
+  // Remove: the count updates now and the card collapses (reduced motion: it just goes).
+  function collapse(id, focusAfterRemove) {
+    const li = [...list.children].find((node) => node.dataset.id === id);
+    if (!li || !drawer.open || prefersReducedMotion()) return render({ focusAfterRemove });
+    const items = readCabinet();
+    renderChrome(items);
+    updateSelection(items);
+    const hadFocus = li.contains(document.activeElement);
+    const others = [...list.children].filter((node) => node !== li && !node.classList.contains("is-removing"));
+    li.inert = true;
+    li.setAttribute("aria-hidden", "true");
+    if (hadFocus) {
+      const target = others[Math.min(focusAfterRemove, others.length - 1)];
+      (target?.querySelector(".card-reopen") || document.querySelector("#cabinetStart")).focus();
+    }
+    li.style.height = `${li.offsetHeight}px`;
+    void li.offsetHeight;  // start the transition from the measured height
+    li.classList.add("is-removing");
+    li.style.height = "0px";
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      if (!li.isConnected) return;  // already re-rendered (Undo, another change)
+      const focusInList = list.contains(document.activeElement);
+      const focusedId = document.activeElement?.closest?.("li")?.dataset.id;
+      render(focusInList && focusedId ? { focusId: focusedId } : {});
+    };
+    li.addEventListener("transitionend", (event) => { if (event.target === li && event.propertyName === "height") finish(); });
+    setTimeout(finish, 320);
+  }
+
+  function render({ revealFrom = null, focusAfterRemove = null, focusId = null } = {}) {
+    const items = readCabinet();
+    renderChrome(items);
     const visible = items.slice(0, Math.min(shown, CABINET_MAX));
     list.innerHTML = "";
     visible.forEach((item, index) => {
@@ -2954,6 +3026,7 @@ const CabinetDrawer = (() => {
       const cards = list.querySelectorAll(".card-reopen");
       (cards[Math.min(focusAfterRemove, cards.length - 1)] || document.querySelector("#cabinetStart")).focus();
     }
+    if (focusId !== null) [...list.children].find((node) => node.dataset.id === focusId)?.querySelector(".card-reopen")?.focus();
     return items;
   }
 
@@ -3132,7 +3205,7 @@ const CabinetDrawer = (() => {
     }
   }
 
-  return { open, close, render, isOpen: () => drawer.open, selected, exportSelected: exportSelectedImpl, setSelectMode };
+  return { open, close, render, collapse, isOpen: () => drawer.open, selected, exportSelected: exportSelectedImpl, setSelectMode };
 })();
 
 const exportSelected = () => CabinetDrawer.exportSelected();
