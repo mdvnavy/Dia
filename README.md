@@ -214,12 +214,22 @@ Only questions that actually reach Gemini are charged: empty messages and
 scripted clients are throttled before touching the quota store. Owners bypass
 both. Sign-in attempts have their own burst guard.
 
+**Kill switch.** `ASK_DIA_ENABLED=false` turns Ask DIA off for everyone,
+owners included, without a redeploy of code (an env change on the service is
+enough). `/api/agent` then answers **503** with `Retry-After: 300` and a calm
+"Ask DIA is temporarily unavailable" message before reading the body, touching
+the quota store or calling Gemini; `/api/agent/status` reports
+`"enabled": false`, and the UI shows the notice and disables the Ask DIA
+composer while the intake tools keep working. Unset or empty means enabled; an
+unrecognised value (a typo) is treated as **off**.
+
 MCP toolsets are attached only via `DIA_AGENT_MCP_MODE` (`none` by default, or
 `make`, `gcp`, `all`); words in a prompt never switch tools on. The
 deterministic `/api/process` path is unaffected by all of this.
 
 | Variable | Default | Purpose |
 | -------- | ------- | ------- |
+| `ASK_DIA_ENABLED` | enabled | Kill switch: `false`/`0`/`off`/`no` (or any unrecognised value) returns 503 "temporarily unavailable". |
 | `GOOGLE_CLIENT_ID` | unset | OAuth Web client ID for Google Sign-In (public). Unset = no sign-in button. |
 | `OWNER_EMAILS` | unset | Comma list of Google emails with unlimited access (case-insensitive). |
 | `DIA_SESSION_SECRET` | unset | Signs the 12h session cookie (≥32 chars, from Secret Manager). Unset = sign-in off. |
