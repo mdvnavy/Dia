@@ -121,7 +121,8 @@ BUTTON_LOOK = """s => { const e = document.querySelector(s), cs = getComputedSty
 
 
 @pytest.mark.parametrize("theme", ["light", "dark"])
-def test_run_with_text_is_the_full_silver_button_like_the_mic(open_page, theme):
+def test_run_with_text_is_a_full_enabled_button_silver_in_light_graphite_in_dark(open_page, theme):
+    """Glyph (PR #40): dark Run is graphite (#3a3a40 -> #26262a, like Tia), never gold; light stays the mic's silver."""
     p = open_page(theme=theme)
     p.click("#loadSample")
     p.wait_for_selector("#runAgent:not([hidden])")
@@ -129,9 +130,36 @@ def test_run_with_text_is_the_full_silver_button_like_the_mic(open_page, theme):
     run, mic = p.evaluate(BUTTON_LOOK, "#runAgent"), p.evaluate(BUTTON_LOOK, "#intakeMic")
     assert run["disabled"] is False and run["ariaDisabled"] is None
     assert run["opacity"] == 1 and run["visibility"] == "visible" and run["border"] == "solid"
-    assert run["bg"] == mic["bg"] and run["color"] == mic["color"]  # same silver fill, same --text ink for the icon
+    if theme == "light":
+        assert run["bg"] == mic["bg"] and run["color"] == mic["color"]  # unchanged: same silver fill and ink as the mic
+        assert "rgb(230, 232, 235)" in run["bg"] and "rgb(184, 189, 196)" in run["bg"]
+    else:
+        assert "rgb(58, 58, 64)" in run["bg"] and "rgb(38, 38, 42)" in run["bg"], run
+        assert _luminance(_rgb(run["color"])) > 0.7   # light icon ink on graphite
+    # Never gold/mustard (dark --accent #c8a96e, drag-over #DFA81C), resting or hovered.
+    for state in ("rest", "hover"):
+        if state == "hover":
+            p.hover("#runAgent")
+            p.wait_for_timeout(300)
+        styles = p.eval_on_selector("#runAgent", "e => { const c = getComputedStyle(e); return [c.backgroundImage, c.color, c.borderColor, c.boxShadow].join(' '); }")
+        assert "200, 169, 110" not in styles and "223, 168, 28" not in styles, (state, styles)
     run_box, mic_box = box(p, "#runAgent"), box(p, "#intakeMic")
     assert run_box["r"] <= mic_box["x"]
+
+
+@pytest.mark.parametrize("width,height", WIDTHS)
+def test_composer_order_is_plus_text_run_mic_with_the_mic_12px_in(open_page, width, height):
+    p = open_page(width=width, height=height)
+    p.fill("#questionnaire", "Client: Gearhead")
+    p.wait_for_selector("#runAgent:not([hidden])")
+    p.wait_for_timeout(300)
+    bar, plus, text, run, mic = (box(p, s) for s in ("#intakeComposer", "#intakePlusButton", "#questionnaire", "#runAgent", "#intakeMic"))
+    text_end = text["r"] - float(p.eval_on_selector("#questionnaire", "e => getComputedStyle(e).paddingRight").rstrip("px"))
+    assert plus["r"] <= text["x"] + 1 and text_end <= run["x"] + 1 and run["r"] <= mic["x"], (plus, text, run, mic)
+    border = float(p.eval_on_selector("#intakeComposer", "e => getComputedStyle(e).borderRightWidth").rstrip("px"))
+    inset = 12 if width > 600 else 8   # phones keep the bar's 8px padding, mirroring the plus (unchanged)
+    assert abs((bar["r"] - border) - mic["r"] - inset) <= 0.5, (bar, mic, border)
+    assert abs((plus["x"] - bar["x"] - border) - inset) <= 0.5
 
 
 def _sample_mic_and_run(p, action):

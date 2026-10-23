@@ -224,3 +224,22 @@ html:not([data-theme="light"]) .action-btn.cmp-circle:not(:hover, :focus-visible
 @media (max-width: 600px) {
   .prompt-input::placeholder { text-overflow: ellipsis; }
 }
+
+/* Run / send in dark (Glyph, PR #40): graphite like Tia's, not gold or silver. Mustard/gold stays the drag-over cue only.
+   Light keeps its silver send button. The pixel style keeps its own flat dark circle (composer-icons.css). */
+html:not([data-theme="light"]) .action-btn.cmp-enter {
+  --send-from: #3a3a40;
+  --send-to: #26262a;
+  --send-hover-from: #45454c;
+  --send-hover-to: #2e2e33;
+  --on-accent: #eeeef2;
+  --accent-rgb: 163, 169, 177;
+  border-color: rgba(255, 255, 255, 0.16);
+}
+html:not([data-theme="light"]) .action-btn.cmp-enter:not(:hover, :focus-visible, [aria-disabled="true"]) {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45), inset 0 1px 1px rgba(255, 255, 255, 0.12), inset 0 -2px 3px rgba(0, 0, 0, 0.35);
+}
+html:not([data-theme="light"]) .action-btn.cmp-enter:is(:hover, :focus-visible) {
+  border-color: rgba(255, 255, 255, 0.32);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5), 0 0 14px rgba(163, 169, 177, 0.18), inset 0 1px 2px rgba(255, 255, 255, 0.18), inset 0 -2px 4px rgba(0, 0, 0, 0.4);
+}
