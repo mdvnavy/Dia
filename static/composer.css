@@ -58,10 +58,39 @@ a.dropdown-item { text-decoration: none; cursor: pointer; }
    Glyph to review: every value below is listed in the PR notes.
    ========================================================================== */
 
-/* 1. Mic in the corner. The Run slot used to be reserved even while the bar was empty, which left a 54px gap
-      between the mic and the bar's right edge. Empty bar: no slot, so the mic sits in the corner, mirroring the plus
-      (12px in, 8px on phones). With text, Run takes the corner and the mic steps left by one circle + gap. */
-.prompt-bar.has-cmp[data-empty="true"] .cmp-run-slot { display: none; }
+/* 1. Mic fixed in the corner (Glyph review + Ikenna): the mic is the bar's last flex item, 12px in (8px on phones),
+      mirroring the plus, and it never moves. Run's slot is reserved inside the textarea's right padding (one circle +
+      the 8px gap), so text never reflows; Run sits in that slot, just LEFT of the mic, and is shown only with text.
+      Show: 180ms EASE_OUT fade + scale 0.9 -> 1. Hide (Ikenna: reverses, not instant): 150ms ease-in fade + scale
+      back to 0.9, then visibility drops. Uses the `scale` property so the hover `transform: scale(1.08)` still works.
+      Reduced motion: a short 100ms fade, no scale. */
+.prompt-bar.has-cmp { --run-slot: calc(var(--cmp-circle) + 8px); --bar-pad: 12px; }
+.prompt-bar.has-cmp .prompt-input { padding-right: var(--run-slot); }
+.prompt-bar.has-cmp .cmp-run-slot {
+  position: absolute; z-index: 1; right: calc(var(--bar-pad) + var(--run-slot)); top: 50%; translate: 0 -50%;
+  pointer-events: none;
+}
+.prompt-bar.has-cmp.multiline .cmp-run-slot { top: auto; bottom: var(--bar-pad); translate: none; }
+.prompt-bar.has-cmp .cmp-enter,
+.prompt-bar.has-cmp .cmp-enter[hidden] { display: flex; animation: none; }
+.prompt-bar.has-cmp .cmp-enter {
+  opacity: 1; scale: 1; visibility: visible; pointer-events: auto;
+  transition: all var(--dia-dur-run-in, 180ms) var(--dia-ease-out, cubic-bezier(0.16, 1, 0.3, 1)), visibility 0s;
+}
+.prompt-bar.has-cmp .cmp-enter[hidden] {
+  opacity: 0; scale: 0.9; visibility: hidden; pointer-events: none;
+  transition: all 150ms var(--dia-ease-in, cubic-bezier(0.55, 0, 0.75, 0.2)), visibility 0s linear 150ms;
+}
+:root:is([data-icon-style="zelda"], [data-icon-style="dia-pixel"]) .prompt-bar.has-cmp .cmp-enter { transition-timing-function: steps(2, end), linear; }
+@media (prefers-reduced-motion: reduce) {
+  .prompt-bar.has-cmp .cmp-enter, .prompt-bar.has-cmp .cmp-enter[hidden] { scale: 1; animation: none; }
+  .prompt-bar.has-cmp .cmp-enter { transition: opacity 100ms linear, visibility 0s; }
+  .prompt-bar.has-cmp .cmp-enter[hidden] { transition: opacity 100ms linear, visibility 0s linear 100ms; }
+}
+.cmp-tip-mic { right: var(--bar-pad, 12px); }   /* the mic is in the corner now */
+@media (max-width: 600px) {
+  .prompt-bar.has-cmp { --run-slot: calc(var(--cmp-circle-mobile) + 8px); --bar-pad: 8px; }
+}
 
 /* 2. Floating notch: a small handle bar floating just above the prompt bar (replaces the 36x12 tab on the top edge).
       Button box 48x20 (hit area 48x28 desktop, 48x44 touch); the visible handle is a 32x4 rounded bar. */
@@ -78,9 +107,37 @@ a.dropdown-item { text-decoration: none; cursor: pointer; }
 .cmp-notch--float:is(:hover, :focus-visible) .notch-handle { background: var(--muted); }
 .cmp-notch--float[aria-expanded="true"] .notch-handle { width: 40px; background: var(--text); }
 :root:is([data-icon-style="zelda"], [data-icon-style="dia-pixel"]) .notch-handle { border-radius: 0; transition: none; }
-/* The fan and tip float above the handle instead of the bar's edge. */
-.has-cmp .voice-fan { bottom: calc(100% + 34px); }
+/* The tip floats above the handle instead of the bar's edge. */
 .has-cmp .cmp-tip-notch { bottom: calc(100% + 34px); }
+
+/* Voice panel (Glyph review + Ikenna): a compact single row (42px tall) on an opaque --raised layer with the plus
+   menu's shadow. Its bottom edge sits 11px above the handle (handle top = bar - 26px), and while it's open the status
+   line slides up 22px into the hero's bottom margin, so the panel never covers "Ready" or the description. */
+.has-cmp .voice-fan {
+  bottom: calc(100% + 37px); flex-direction: row; align-items: center; gap: 2px; padding: 4px;
+  border-radius: 21px; background: var(--raised);
+}
+.has-cmp .voice-item {
+  width: auto; height: 32px; padding: 0 12px 0 0; flex-direction: row; gap: 7px; border-radius: 16px; white-space: nowrap;
+}
+.has-cmp .voice-item .icon { width: 32px; height: 32px; flex: none; }
+.has-cmp .voice-item:is(:hover, :focus-visible):not([aria-disabled="true"]) { background: var(--surface); }
+.has-cmp .voice-item:focus-visible { outline-offset: 0; }
+.has-cmp .voice-label { font-size: 12px; line-height: 1; text-align: start; }
+.has-cmp .voice-note { display: inline; margin-left: 4px; }
+.has-cmp .voice-note::before { content: "· "; }
+@media (max-width: 600px) {
+  .has-cmp .voice-item { width: auto; padding-right: 9px; gap: 5px; }
+  .has-cmp .voice-label { font-size: 11.5px; }
+  .has-cmp .voice-item .icon svg { width: 16px; height: 16px; }
+}
+.intake-stage #status { transition: translate 120ms linear; }
+.intake-stage:has(#intakeVoiceNotch[aria-expanded="true"]) #status {
+  translate: 0 -22px; transition: translate var(--dia-dur-run-in, 180ms) var(--dia-ease-out, cubic-bezier(0.16, 1, 0.3, 1));
+}
+@media (prefers-reduced-motion: reduce) {
+  .intake-stage #status, .intake-stage:has(#intakeVoiceNotch[aria-expanded="true"]) #status { transition: none; }
+}
 
 /* Clean close (no faint "shadow" left behind): the fan goes hidden in one short 120ms fade, then visibility,
    box-shadow and pointer events all drop at the same instant. Items no longer sink and stagger out on close. JS
@@ -90,7 +147,8 @@ a.dropdown-item { text-decoration: none; cursor: pointer; }
 }
 .has-cmp .voice-fan:not(.cmp-notch[aria-expanded="true"] ~ .voice-fan) { box-shadow: none; pointer-events: none; }
 .has-cmp .voice-fan .voice-item { transition-delay: 0s; transition-duration: 120ms; transition-timing-function: linear; }
-.has-cmp .cmp-notch[aria-expanded="true"] ~ .voice-fan { box-shadow: var(--shadow-subtle); transition: opacity calc(var(--dia-dur-stack-open, 280ms) * 0.6) var(--dia-ease-out, cubic-bezier(0.16, 1, 0.3, 1)), visibility 0s, box-shadow 0s; }
+.has-cmp .cmp-notch[aria-expanded="true"] ~ .voice-fan { box-shadow: var(--shadow-subtle);   /* = .plus-menu */
+  transition: opacity calc(var(--dia-dur-stack-open, 280ms) * 0.6) var(--dia-ease-out, cubic-bezier(0.16, 1, 0.3, 1)), visibility 0s, box-shadow 0s; }
 .has-cmp .cmp-notch[aria-expanded="true"] ~ .voice-fan .voice-item { transition-duration: var(--dia-dur-stack-open, 280ms), calc(var(--dia-dur-stack-open, 280ms) * 0.6); transition-timing-function: var(--dia-ease-out, cubic-bezier(0.16, 1, 0.3, 1)); transition-delay: calc(var(--d, 0) * var(--dia-stagger-open, 30ms)); }
 .cmp-notch[data-tip-muted] + .cmp-tip { opacity: 0; visibility: hidden; transition: none; }
 
@@ -131,11 +189,23 @@ html:not([data-theme="light"]) .action-btn.cmp-circle:not(:hover, :focus-visible
 /* Ask DIA: the floating handle needs clear air under the heading's badge. */
 .agent > h2 + .prompt-bar.has-cmp { margin-top: 34px; }
 
-/* Plus menu viewport guard (createPlusMenu placeMenu): flipped below the bar when there's no room above, and a
-   capped height scrolls. Same look; only the side changes. */
+/* Plus menu viewport guard (createPlusMenu placeMenu, Glyph review): flipped below the bar when there's more room
+   there; otherwise it opens upward with its top clamped 8px below the 52px letterhead band and its height capped at
+   the space left. The menu is a column: the groups scroll in .pm-scroll (bottom-edge fade while there's more below),
+   and All commands is a sticky footer row that's always visible. Rows keep 36px on desktop. */
+.plus-menu { display: flex; flex-direction: column; }
+.pm-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+/* Scroll cue, ported from Tia's plus-menu guard (tia-sia bfae6fd, #29): a 28px sticky gradient into the menu's own
+   background along the scroll area's bottom edge, shown (150ms fade) only while there's more below. */
+.pm-scroll::after {
+  content: ""; display: block; position: sticky; bottom: 0; height: 28px; margin-top: -28px; pointer-events: none;
+  opacity: 0; transition: opacity 150ms ease; background: linear-gradient(color-mix(in srgb, var(--surface) 0%, transparent), var(--surface) 85%);
+}
+.pm-scroll[data-more]::after { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .pm-scroll::after { transition: none; } }
+.plus-menu > .pm-sep, .pm-foot { flex: none; }
 @media (min-width: 601px) {
   .plus-menu[data-drop="down"] { bottom: auto; top: calc(100% + 10px); transform: translateY(calc(-1 * var(--dia-fan-rise))); }
-  .plus-menu[style*="max-height"] { overflow-y: auto; overscroll-behavior: contain; }
 }
 
 /* Phones: the intake placeholder gets a shorter line so it never cuts off mid-word (set by JS at <=600px),

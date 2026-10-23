@@ -1747,17 +1747,34 @@ function createPlusMenu(prefix) {
     });
     return [labelRow, seg];
   }
+  // Layout (landing polish, Glyph): every group but the last scrolls in .pm-scroll; the last group (All commands) is a
+  // sticky .pm-foot row, so it stays visible when the capped menu has to scroll. DOM order (and so keyboard order) is
+  // unchanged.
+  const scroller = document.createElement("div");
+  scroller.className = "pm-scroll";
+  scroller.setAttribute("role", "none");
+  const syncFade = () => {
+    const more = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight > 2;   // Tia's updatePlusScrollCue threshold
+    if (more) scroller.dataset.more = "true"; else delete scroller.dataset.more;
+  };
+  scroller.addEventListener("scroll", syncFade, { passive: true });
+  // Rows rise 4px as they fade in (a transform counts toward scroll overflow), so re-check once they settle.
+  menu.addEventListener("transitionend", syncFade);
   function render() {
     menu.replaceChildren();
+    scroller.replaceChildren();
     const rows = [];
-    PLUS_GROUPS.forEach((group) => {
-      const visible = group.rows.filter((row) => !(row.hideIn === prefix) && !(row.kind === "link" && !donateUrl));
-      if (!visible.length) return;
-      if (menu.childElementCount) {
+    const groups = PLUS_GROUPS.map((group) => ({ group, visible: group.rows.filter((row) => !(row.hideIn === prefix) && !(row.kind === "link" && !donateUrl)) }))
+      .filter(({ visible }) => visible.length);
+    groups.forEach(({ group, visible }, groupIndex) => {
+      const isFoot = groups.length > 1 && groupIndex === groups.length - 1;
+      const target = isFoot ? menu : scroller;
+      if (groupIndex === 0) menu.append(scroller);
+      if (groupIndex > 0) {
         const sep = document.createElement("div");
         sep.className = "pm-sep";
         sep.setAttribute("role", "separator");
-        menu.append(sep);
+        target.append(sep);
       }
       const box = document.createElement("div");
       box.setAttribute("role", "group");
@@ -1772,7 +1789,8 @@ function createPlusMenu(prefix) {
           rows.push(wrap);
         });
       });
-      menu.append(box);
+      if (isFoot) box.classList.add("pm-foot");
+      target.append(box);
     });
     // 15ms stagger, the bottom row (nearest the plus) first.
     rows.forEach((wrap, index) => wrap.style.setProperty("--r", String(rows.length - 1 - index)));
@@ -1782,22 +1800,31 @@ function createPlusMenu(prefix) {
     const list = items();
     if (list.length) list[(index + list.length) % list.length].focus();
   }
-  // Viewport guard (landing polish), the cabinet fan's placeFan pattern: open upward by default; flip below the bar
-  // when there's no room above; if neither side fits, use the roomier side and cap the height so the menu scrolls.
+  // Viewport guard (landing polish, Glyph review): open upward by default, never over the 52px letterhead band (top
+  // clamped 8px below it); flip below the bar only when there's more room there. If it still doesn't fit, cap the
+  // height at the space left: the middle (.pm-scroll) scrolls with a bottom-edge fade, All commands stays as a footer.
   // Phones (<=600px) use the fixed bottom sheet, so no guard there.
   const MENU_GAP = 10;
   const MENU_MARGIN = 8;
+  const HEADER_BAND = 52;
+  const BAR_LIFT = 2;   // the bar rises 2px on hover/focus (style.css), carrying the menu with it
   function placeMenu() {
     delete menu.dataset.drop;
     menu.style.removeProperty("max-height");
-    if (matchMedia("(max-width: 600px)").matches) return;
-    const anchor = (menu.offsetParent || button).getBoundingClientRect();
-    const height = menu.offsetHeight;
-    const above = anchor.top - MENU_GAP - MENU_MARGIN;
-    const below = window.innerHeight - anchor.bottom - MENU_GAP - MENU_MARGIN;
-    if (height <= above) return;
-    if (height <= below || below > above) menu.dataset.drop = "down";
-    if (height > Math.max(above, below)) menu.style.maxHeight = `${Math.max(Math.max(above, below), 120)}px`;
+    if (!matchMedia("(max-width: 600px)").matches) {
+      const anchor = (menu.offsetParent || button).getBoundingClientRect();
+      const header = document.querySelector("header.lh");
+      const band = Math.max(HEADER_BAND, header ? header.getBoundingClientRect().bottom : 0);
+      const height = menu.offsetHeight;
+      const above = anchor.top - MENU_GAP - (band + MENU_MARGIN) - BAR_LIFT;
+      const below = window.innerHeight - anchor.bottom - MENU_GAP - MENU_MARGIN;
+      if (height > above) {
+        if (height <= below || below > above) menu.dataset.drop = "down";
+        const room = Math.max(above, below);
+        if (height > room) menu.style.maxHeight = `${Math.max(room, 120)}px`;
+      }
+    }
+    syncFade();
   }
   function show({ focus = null } = {}) {
     if (!open) {
