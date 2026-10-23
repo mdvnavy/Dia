@@ -54,7 +54,7 @@ def test_new_static_assets_are_served(base, path):
 
 
 def test_merged_multi_file_drop_still_parses_and_later_values_win():
-    # Same separator the client uses for MULTI_FILE_MODE = "merge".
+    # Same separator the client's combineExtracted() uses (merge is decided, flows.md v8.9 §2.3).
     second = FIXTURE.replace("Northstar Studio", "Second File Co")
     merged = f"<!-- file: a.md -->\n{FIXTURE}\n\n---\n\n<!-- file: b.md -->\n{second}\n"
     result = build_intake_response(merged)
@@ -64,9 +64,9 @@ def test_merged_multi_file_drop_still_parses_and_later_values_win():
 
 def test_product_switches_are_single_constants():
     assert re.search(r'^const CABINET_CAP_POLICY = "drop-oldest";', APP_JS, re.M)
-    assert re.search(r'^const MULTI_FILE_MODE = "merge";', APP_JS, re.M)
+    assert "MULTI_FILE_MODE" not in APP_JS  # merge is decided; no provisional switch
     assert re.search(r"^const CABINET_MAX = 15;", APP_JS, re.M)
-    assert 'sessionStorage.getItem(CABINET_KEY' in APP_JS  # intakes: session only
+    assert 'const CABINET_KEY = "dia-cabinet-v2";' in APP_JS  # intakes: localStorage (addendum §7.1)
     assert 'localStorage.setItem(ICON_STYLE_KEY' in APP_JS  # icon style: per device
 
 

@@ -13,11 +13,20 @@ import json
 import shutil
 import subprocess
 import tempfile
+import zipfile
 from pathlib import Path
 
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 TEXT_TYPES = {".txt", ".md", ".markdown", ".text"}
 SUPPORTED_TYPES = TEXT_TYPES | {".csv", ".tsv", ".json", ".rtf", ".docx", ".doc"}
+
+# A .docx is a ZIP, so the 5 MB upload cap only bounds its compressed size. These limits are checked from the
+# archive's directory before python-docx inflates anything (decompression-bomb guard, Codex review on PR #32).
+# Real questionnaires are a few dozen entries and well under 10 MB unzipped, images included.
+DOCX_MAX_ENTRIES = 1000
+DOCX_MAX_UNCOMPRESSED_BYTES = 50 * 1024 * 1024
+DOCX_MAX_RATIO = 100  # uncompressed:compressed, per entry and for the whole archive
+DOCX_RATIO_FLOOR_BYTES = 1024 * 1024  # small entries may compress very well without being a risk
 
 
 class ExtractionError(ValueError):
@@ -101,7 +110,34 @@ def _from_rtf(text: str) -> str:
     return rtf_to_text(text, errors="ignore")
 
 
+def _check_docx_archive(data: bytes) -> None:
+    """Reject archives that would expand too far, using only the ZIP central directory (nothing is inflated)."""
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            entries = archive.infolist()
+    except (zipfile.BadZipFile, ValueError, OSError) as error:
+        raise ExtractionError("That .docx file couldn't be opened. Is it a real Word document?") from error
+    too_big = ExtractionError(
+        "That .docx expands to far more than a questionnaire should when unzipped, so DIA won't open it. "
+        "Save it again from Word or Google Docs, or export it as .txt, then drop it in again.",
+        413,
+    )
+    if len(entries) > DOCX_MAX_ENTRIES:
+        raise too_big
+    total = compressed = 0
+    for entry in entries:
+        total += entry.file_size
+        compressed += entry.compress_size
+        if total > DOCX_MAX_UNCOMPRESSED_BYTES:
+            raise too_big
+        if entry.file_size > DOCX_RATIO_FLOOR_BYTES and entry.file_size > DOCX_MAX_RATIO * max(entry.compress_size, 1):
+            raise too_big
+    if total > DOCX_RATIO_FLOOR_BYTES and total > DOCX_MAX_RATIO * max(compressed, 1):
+        raise too_big
+
+
 def _from_docx(data: bytes) -> str:
+    _check_docx_archive(data)
     try:
         import docx
         from docx.table import Table
