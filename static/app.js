@@ -198,6 +198,7 @@ async function refreshAgentStatus() {
   try {
     const response = await fetch("/api/agent/status");
     const payload = await response.json();
+    geminiConnected = Boolean(payload.configured) && payload.enabled !== false;
     if (payload.enabled === false) {
       disableAskDia();
       return;
@@ -212,7 +213,162 @@ async function refreshAgentStatus() {
   } catch (error) {
     agentStatus.textContent = "status unavailable";
   }
+  refreshFollowupButton();
 }
+
+// --- Assistant mode (persona-ux.md v1.2 §3): Guided / Expert / Off, per device ---
+// Guided: suggestion buttons and Ask DIA. Expert: no suggestions; Ask DIA only from the DIA menu and the palette.
+// Off: no Ask DIA and no Gemini call at all. The <head> script applies the saved value before first paint.
+const ASSISTANT_KEY = "dia-assistant";
+const ASSISTANT_MODES = ["guided", "expert", "off"];
+let assistantMode = ASSISTANT_MODES.includes(document.documentElement.dataset.assistant) ? document.documentElement.dataset.assistant : "guided";
+let geminiConnected = false;
+const agentAiLabel = document.querySelector("#agentAiLabel");
+const agentCancel = document.querySelector("#agentCancel");
+const copyQuestions = document.querySelector("#copyQuestions");
+const followupRow = document.querySelector("#followupRow");
+const draftFollowups = document.querySelector("#draftFollowups");
+const assistantOptions = [...document.querySelectorAll(".assistant-option")];
+let agentController = null;
+// Off mode also turns off voice input (speech recognition); Listen and Auto-speak are local speechSynthesis and stay on.
+const VOICE_OFF_NOTE = "Voice input is off in Off mode.";
+let voiceReady = false; // set once the mics and voice fans exist
+
+// Same pattern as an unsupported browser: aria-disabled (still focusable), the note via aria-describedby and the tooltip.
+// If the browser has no speech recognition, the mics are already disabled with their own note, so they're left alone.
+function applyVoiceOff() {
+  if (!voiceReady || !SpeechRecognitionImpl) return;
+  const off = assistantMode === "off";
+  [intakeMic, micButton].forEach((button) => {
+    if (!button || (button.dataset.offMode === "true") === off) return;
+    const wrap = button.closest(".composer");
+    const note = wrap?.querySelector("[id$='MicNote']");
+    const tip = wrap?.querySelector(".cmp-tip-mic");
+    if (off) {
+      if (button.getAttribute("aria-pressed") === "true") cancelRecognition();
+      button.dataset.offMode = "true";
+      button.dataset.describedby = button.getAttribute("aria-describedby") || "";
+      button.setAttribute("aria-disabled", "true");
+      if (note) { note.dataset.text = note.textContent; note.textContent = VOICE_OFF_NOTE; button.setAttribute("aria-describedby", note.id); }
+      if (tip) { tip.dataset.html = tip.innerHTML; tip.textContent = VOICE_OFF_NOTE; }
+    } else {
+      delete button.dataset.offMode;
+      button.removeAttribute("aria-disabled");
+      if (button.dataset.describedby) button.setAttribute("aria-describedby", button.dataset.describedby);
+      else button.removeAttribute("aria-describedby");
+      if (note && note.dataset.text) note.textContent = note.dataset.text;
+      if (tip && tip.dataset.html) tip.innerHTML = tip.dataset.html;
+    }
+  });
+  document.querySelectorAll(".voice-item[id$='FanConversation']").forEach((item) => {
+    if ((item.dataset.off === "true") === off) return;
+    if (off) {
+      item.dataset.off = "true";
+      item.dataset.label = item.getAttribute("aria-label");
+      item.setAttribute("aria-disabled", "true");
+      item.setAttribute("aria-label", `${item.dataset.label} (${VOICE_OFF_NOTE.toLowerCase().replace(/\.$/, "")})`);
+      const note = document.createElement("span");
+      note.className = "voice-note voice-off-note";
+      note.textContent = VOICE_OFF_NOTE;
+      item.querySelector(".voice-label").append(note);
+    } else {
+      delete item.dataset.off;
+      item.removeAttribute("aria-disabled");
+      item.setAttribute("aria-label", item.dataset.label);
+      item.querySelector(".voice-off-note")?.remove();
+    }
+  });
+}
+
+function applyAssistantMode() {
+  document.documentElement.dataset.assistant = assistantMode;
+  assistantOptions.forEach((option) => {
+    const on = option.dataset.assistantMode === assistantMode;
+    option.setAttribute("aria-checked", String(on));
+    option.tabIndex = on ? 0 : -1;
+  });
+  if (assistantMode === "off") {
+    agentController?.abort();
+    if (document.body.dataset.agent === "open") delete document.body.dataset.agent;
+  }
+  applyVoiceOff();
+  refreshFollowupButton();
+}
+
+function setAssistantMode(mode) {
+  if (!ASSISTANT_MODES.includes(mode)) return;
+  assistantMode = mode;
+  try { localStorage.setItem(ASSISTANT_KEY, mode); } catch (error) { /* session only */ }
+  applyAssistantMode(); // aria-checked announces the change
+  // Off also ends a live Conversation mode and cancels its pending Ask DIA request, so a late reply is never
+  // spoken and never restarts the mic (Codex review on PR #38). Only reachable after load, so the voice state exists.
+  if (mode === "off") {
+    chatController?.abort();
+    if (conversationActive) stopConversation("Conversation ended: Assistant is Off");
+  }
+}
+
+assistantOptions.forEach((option, index) => {
+  option.addEventListener("click", () => setAssistantMode(option.dataset.assistantMode));
+  option.addEventListener("keydown", (event) => {
+    const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[event.key];
+    if (!step) return;
+    event.preventDefault();
+    const next = assistantOptions[(index + step + assistantOptions.length) % assistantOptions.length];
+    setAssistantMode(next.dataset.assistantMode);
+    next.focus();
+  });
+});
+
+// One centred button under Validation Issues: Guided only, Gemini connected, and only when there are issues.
+function refreshFollowupButton() {
+  if (!followupRow) return;
+  followupRow.hidden = !(assistantMode === "guided" && geminiConnected && latestPayload?.issues?.length);
+}
+
+function showAiReply(text, { questions = false } = {}) {
+  agentOutput.textContent = text;
+  agentAiLabel.hidden = false;
+  copyQuestions.hidden = !questions;
+}
+
+// On click only: one /api/agent call, `Drafting…` with Cancel (AbortController), result in Ask DIA.
+async function draftFollowUpQuestions() {
+  if (assistantMode === "off" || !latestPayload?.issues?.length) return;
+  openAgent();
+  agentController?.abort();
+  agentController = new AbortController();
+  agentAiLabel.hidden = true;
+  copyQuestions.hidden = true;
+  agentCancel.hidden = false;
+  agentOutput.textContent = "Drafting…";
+  draftFollowups.disabled = true;
+  const prompt =
+    "Draft follow-up questions for the client, one per validation issue below. " +
+    "Return only a short numbered list of client-ready questions, with no preamble. " +
+    "Make no promises about price, dates or outcomes." + buildAgentContext();
+  try {
+    const response = await fetch("/api/agent", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: prompt }),
+      signal: agentController.signal,
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "Agent run failed");
+    showAiReply((payload.reply || "").trim() || "(empty response)", { questions: Boolean(payload.reply) });
+  } catch (error) {
+    agentOutput.textContent = error.name === "AbortError" ? "Drafting cancelled" : error.message;
+  } finally {
+    agentCancel.hidden = true;
+    draftFollowups.disabled = false;
+    agentController = null;
+  }
+}
+
+draftFollowups.addEventListener("click", draftFollowUpQuestions);
+agentCancel.addEventListener("click", () => agentController?.abort());
+copyQuestions.addEventListener("click", () => copyText(agentOutput.textContent, "Questions copied", document.querySelector("#aiStatus")));
 
 // Ground the agent in the deterministic run so its answers (scores, missing
 // fields, tier) agree with the tier card instead of re-scoring a lossy
@@ -246,20 +402,30 @@ function buildAgentContext() {
   return sections.length ? `\n\nContext:\n${sections.join("\n\n---\n\n")}` : "";
 }
 
+// The in-flight Ask DIA request (typed or Conversation mode); switching to Off aborts it.
+let chatController = null;
+
 async function sendAgentMessage() {
+  if (assistantMode === "off") return null; // Off: no Gemini call, ever
   const message = agentMessage.value.trim();
   if (!message) {
     agentOutput.textContent = "Type a question for the agent first.";
     return null;
   }
   const context = buildAgentContext();
-  agentOutput.textContent = "Thinking...";
+  agentOutput.textContent = "Thinking…";
+  agentAiLabel.hidden = true;
+  copyQuestions.hidden = true;
   setBusy(runChat, true);
+  chatController?.abort();
+  const controller = new AbortController();
+  chatController = controller;
   try {
     const response = await fetch("/api/agent", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message: message + context }),
+      signal: controller.signal,
     });
     const payload = await response.json();
     if (payload.enabled === false) {
@@ -269,23 +435,26 @@ async function sendAgentMessage() {
     if (!response.ok) {
       throw new Error(payload.error || "Agent run failed");
     }
-    agentOutput.textContent = payload.reply || "(empty response)";
+    if (controller.signal.aborted || assistantMode === "off") return null;
+    showAiReply(payload.reply || "(empty response)");
     return payload.reply || "";
   } catch (error) {
-    agentOutput.textContent = error.message;
+    agentOutput.textContent = error.name === "AbortError" ? "Request cancelled" : error.message;
     return null;
   } finally {
+    if (chatController === controller) chatController = null;
     setBusy(runChat, agentMessage.disabled);
   }
 }
 
 runChat.addEventListener("click", async () => {
   const reply = await sendAgentMessage();
-  if (autoSpeakEnabled && reply) {
+  if (autoSpeakEnabled && reply && assistantMode !== "off") {
     speakText(reply, listenAgent);
   }
 });
 
+applyAssistantMode();
 refreshAgentStatus();
 
 copyAll.addEventListener("click", async () => {
@@ -300,14 +469,14 @@ downloadMarkdown.addEventListener("click", () => {
 downloadJson.addEventListener("click", () => {
   downloadFile(
     "dia-export.json",
-    JSON.stringify(latestPayload, null, 2),
+    exportJson(latestPayload),
     "application/json"
   );
   flashStatus(exportStatus, "JSON downloaded");
 });
 
 copySection.addEventListener("click", async () => {
-  await copyText(documents[activeDoc] || "", `${activeLabel()} copied`, exportStatus);
+  await copyText(scrubForExport(documents)[activeDoc] || "", `${activeLabel()} copied`, exportStatus);
 });
 
 const draftEditor = document.querySelector("#draftEditor");
@@ -548,6 +717,7 @@ function showResults(payload, questionnaireText) {
   tier.textContent = payload.score.tier;
   score.textContent = `${payload.score.total_score}/${payload.score.max_score} · ${payload.score.timeline}`;
   renderIssues(payload.issues);
+  refreshFollowupButton();
   renderDocument(activeDoc);
   setExportAvailability(true);
   setIntakeCollapsed(true);
@@ -584,10 +754,35 @@ function setExportAvailability(isAvailable) {
   shareX.disabled = !isAvailable;
 }
 
+// Persona v1.2 rule 1: no AI text in client exports. Mirrors scrub_for_export in client_discovery/core.py:
+// drop unreviewed AI keys (strategic_analysis), cut anything appended after opportunity-analysis.md's
+// Score Reasons, and remove every line carrying a "DIA Agent Error", whatever produced it.
+const UNREVIEWED_AI_KEYS = new Set(["strategic_analysis"]);
+function scrubForExport(value, key = null) {
+  if (Array.isArray(value)) return value.map((item) => scrubForExport(item));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).filter(([k]) => !UNREVIEWED_AI_KEYS.has(k)).map(([k, v]) => [k, scrubForExport(v, k)]));
+  }
+  if (typeof value !== "string") return value;
+  let text = value;
+  if (key === "opportunity-analysis.md") {
+    const at = text.indexOf("\n## Score Reasons\n");
+    if (at !== -1) {
+      const head = text.slice(0, at + "\n## Score Reasons\n".length);
+      const bullets = [];
+      for (const line of text.slice(head.length).split("\n")) { if (!line.startsWith("- ")) break; bullets.push(line); }
+      text = `${head}${bullets.join("\n")}\n`;
+    }
+  }
+  return text.split("\n").filter((line) => !line.toLowerCase().includes("dia agent error")).join("\n");
+}
+const exportJson = (result) => JSON.stringify(scrubForExport(result), null, 2);
+
 function buildMarkdownExport(docs = documents) {
+  const safe = scrubForExport(docs || {});
   return tabs
     .map((tab) => tab.dataset.doc)
-    .map((name) => docs[name])
+    .map((name) => safe[name])
     .filter(Boolean)
     .join("\n\n---\n\n");
 }
@@ -930,6 +1125,7 @@ function attachDictation(button, textarea, { continuous = true, intercept, label
     rec.stop();
   }
   button.addEventListener("click", () => {
+    if (button.getAttribute("aria-disabled") === "true") { statusText.textContent = VOICE_OFF_NOTE; return; } // Off mode
     if (intercept?.()) return;
     if (rec) stop();
     else start();
@@ -1175,6 +1371,7 @@ function createVoiceFan(prefix, { conversationRun, conversationNote = null }) {
   fan.addEventListener("focusout", (event) => { if (open && event.relatedTarget && !inside(event.relatedTarget)) api.hide(); });
   document.addEventListener("pointerdown", (event) => { if (open && !inside(event.target)) api.hide(); });
   entries.forEach((entry) => entry.item.addEventListener("click", () => {
+    if (entry.item.dataset.off === "true") { statusText.textContent = VOICE_OFF_NOTE; return; } // Off mode
     if (entry.item.getAttribute("aria-disabled") === "true") { statusText.textContent = `${entry.item.querySelector(".voice-label").firstChild.textContent}: ${entry.note.toLowerCase()} in this browser`; return; }
     const keyboard = entry.item.matches(":focus-visible");
     if (entry.closes) api.hide({ returnFocus: keyboard });
@@ -1188,6 +1385,8 @@ const VoiceFans = {
   intake: createVoiceFan("intake", { conversationRun: () => { if (!conversationActive) openAgent(); conversationMode.click(); } }),
   agent: createVoiceFan("agent", { conversationRun: () => conversationMode.click() }),
 };
+voiceReady = true;
+applyVoiceOff();
 
 // Cmd/Ctrl+Shift+Space toggles voice input for the composer that has focus (intake when neither does).
 document.addEventListener("keydown", (event) => {
@@ -1239,8 +1438,7 @@ shareX.addEventListener("click", () => {
   const scoreInfo = latestPayload.score;
   const text =
     `DIA scored this discovery intake ${scoreInfo.total_score}/${scoreInfo.max_score} ` +
-    `and recommends the "${scoreInfo.tier}" tier. Profile, analysis, and proposal ` +
-    `drafted in seconds by a Gemini ADK agent.`;
+    `and recommends the "${scoreInfo.tier}" tier.`;
   const url = `https://x.com/intent/tweet?text=${encodeURIComponent(text)}`;
   window.open(url, "_blank", "noopener");
   flashStatus(exportStatus, "Opening X share window");
@@ -1264,6 +1462,7 @@ function setStage(stage) {
 
 // Ask DIA can be opened before any intake has run (the agent works on its own).
 function openAgent() {
+  if (assistantMode === "off") return;
   document.body.dataset.agent = "open";
   autosizeComposer(agentMessage);
   agentMessage.focus();
@@ -1499,9 +1698,9 @@ const commands = [
   { id: "run-intake", label: "Run intake", hint: `${modKey} Enter`, enabled: () => !runAgent.disabled && questionnaire.value.trim() !== "", run: () => runAgent.click() },
   { id: "edit-intake", label: "Edit intake", enabled: () => !intakeToggle.hidden && intakeBody.hidden, run: () => { setIntakeCollapsed(false); questionnaire.focus(); } },
   { id: "focus", label: "Focus the input", hint: "/", run: focusComposer },
-  { id: "ask", label: "Ask DIA", run: openAgent },
-  { id: "dictate", label: "Dictate a message", enabled: clickable("#micButton"), run: () => { openAgent(); micButton.click(); } },
-  { id: "conversation", label: "Toggle conversation mode", enabled: clickable("#conversationMode"), run: () => { openAgent(); conversationMode.click(); } },
+  { id: "ask", label: "Ask DIA", enabled: () => assistantMode !== "off", run: openAgent },
+  { id: "dictate", label: "Dictate a message", enabled: () => assistantMode !== "off" && clickable("#micButton")(), run: () => { openAgent(); micButton.click(); } },
+  { id: "conversation", label: "Toggle conversation mode", enabled: () => assistantMode !== "off" && clickable("#conversationMode")(), run: () => { openAgent(); conversationMode.click(); } },
   { id: "tab-profile", label: "View client profile", enabled: hasResults, run: () => selectTab(document.querySelector("#tab-profile"), { focus: true }) },
   { id: "tab-analysis", label: "View opportunity analysis", enabled: hasResults, run: () => selectTab(document.querySelector("#tab-analysis"), { focus: true }) },
   { id: "tab-proposal", label: "View proposal draft", enabled: hasResults, run: () => selectTab(document.querySelector("#tab-proposal"), { focus: true }) },
@@ -1587,11 +1786,25 @@ function updateActive() {
   }
 }
 
+// Where Escape returns focus. Menus hide as the palette opens, so a row inside one maps to the button that opened it
+// (Codex review on PR #32: focus was lost to a hidden DIA menu row).
+function paletteReturnTarget(el) {
+  if (!el || el === document.body || palette.contains(el)) return null;
+  if (navDropdown.contains(el)) return navBrandMenu;
+  const plusMenu = el.closest?.("[id$='PlusMenu']");
+  if (plusMenu) return document.querySelector(`#${plusMenu.id.replace(/Menu$/, "Button")}`) || null;
+  return el;
+}
+
+function canTakeFocus(el) {
+  return Boolean(el && el.isConnected && !el.closest("[hidden], [inert]") && el.getClientRects().length);
+}
+
 function openPalette() {
   if (palette.open) return;
+  paletteReturnFocus = paletteReturnTarget(document.activeElement);
   setNavMenu(false);
   if (helpDialog.open) helpDialog.close();
-  paletteReturnFocus = document.activeElement;
   paletteInput.value = "";
   activeIndex = 0;
   renderPalette();
@@ -1603,9 +1816,10 @@ function closePalette({ restoreFocus = true } = {}) {
   if (!palette.open) return;
   palette.close();
   paletteInput.setAttribute("aria-expanded", "false");
-  if (restoreFocus && paletteReturnFocus && document.contains(paletteReturnFocus)) {
-    paletteReturnFocus.focus();
-  }
+  if (!restoreFocus) return;
+  const target = canTakeFocus(paletteReturnFocus) ? paletteReturnFocus : paletteTrigger;
+  if (canTakeFocus(target)) target.focus();
+  else paletteInput.blur(); // never leave focus inside the closed dialog
 }
 
 function runCommand(command) {
@@ -1745,7 +1959,7 @@ function createPlusMenu(prefix) {
     menu.replaceChildren();
     const rows = [];
     PLUS_GROUPS.forEach((group) => {
-      const visible = group.rows.filter((row) => !(row.hideIn === prefix) && !(row.kind === "link" && !donateUrl));
+      const visible = group.rows.filter((row) => !(row.hideIn === prefix) && !(row.kind === "link" && !donateUrl) && !(row.id === "ask" && assistantMode !== "guided"));
       if (!visible.length) return;
       if (menu.childElementCount) {
         const sep = document.createElement("div");
@@ -1920,9 +2134,8 @@ document.addEventListener("keydown", (event) => {
 // What happens when a 16th intake is filed. Ikenna chose "drop-oldest" (with an
 // Undo / Export it toast). "block" would refuse to file until one is removed.
 const CABINET_CAP_POLICY = "drop-oldest";
-// Several files dropped at once: "merge" appends them into one questionnaire
-// (provisional, pending Ikenna). "first" keeps only the first readable file.
-const MULTI_FILE_MODE = "merge";
+// Several files dropped at once merge into one questionnaire (Ikenna, flows.md v8.9 §2.3).
+// The merge lives only in the combineExtracted function.
 const CABINET_MAX = 15;
 const CABINET_PAGE = 5;
 const MAX_FILES_PER_DROP = 10;
@@ -2013,7 +2226,7 @@ function syncStateIcons(slots = document.querySelectorAll("[data-icon-on]")) {
 }
 
 // Help & settings: segmented radiogroup (roving tabindex; arrows move and select).
-const iconStyleOptions = [...document.querySelectorAll(".icon-style-option")];
+const iconStyleOptions = [...document.querySelectorAll(".icon-style-option[data-icon-style]")];
 iconStyleOptions.forEach((option, index) => {
   option.addEventListener("click", () => setIconStyle(option.dataset.iconStyle));
   option.addEventListener("keydown", (event) => {
@@ -2151,7 +2364,8 @@ async function extractOne(file, signal) {
   return payload;
 }
 
-// The merge strategy lives in one function so it can become a queue later.
+// Multi-file merge (decided, flows.md v8.9 §2.3): the only place files are joined, kept in one
+// function as a cheap safeguard so it could become a queue later.
 function combineExtracted(existing, parts) {
   const blocks = parts.map((part) => (parts.length > 1 ? `<!-- file: ${part.filename} -->\n${part.questionnaire.trim()}` : part.questionnaire.trim()));
   const joined = blocks.join("\n\n---\n\n");
@@ -2163,7 +2377,6 @@ async function loadIntakeFiles(fileList) {
   if (!files.length) return;
   clearIntakeError();
   const notes = [];
-  if (MULTI_FILE_MODE === "first") files = files.slice(0, 1);
   if (files.length > MAX_FILES_PER_DROP) {
     notes.push(`Only the first ${MAX_FILES_PER_DROP} files were read.`);
     files = files.slice(0, MAX_FILES_PER_DROP);
@@ -2748,7 +2961,7 @@ const CabinetDrawer = (() => {
           failedPdfs.push(item.title);
         }
         dir.file(`dia-${slug}.md`, buildMarkdownExport(item.result.documents || {}));
-        dir.file(`dia-${slug}.json`, JSON.stringify(item.result, null, 2));
+        dir.file(`dia-${slug}.json`, exportJson(item.result));
       }
       exportButton.textContent = "Zipping…";
       const blob = await zip.generateAsync({ type: "blob" });
@@ -2827,7 +3040,7 @@ async function fetchPdf(item, signal) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       questionnaire: item.questionnaire,
-      result: item.result,
+      result: scrubForExport(item.result),
       date: new Date(item.savedAt).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" }),
     }),
     signal,
@@ -2863,7 +3076,7 @@ async function exportOne(item, kind, { button = null, status = null } = {}) {
       downloadFile(`${base}.md`, buildMarkdownExport(item.result.documents || {}), "text/markdown");
       say("Markdown downloaded");
     } else {
-      downloadFile(`${base}.json`, JSON.stringify(item.result, null, 2), "application/json");
+      downloadFile(`${base}.json`, exportJson(item.result), "application/json");
       say("JSON downloaded");
     }
     if (readCabinet().some((entry) => entry.id === item.id)) {

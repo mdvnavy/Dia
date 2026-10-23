@@ -74,7 +74,8 @@ def build_intake_response(questionnaire: str) -> dict[str, object]:
         except Exception as e:
             strategic_analysis = f"DIA Agent Error: {e}"
 
-    documents = generate_documents(intake, score, strategic_analysis)
+    # The draft stays out of the documents (and so out of every export); it rides beside them for screen use only.
+    documents = generate_documents(intake, score)
 
     if issues:
         try:
@@ -88,4 +89,5 @@ def build_intake_response(questionnaire: str) -> dict[str, object]:
         "issues": [asdict(issue) for issue in issues],
         "score": asdict(score),
         "documents": documents,
+        "strategic_analysis": strategic_analysis,
     }

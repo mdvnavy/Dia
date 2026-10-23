@@ -135,7 +135,41 @@ def score_opportunity(intake: ClientIntake) -> OpportunityScore:
     )
 
 
-def generate_documents(intake: ClientIntake, score: OpportunityScore, strategic_analysis: str | None = None) -> dict[str, str]:
+# Persona v1.2 rule 1: no AI text in client exports. Gemini output (strategic_analysis, with or without
+# Jules refinement) and its "DIA Agent Error" fallback are unreviewed drafts: never part of the documents.
+# A future "add to export after review" step would append reviewed text explicitly; it doesn't exist yet.
+UNREVIEWED_AI_KEYS = frozenset({"strategic_analysis"})
+AI_ERROR_MARKER = "dia agent error"
+_SCORE_REASONS = "\n## Score Reasons\n"
+
+
+def _deterministic_analysis(text: str) -> str:
+    """Cut opportunity-analysis.md after its last deterministic section (the Score Reasons bullets)."""
+    head, sep, tail = text.partition(_SCORE_REASONS)
+    if not sep:
+        return text
+    bullets = []
+    for line in tail.split("\n"):
+        if not line.startswith("- "):
+            break
+        bullets.append(line)
+    return f"{head}{sep}" + "\n".join(bullets) + "\n"
+
+
+def scrub_for_export(value, key: str | None = None):
+    """Deep-copy a result (or documents) for export: drop unreviewed AI keys, cut appended text from
+    opportunity-analysis.md, and remove any line carrying a DIA Agent Error, whatever produced it."""
+    if isinstance(value, dict):
+        return {k: scrub_for_export(v, k) for k, v in value.items() if k not in UNREVIEWED_AI_KEYS}
+    if isinstance(value, list):
+        return [scrub_for_export(v) for v in value]
+    if isinstance(value, str):
+        text = _deterministic_analysis(value) if key == "opportunity-analysis.md" else value
+        return "\n".join(line for line in text.split("\n") if AI_ERROR_MARKER not in line.lower())
+    return value
+
+
+def generate_documents(intake: ClientIntake, score: OpportunityScore) -> dict[str, str]:
     pain_lines = _numbered_lines(intake.pain_points)
     goal_lines = _numbered_lines(intake.goals)
 
@@ -157,9 +191,6 @@ def generate_documents(intake: ClientIntake, score: OpportunityScore, strategic_
 ## Score Reasons
 {_bullet_lines(score.reasons)}
 """
-    if strategic_analysis:
-        opportunity_analysis += f"\n\n{strategic_analysis}"
-
     return {
         "client-profile.md": f"""# Client Profile: {intake.company_name or 'Unknown'}
 
