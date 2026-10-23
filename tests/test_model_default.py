@@ -4,6 +4,11 @@ from pathlib import Path
 
 import character
 
+
+def _model_id(agent) -> str:
+    # A plain string today; a Vertex-pinned Gemini wrapper once fix/enforce-vertex lands.
+    return getattr(agent.model, "model", agent.model)
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -11,13 +16,13 @@ def test_default_is_the_current_replacement(monkeypatch):
     monkeypatch.delenv("DIA_MODEL", raising=False)
     assert character.DEFAULT_MODEL == "gemini-3.8-flash"
     assert character.agent_model() == "gemini-3.8-flash"
-    assert character.build_agent().model == "gemini-3.8-flash"
+    assert _model_id(character.build_agent()) == "gemini-3.8-flash"
 
 
 def test_dia_model_env_overrides(monkeypatch):
     monkeypatch.setenv("DIA_MODEL", "  pinned-model  ")
     assert character.agent_model() == "pinned-model"
-    assert character.build_agent().model == "pinned-model"
+    assert _model_id(character.build_agent()) == "pinned-model"
     monkeypatch.setenv("DIA_MODEL", "   ")
     assert character.agent_model() == "gemini-3.8-flash"
 
