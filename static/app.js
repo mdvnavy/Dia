@@ -168,6 +168,10 @@ function renderUsage(usage) {
   }
   setRunLimited(runAgent, "generations", usage);
   setRunLimited(runChat, "ask", usage);
+  // Silent on the first fill (page load); announce only later changes, which
+  // only ever happen after a run.
+  if (usageMeter.dataset.filled) usageMeter.setAttribute("aria-live", "polite");
+  usageMeter.dataset.filled = "1";
 }
 
 function setSignedOut(signedOut, { configured = true } = {}) {
