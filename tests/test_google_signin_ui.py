@@ -108,6 +108,7 @@ def live_server(monkeypatch):
         "GOOGLE_CLIENT_ID",
         "OWNER_EMAILS",
         "DIA_SESSION_SECRET",
+        "ASK_DIA_ENABLED",
     ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("GEMINI_API_KEY", "fake-key-for-test")
@@ -228,4 +229,32 @@ def test_google_button_visitor_cap_sign_out_and_owner(browser, live_server, goog
     assert page.text_content("#diaSignOut") == "Owner · Sign out"
     _ask(page, "owner question")
     page.wait_for_function("document.querySelector('#agentOutput').textContent === 'fake agent reply'")
+    page.close()
+
+
+def test_kill_switch_degrades_ask_dia_calmly(browser, live_server, monkeypatch):
+    monkeypatch.setenv("ASK_DIA_ENABLED", "false")
+    page, _ = _page(browser)
+    page.goto(live_server)
+    page.wait_for_function(
+        "document.querySelector('#agentStatus').textContent === 'Temporarily unavailable'"
+    )
+    assert "temporarily unavailable" in page.text_content("#agentOutput")
+    assert page.evaluate("document.querySelector('#agentMessage').disabled") is True
+    assert page.evaluate("document.querySelector('#runChat').disabled") is True
+    assert page.text_content("#agentQuota") == ""  # no quota badge while off
+    page.close()
+
+
+def test_kill_switch_mid_session_503_disables_composer(browser, live_server, monkeypatch):
+    page, _ = _page(browser)
+    page.goto(live_server)
+    page.wait_for_function("document.querySelector('#agentQuota')?.textContent.includes('1 of 1')")
+    monkeypatch.setenv("ASK_DIA_ENABLED", "false")  # flipped after the page loaded
+    _ask(page, "a question")
+    page.wait_for_function(
+        "document.querySelector('#agentOutput').textContent.includes('temporarily unavailable')"
+    )
+    page.wait_for_function("document.querySelector('#runChat').disabled === true")
+    assert page.evaluate("document.querySelector('#agentMessage').disabled") is True
     page.close()

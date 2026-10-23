@@ -75,6 +75,7 @@ def _env(monkeypatch):
         "DIA_QUOTA_STORE",
         "DIA_VISITOR_SALT",
         "GOOGLE_API_KEY",
+        "ASK_DIA_ENABLED",
     ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("DIA_AGENT_RATE_LIMIT", "0")  # isolate the daily cap
@@ -535,3 +536,92 @@ def test_status_reports_quota_and_sign_in(live_agent, google):
     assert payload["signed_in"] is False and payload["email"] is None
     assert payload["quota"]["limit"] == 10 and payload["quota"]["remaining"] == 10
     assert "set-cookie" in headers
+
+
+# --- ASK_DIA_ENABLED kill switch ----------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        (None, True),
+        ("", True),
+        ("  ", True),
+        ("true", True),
+        ("TRUE", True),
+        ("1", True),
+        ("on", True),
+        ("false", False),
+        ("0", False),
+        ("off", False),
+        ("No", False),
+        ("flase", False),  # a typo fails closed
+    ],
+)
+def test_ask_dia_enabled_parsing(monkeypatch, raw, expected):
+    if raw is None:
+        monkeypatch.delenv("ASK_DIA_ENABLED", raising=False)
+    else:
+        monkeypatch.setenv("ASK_DIA_ENABLED", raw)
+    assert agent_auth.ask_dia_enabled() is expected
+
+
+def test_kill_switch_returns_calm_503_and_never_reaches_agent_or_quota(live_agent, monkeypatch):
+    server, calls = live_agent
+    store = agent_quota.get_quota().store
+    monkeypatch.setenv("ASK_DIA_ENABLED", "false")
+    status, payload, headers = _call(server, "POST", "/api/agent", {}, ASK)
+    assert status == 503
+    assert payload == {"enabled": False, "error": agent_auth.ASK_DIA_UNAVAILABLE_MESSAGE}
+    assert "temporarily unavailable" in payload["error"]
+    assert headers["retry-after"] == str(agent_auth.ASK_DIA_RETRY_AFTER_SECONDS)
+    assert calls == []
+    assert not [c for c in store.calls if c[0] == "incr"]  # nothing charged
+    # Status tells the UI to degrade.
+    _, payload, _ = _call(server, "GET", "/api/agent/status")
+    assert payload["enabled"] is False
+    # Flipping it back restores service without a restart.
+    monkeypatch.setenv("ASK_DIA_ENABLED", "true")
+    status, payload, _ = _call(server, "POST", "/api/agent", {}, ASK)
+    assert status == 200 and calls == ["hi"]
+    _, payload, _ = _call(server, "GET", "/api/agent/status")
+    assert payload["enabled"] is True
+
+
+def test_kill_switch_also_stops_owners(live_agent, google, monkeypatch):
+    server, calls = live_agent
+    _, _, session, _ = _sign_in(server, "owner-cred")
+    monkeypatch.setenv("ASK_DIA_ENABLED", "off")
+    status, payload, _ = _call(server, "POST", "/api/agent", {"Cookie": session}, ASK)
+    assert status == 503 and payload["enabled"] is False
+    assert calls == []
+
+
+def test_kill_switch_leaves_the_deterministic_intake_working(live_agent, monkeypatch):
+    # The deterministic intake keeps working while Ask DIA is off.
+    server, _ = live_agent
+    monkeypatch.setenv("ASK_DIA_ENABLED", "false")
+    body = json.dumps({"questionnaire": app.read_sample_questionnaire()})
+    status, payload, _ = _call(server, "POST", "/api/process", {}, body)
+    assert status == 200 and "score" in payload
+
+
+def test_signed_out_visitor_is_burst_limited_per_ip(live_agent, monkeypatch):
+    # Signed out: a per-IP burst guard and the 10/day cap both apply.
+    server, calls = live_agent
+    monkeypatch.setenv("DIA_AGENT_RATE_LIMIT", "3/60")
+    statuses = [_call(server, "POST", "/api/agent", {}, ASK)[0] for _ in range(4)]
+    assert statuses == [200, 200, 200, 429]
+    assert len(calls) == 3
+
+
+def test_owner_bypass_comes_only_from_the_env_allowlist(live_agent, google, monkeypatch):
+    server, calls = live_agent
+    monkeypatch.setenv("DIA_AGENT_DAILY_LIMIT", "1")
+    _, _, session, _ = _sign_in(server, "owner-cred")
+    assert _call(server, "POST", "/api/agent", {"Cookie": session}, ASK)[0] == 200
+    assert _call(server, "POST", "/api/agent", {"Cookie": session}, ASK)[0] == 200
+    # Removing the address from OWNER_EMAILS caps the same session immediately.
+    monkeypatch.setenv("OWNER_EMAILS", "someone-else@example.com")
+    assert _call(server, "POST", "/api/agent", {"Cookie": session}, ASK)[0] == 200  # first of 1
+    assert _call(server, "POST", "/api/agent", {"Cookie": session}, ASK)[0] == 429
