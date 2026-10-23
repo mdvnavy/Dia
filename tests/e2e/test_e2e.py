@@ -324,8 +324,8 @@ def test_f4_obs_not_triggered_on_valid(client, load_questionnaire, mock_obs):
 # =====================================================================
 
 def test_f1_empty_env(client, load_questionnaire):
-    """Empty .env file is handled gracefully."""
-    with patch.dict(os.environ, {}, clear=True):
+    """Empty .env file is handled gracefully (local dev: sign-in gate opened explicitly)."""
+    with patch.dict(os.environ, {"DIA_LOCAL_DEV_NO_SIGN_IN": "true"}, clear=True):
         questionnaire = load_questionnaire("complete_intake.md")
         status, response = client.request("POST", "/api/process", json_data={"questionnaire": questionnaire})
         
