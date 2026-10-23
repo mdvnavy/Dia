@@ -135,14 +135,81 @@ def local_dev_open() -> bool:
 # --- Google ID token verification ----------------------------------------------
 
 
+# Ported from Tia (mdvnavy/tia-sia packages/auth/tokens.py GoogleTokenVerifier):
+# the same google-auth call, the same "Bearer " handling, the same claim checks
+# and error classes. ``google_request_adapter`` is Tia's ``request_adapter``:
+# None means google-auth's real HTTP transport to Google's certs endpoint;
+# tests inject a transport that serves a locally generated key set.
+google_request_adapter: Any = None
+
+
+class TokenVerificationError(ValueError):
+    """Raised when an ID token fails verification (Tia's hierarchy)."""
+
+
+class MissingTokenError(TokenVerificationError):
+    pass
+
+
+class ExpiredTokenError(TokenVerificationError):
+    pass
+
+
+class InvalidIssuerError(TokenVerificationError):
+    pass
+
+
+class InvalidAudienceError(TokenVerificationError):
+    pass
+
+
+class TamperedTokenError(TokenVerificationError):
+    pass
+
+
+class UnverifiedEmailError(TokenVerificationError):
+    pass
+
+
+def _strip_bearer(value: str | None) -> str:
+    """Drop an optional "Bearer" scheme (Tia's rule; a bare "Bearer" is empty)."""
+    parts = (value or "").strip().split(None, 1)
+    if parts and parts[0].lower() == "bearer":
+        return parts[1].strip() if len(parts) > 1 else ""
+    return (value or "").strip()
+
+
 def _google_verify(token: str, audience: str) -> Mapping[str, Any]:
-    """Signature + standard-claim check by google-auth (fetches Google's certs)."""
+    """Signature (Google's published keys), aud and exp via google-auth, as in Tia."""
+    clean = _strip_bearer(token)
+    if not clean:
+        raise MissingTokenError("missing authentication token")
     from google.auth.transport import requests as google_requests
     from google.oauth2 import id_token
 
-    return id_token.verify_oauth2_token(
-        token, google_requests.Request(), audience=audience, clock_skew_in_seconds=10
-    )
+    transport = google_request_adapter or google_requests.Request()
+    try:
+        claims = id_token.verify_oauth2_token(
+            clean, transport, audience=audience, clock_skew_in_seconds=10
+        )
+    except Exception as exc:  # noqa: BLE001 - classified like Tia
+        msg = str(exc).lower()
+        if "expired" in msg:
+            raise ExpiredTokenError("token has expired") from None
+        if "audience" in msg or "wrong recipient" in msg:
+            raise InvalidAudienceError("invalid token audience") from None
+        if "issuer" in msg:
+            raise InvalidIssuerError("invalid token issuer") from None
+        raise TamperedTokenError("token verification failed") from None
+    if claims.get("iss", "") not in GOOGLE_ISSUERS:
+        raise InvalidIssuerError("untrusted token issuer")
+    if not str(claims.get("email", "")).strip():
+        raise TokenVerificationError("token missing email claim")
+    if not claims.get("email_verified", False):
+        raise UnverifiedEmailError("email is not verified by Google")
+    if not str(claims.get("sub", "")).strip():
+        raise TokenVerificationError("token missing sub claim")
+    return claims
 
 
 # Tests replace this with a fake; production always uses google-auth.
@@ -193,11 +260,15 @@ def verify_google_credential(
     client_id = google_client_id()
     if not client_id:
         raise SignInError("Google sign-in is not configured.")
-    token = (credential or "").strip()
+    token = _strip_bearer(credential)
     if not token or len(token) > 4096:
         raise SignInError("Missing Google credential.")
     try:
         claims = google_verifier(token, client_id)
+    except ExpiredTokenError:
+        raise SignInError("Google sign-in expired. Sign in again.") from None
+    except UnverifiedEmailError:
+        raise SignInError("Google account email is not verified.") from None
     except Exception as error:  # noqa: BLE001 - any verifier failure is a rejection
         logger.info("Google ID token rejected: %s", type(error).__name__)
         raise SignInError("Google sign-in failed. Try again.") from None

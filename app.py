@@ -503,9 +503,15 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
             return
         try:
             payload = self.read_json()
-            identity = verify_google_credential(str(payload.get("credential", "")))
+            # Tia sends the GIS credential as "Authorization: Bearer <id token>";
+            # a JSON {"credential"} body is also accepted.
+            credential = self.headers.get("Authorization", "") or str(payload.get("credential", ""))
+            identity = verify_google_credential(credential)
         except SignInError as error:
-            self.send_json({"error": str(error)}, HTTPStatus.UNAUTHORIZED)
+            self.send_json(
+                {"error": str(error), "status": "unauthorized", "authorized": False, "message": str(error)},
+                HTTPStatus.UNAUTHORIZED,
+            )
             return
         except (json.JSONDecodeError, ValueError):
             self.send_json({"error": "invalid json"}, HTTPStatus.BAD_REQUEST)
@@ -513,8 +519,20 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
         self._queue_header(
             "Set-Cookie", session_cookie_header(make_session(identity), self._secure_request())
         )
+        owner = is_owner_identity(identity)
+        # Tia's /api/auth/session shape (status, authorized, message, user) plus
+        # DIA's signed_in/email/owner. The ID token itself is never echoed.
         self.send_json(
-            {"signed_in": True, "email": identity.email, "owner": is_owner_identity(identity)}
+            {
+                "status": "authorized",
+                "authorized": True,
+                "message": "Signed in.",
+                "user": {"sub": identity.sub, "email": identity.email, "name": identity.name},
+                "signed_in": True,
+                "email": identity.email,
+                "owner": owner,
+            },
+            extra_headers={"Cache-Control": "no-store"},
         )
 
     def handle_auth_logout(self) -> None:
