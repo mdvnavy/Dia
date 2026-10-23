@@ -1,0 +1,361 @@
+/* Fonts: vendored static TTFs (templates/report/fonts), no system or network fonts. */
+@font-face { font-family: "Inter"; src: url("fonts/Inter-Regular.ttf") format("truetype"); font-weight: 400; font-style: normal; }
+@font-face { font-family: "Inter"; src: url("fonts/Inter-SemiBold.ttf") format("truetype"); font-weight: 500; font-style: normal; }
+@font-face { font-family: "Inter"; src: url("fonts/Inter-SemiBold.ttf") format("truetype"); font-weight: 600; font-style: normal; }
+@font-face { font-family: "Inter"; src: url("fonts/Inter-Bold.ttf") format("truetype"); font-weight: 700; font-style: normal; }
+@font-face { font-family: "Inter"; src: url("fonts/Inter-Bold.ttf") format("truetype"); font-weight: 800; font-style: normal; }
+@font-face { font-family: "Inter"; src: url("fonts/Inter-Bold.ttf") format("truetype"); font-weight: 900; font-style: normal; }
+@font-face { font-family: "Inter"; src: url("fonts/Inter-Italic.ttf") format("truetype"); font-weight: 400; font-style: italic; }
+@font-face { font-family: "Inter"; src: url("fonts/Inter-Italic.ttf") format("truetype"); font-weight: 500; font-style: italic; }
+@font-face { font-family: "Inter"; src: url("fonts/Inter-Italic.ttf") format("truetype"); font-weight: 600; font-style: italic; }
+@font-face { font-family: "Inter"; src: url("fonts/Inter-Italic.ttf") format("truetype"); font-weight: 700; font-style: italic; }
+@font-face { font-family: "JetBrains Mono"; src: url("fonts/JetBrainsMono-Regular.ttf") format("truetype"); font-weight: 400; font-style: normal; }
+@font-face { font-family: "JetBrains Mono"; src: url("fonts/JetBrainsMono-Regular.ttf") format("truetype"); font-weight: 500; font-style: normal; }
+@font-face { font-family: "JetBrains Mono"; src: url("fonts/JetBrainsMono-Bold.ttf") format("truetype"); font-weight: 600; font-style: normal; }
+@font-face { font-family: "JetBrains Mono"; src: url("fonts/JetBrainsMono-Bold.ttf") format("truetype"); font-weight: 700; font-style: normal; }
+@font-face { font-family: "JetBrains Mono"; src: url("fonts/JetBrainsMono-Bold.ttf") format("truetype"); font-weight: 800; font-style: normal; }
+
+/* DIA intake report: print stylesheet for WeasyPrint (tested on 70.0).
+ *
+ * Paper: A4 by default. For US Letter, change the one line in @page below:
+ *     size: A4;      ->   size: Letter;
+ * The margins are sized to work on both (Letter is 6 mm wider and 18 mm shorter).
+ *
+ * Fonts: Inter (body) and JetBrains Mono (data, labels). local() is tried first,
+ * then the absolute file path on the box. In a container, copy the .ttf files next
+ * to this stylesheet and swap the url()s for relative paths (they resolve against
+ * the base_url passed to WeasyPrint).
+ */
+
+/* ---- Tokens (light theme of the app) ---- */
+:root {
+  --paper:   #fdfcfa;  /* app --surface */
+  --wash:    #f3f1ec;  /* app --bg */
+  --raised:  #f0ede6;
+  --border:  #d9d4c9;
+  --ink:     #16150f;
+  --soft:    #2e2c27;
+  --muted:   #56524b;
+  --silver:  #A3A9B1;
+  --silver-deep: #9EA4AC;
+  --silver-hi:   #D9DCE0;
+  --mark:    #DFA81C;
+  --sans: "Inter", "Helvetica Neue", Arial, sans-serif;
+  --mono: "JetBrains Mono", "DejaVu Sans Mono", monospace;
+}
+
+/* ---- Page: letterhead corner system ----
+   One corner system on every page: the cover band, the page 2+ running header and the
+   footer share the same 10mm paper-edge insets, type and hairline.
+
+   Geometry (A4 or Letter, mm from the paper edge):
+     side inset ......... 10   band/header/footer text starts and ends here
+     header text top .... ~10  (7pt mono caps, cap height)
+     header hairline .... 15   0.5pt silver, spanning the 10mm insets
+     content box ........ 22 top / 24 bottom / 20 sides
+     footer hairline .... 15 from the bottom edge
+     footer text bottom . ~10 from the bottom edge
+   The page's side margin is 10mm so the margin boxes reach the 10mm insets; body gets
+   10mm side padding, which puts the content on the 20mm margin. */
+@page {
+  /* margin boxes don't inherit :root custom properties, so values are literal here */
+  size: A4;                     /* Letter: size: Letter; */
+  margin: 22mm 10mm 24mm 10mm;
+  background: #fdfcfa;
+
+  @top-left {
+    content: "Discovery Intake Agent";
+    width: 50%;
+    margin-bottom: 7mm;            /* hairline sits at 22 - 7 = 15mm */
+    padding-top: 9.2mm;
+    vertical-align: top;
+    font: 500 7pt "JetBrains Mono", monospace;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: #56524b;
+    text-align: left;
+    border-bottom: 0.5pt solid #A3A9B1;
+  }
+  @top-right {
+    content: string(client);
+    width: 50%;
+    margin-bottom: 7mm;
+    padding-top: 9.2mm;
+    vertical-align: top;
+    font: 500 7pt "JetBrains Mono", monospace;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: #56524b;
+    text-align: right;
+    border-bottom: 0.5pt solid #A3A9B1;
+  }
+  @bottom-left {
+    content: "Page " counter(page) " of " counter(pages) "   ·   " string(docdate);
+    width: 70%;
+    margin-top: 9mm;               /* hairline sits at 24 - 9 = 15mm from the bottom */
+    padding-top: 2.4mm;
+    vertical-align: top;
+    font: 500 7pt "JetBrains Mono", monospace;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: #56524b;
+    text-align: left;
+    border-top: 0.5pt solid #A3A9B1;
+  }
+  @bottom-right {
+    content: "Made by BASH";
+    width: 30%;
+    margin-top: 9mm;
+    padding-top: 2.4mm;
+    vertical-align: top;
+    font: 500 7pt "JetBrains Mono", monospace;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: #16150f;
+    text-align: right;
+    border-top: 0.5pt solid #A3A9B1;
+  }
+}
+/* Cover band: label left, date right (the client name lives in the cover body). */
+@page :first {
+  @top-right { content: string(docdate); }
+}
+
+/* ---- Base ---- */
+html { font-family: var(--sans); font-size: 9.5pt; line-height: 1.55; color: var(--soft); }
+body { margin: 0; padding: 0 10mm; }
+* { box-sizing: border-box; }
+
+/* ---- Cover header ---- */
+.cover {
+  break-inside: avoid;
+  break-after: avoid;
+  padding-bottom: 7mm;
+  margin-bottom: 7mm;
+  border-bottom: 0.75pt solid var(--silver);
+}
+/* Wordmark row: DIA centred at the top of the cover body. */
+.cover-top { margin-bottom: 9mm; padding-top: 2mm; text-align: center; }
+/* The date is shown in the band via string(docdate); this source element takes no space. */
+.cover-date { height: 0; overflow: hidden; visibility: hidden; }
+.cover-date .meta-date { string-set: docdate content(); }
+.wordmark {
+  font: 700 34pt/1 var(--sans);
+  letter-spacing: -0.04em;
+  color: var(--ink);
+  padding-top: 3pt;
+}
+/* Mustard BASH mark riding over the I, as in the app's .tittle::after. */
+.tittle { position: relative; display: inline-block; letter-spacing: 0; margin-right: -0.04em; }
+.tittle::after {
+  content: "BASH";
+  position: absolute;
+  top: -3pt;
+  left: 50%;
+  width: 20pt;
+  margin-left: -10pt;
+  text-align: center;
+  font: 700 3.6pt/1 var(--mono);
+  letter-spacing: 0.08em;
+  color: var(--mark);
+}
+.client {
+  string-set: client content();
+  margin: 0 0 7mm;
+  text-align: center;
+  font: 600 24pt/1.12 var(--sans);
+  letter-spacing: -0.025em;
+  color: var(--ink);
+}
+/* Stat row: Tier · Score as a balanced, centred pair. A table gives WeasyPrint a true
+   shared baseline across both values. */
+.stats {
+  width: 120mm;
+  margin: 0 auto;
+  table-layout: fixed;
+  border-collapse: collapse;
+  break-inside: avoid;
+}
+.stats td { width: 50%; text-align: center; padding: 0; }
+.stat-labels td {
+  padding-bottom: 2.5mm;
+  font: 500 6.5pt var(--mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.stat-values td { vertical-align: baseline; line-height: 1; color: var(--ink); }
+/* Tier letter and score share one display scale: Inter 800, 60pt, tight, tabular. Ink, not
+   mustard: #DFA81C on off-white is ~2:1 contrast and goes muddy in office print. */
+.stat-tier,
+.stat-score {
+  font: 800 60pt/1 var(--sans);
+  letter-spacing: -0.045em;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+.out-of {
+  /* hangs to the right of the numerals; the negative right margin cancels its width
+     (4 mono chars at 9pt = 21.6pt, + 1.2mm gap) so the number itself stays centred */
+  margin-left: 1.2mm;
+  margin-right: -25pt;
+  font: 500 9pt var(--mono);
+  letter-spacing: 0.02em;
+  color: var(--muted);
+}
+
+/* ---- Missing details ---- */
+.missing {
+  break-inside: avoid;
+  margin-bottom: 9mm;
+  padding: 4.5mm 5mm 3.5mm;
+  background: var(--wash);
+  border-left: 1.5pt solid var(--mark);
+  border-radius: 0 2mm 2mm 0;
+}
+.block-title {
+  margin: 0 0 2.5mm;
+  font: 600 7pt var(--mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.count {
+  display: inline-block;
+  margin-left: 1.5mm;
+  padding: 0 1.6mm;
+  border: 0.5pt solid var(--silver-deep);
+  border-radius: 99pt;
+  font-weight: 500;
+  color: var(--muted);
+}
+.issue-list { list-style: none; margin: 0; padding: 0; }
+.issue-list li {
+  display: flex;
+  padding: 1.6mm 0;
+  border-top: 0.5pt solid var(--border);
+  break-inside: avoid;
+}
+.issue-list li:first-child { border-top: 0; }
+.issue-index {
+  flex: none;
+  width: 9mm;
+  font: 500 7.5pt/1.75 var(--mono);
+  color: var(--silver-deep);
+}
+.issue-text { color: var(--ink); }
+.none { margin: 0; color: var(--muted); }
+
+/* ---- Sections ---- */
+.section { margin-bottom: 9mm; }
+.section-title {
+  break-after: avoid;
+  margin: 0 0 4mm;
+  padding-bottom: 2.4mm;
+  border-bottom: 0.75pt solid var(--silver);
+  font: 600 14pt/1.2 var(--sans);
+  letter-spacing: -0.015em;
+  color: var(--ink);
+}
+.section-no {
+  display: inline-block;
+  width: 9mm;
+  font: 500 8pt var(--mono);
+  letter-spacing: 0.04em;
+  color: var(--silver-deep);
+  vertical-align: 2pt;
+}
+/* Proposal starts a fresh page when the document runs long; remove if unwanted. */
+#proposal { break-before: auto; }
+
+/* ---- Injected HTML defaults ---- */
+.prose > :first-child { margin-top: 0; }
+.prose h2, .prose h3, .prose h4 { break-after: avoid; color: var(--ink); }
+.prose h2 { margin: 6mm 0 2mm; font: 600 11pt/1.3 var(--sans); letter-spacing: -0.01em; }
+.prose h3 { margin: 5mm 0 1.5mm; font: 600 9.5pt/1.35 var(--sans); }
+.prose h4 {
+  margin: 4mm 0 1mm;
+  font: 600 7pt var(--mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.prose p { margin: 0 0 2.6mm; orphans: 3; widows: 3; }
+.prose strong { font-weight: 600; color: var(--ink); }
+.prose em { font-style: italic; }
+.prose a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--silver); }
+.prose ul, .prose ol { margin: 0 0 3mm; padding-left: 5mm; }
+.prose li { margin: 0 0 1.2mm; padding-left: 1mm; }
+.prose ul { list-style: none; }
+.prose ul > li { position: relative; }
+.prose ul > li::before {
+  content: "";
+  position: absolute;
+  left: -4mm;
+  top: 2.1mm;
+  width: 2mm;
+  border-top: 0.75pt solid var(--silver-deep);
+}
+.prose ol { list-style: none; counter-reset: item; }
+.prose ol > li { position: relative; counter-increment: item; }
+.prose ol > li::before {
+  content: counter(item, decimal-leading-zero);
+  position: absolute;
+  left: -5mm;
+  top: 0.35mm;
+  font: 500 7pt/1.75 var(--mono);
+  color: var(--silver-deep);
+}
+.prose code {
+  font: 400 8.2pt var(--mono);
+  padding: 0.2mm 1mm;
+  background: var(--raised);
+  border-radius: 1mm;
+  color: var(--ink);
+}
+.prose pre {
+  font: 400 8pt/1.5 var(--mono);
+  padding: 3mm 4mm;
+  background: var(--wash);
+  border: 0.5pt solid var(--border);
+  border-radius: 1.5mm;
+  white-space: pre-wrap;
+  break-inside: avoid;
+}
+.prose pre code { padding: 0; background: none; }
+.prose blockquote {
+  margin: 3mm 0 3.5mm;
+  padding: 0.5mm 0 0.5mm 4mm;
+  border-left: 1pt solid var(--silver);
+  color: var(--muted);
+  font-style: italic;
+  break-inside: avoid;
+}
+.prose blockquote p:last-child { margin-bottom: 0; }
+.prose hr { border: 0; border-top: 0.5pt solid var(--silver); margin: 5mm 0; }
+.prose table {
+  width: 100%;
+  margin: 1mm 0 4mm;
+  border-collapse: collapse;
+  font-size: 8.5pt;
+}
+.prose thead { display: table-header-group; } /* repeat header across pages */
+.prose th {
+  text-align: left;
+  font: 600 6.5pt var(--mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 0 3mm 1.8mm 0;
+  border-bottom: 0.75pt solid var(--silver);
+}
+.prose td {
+  padding: 1.8mm 3mm 1.8mm 0;
+  border-bottom: 0.5pt solid var(--border);
+  vertical-align: top;
+}
+.prose tr { break-inside: avoid; }
+.prose td.num, .prose th.num { text-align: right; font-family: var(--mono); padding-right: 0; }
+
+/* Keep short lists with their lead-in heading rather than stranding the last item. */
+.prose h3 + ul, .prose h3 + ol, .prose h4 + ul, .prose h4 + ol { break-inside: avoid; }
+

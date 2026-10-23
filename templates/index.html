@@ -8,6 +8,9 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/cabinet-fan.css">
+  <link rel="stylesheet" href="/static/pixel-hover.css">
+  <link rel="stylesheet" href="/static/fanout-pixel.css">
   <link rel="stylesheet" href="/static/style.css">
   <script>
     // Apply the saved (or system) theme before first paint to avoid a flash.
@@ -18,6 +21,14 @@
         document.documentElement.dataset.theme = theme;
       } catch (error) {
         document.documentElement.dataset.theme = "dark";
+      }
+      try {
+        var icons = localStorage.getItem("dia-icon-style");
+        var valid = /^(line|zelda|dia-pixel)$/.test(icons || "");
+        if (icons !== null && !valid) localStorage.setItem("dia-icon-style", "line"); // unknown or old value
+        document.documentElement.dataset.iconStyle = valid ? icons : "line";
+      } catch (error) {
+        document.documentElement.dataset.iconStyle = "line";
       }
     })();
   </script>
@@ -65,6 +76,14 @@
           <span>Search actions</span>
           <kbd class="kbd-hint" id="paletteShortcutHint">⌘K</kbd>
         </button>
+        <div class="cabinet" id="cabinetDock" data-open="false">
+          <button id="cabinetButton" class="cabinet-btn px-btn" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="fan" aria-label="Cabinet" title="Filing cabinet: this session's intakes">
+            <span class="icon icon-idle" data-icon="cabinet" aria-hidden="true"></span>
+            <span class="icon icon-active" data-icon="cabinet-open" aria-hidden="true"></span>
+            <span id="cabinetCount" class="cabinet-badge" aria-hidden="true" hidden>0</span>
+          </button>
+          <ul class="fan" id="fan" role="menu" aria-label="Recent intakes"></ul>
+        </div>
         <button id="themeToggle" class="icon-button ghost-round" type="button" aria-pressed="false" aria-label="Switch to light mode">
           <svg class="theme-icon-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
           <svg class="theme-icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
@@ -83,15 +102,30 @@
           <p class="prompt-callout" id="intakeNote">Intake scoring is deterministic and needs no API key. Only Ask DIA sends your text to Gemini.</p>
           <button id="intakeToggle" class="text-link" type="button" aria-expanded="true" aria-controls="intakeBody" hidden>Collapse intake</button>
         </div>
+        <!-- Intake tray (upload) and filing cabinet (this session's intakes). Icons by Glyph. -->
+        <div class="dock-row">
+          <button id="trayButton" class="dock-icon tray-icon px-btn" type="button" aria-label="Upload a file" aria-describedby="dropHint" title="Drop a file here or click to upload">
+            <span class="icon icon-idle" data-icon="tray" aria-hidden="true"></span>
+            <span class="icon icon-active" data-icon="tray-active" aria-hidden="true"></span>
+          </button>
+          <span class="dock-hint" aria-hidden="true">Drop a file</span>
+        </div>
+        <p id="dropHint" class="visually-hidden">You can also drop or upload .txt, .md, .csv, .docx, .doc, .rtf or .json files up to 5 MB.</p>
+        <input id="trayInput" type="file" multiple accept=".txt,.md,.markdown,.text,.csv,.tsv,.json,.rtf,.docx,.doc" hidden>
+        <div id="fileChips" class="file-chips" hidden></div>
         <div id="intakeBody">
           <div class="prompt-bar composer" id="intakeComposer">
-            <textarea id="questionnaire" class="prompt-input" rows="1" aria-label="Questionnaire Markdown" aria-describedby="intakeNote" spellcheck="false" placeholder="Paste a completed discovery questionnaire..."></textarea>
+            <textarea id="questionnaire" class="prompt-input" rows="1" aria-label="Questionnaire Markdown" aria-describedby="intakeNote dropHint" spellcheck="false" placeholder="Paste a questionnaire, or drop a file here…"></textarea>
             <button id="runAgent" class="action-btn" type="button" aria-label="Run intake" title="Run intake (Ctrl/⌘ + Enter)">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
             </button>
           </div>
         </div>
+        <div id="intakeError" class="intake-error" role="alert" hidden></div>
         <div class="actions under-prompt">
+          <button id="uploadLink" class="text-link" type="button">Upload a file</button>
+          <button id="uploadCancel" class="text-link" type="button" hidden>Cancel</button>
+          <span class="dot-sep" aria-hidden="true">·</span>
           <button id="loadSample" class="text-link" type="button">Load sample</button>
           <span class="dot-sep" aria-hidden="true">·</span>
           <button type="button" class="text-link help-link" data-command="help" aria-haspopup="dialog" aria-controls="diaHelpDialog">Learn how to use DIA</button>
@@ -153,6 +187,7 @@
           <div class="export-bar" role="group" aria-label="Output export actions">
             <button id="copyAll" type="button" disabled>Copy all</button>
             <button id="downloadMarkdown" type="button" disabled>Download MD</button>
+            <button id="downloadPdf" type="button" disabled>Download PDF</button>
             <button id="downloadJson" type="button" disabled>Download JSON</button>
             <button id="copySection" type="button" disabled>Copy section</button>
             <button id="listenDocument" class="icon-button speech-only" type="button" aria-pressed="false" disabled>
@@ -208,6 +243,46 @@
     <footer class="footer-note">Press <kbd class="kbd-hint">⌘K</kbd> for actions</footer>
   </main>
 
+  <!-- Filing cabinet drawer: everything filed this session (max 15). -->
+  <dialog id="cabinetDrawer" class="drawer" aria-labelledby="cabinetTitle">
+    <div class="drawer-head">
+      <div>
+        <h2 id="cabinetTitle" tabindex="-1">Filing cabinet</h2>
+        <p id="cabinetSummary" class="drawer-sub"></p>
+      </div>
+      <button id="cabinetSelectMode" class="text-link" type="button">Select</button>
+      <button id="cabinetClose" class="drawer-x" type="button" aria-label="Close filing cabinet">×</button>
+    </div>
+    <div id="cabinetSelectBar" class="drawer-select-bar" hidden>
+      <label><input id="cabinetSelectAll" type="checkbox"> <span id="cabinetSelectAllLabel">Select all</span></label>
+      <span id="cabinetCountLive" aria-live="polite"></span>
+    </div>
+    <div id="cabinetFull" class="drawer-note drawer-full" hidden>
+      <strong>Your cabinet is full (15 of 15).</strong>
+      <p>Export the ones you want to keep. The next intake you run will replace the oldest one.</p>
+      <button id="cabinetSelectExport" type="button">Select and export</button>
+    </div>
+    <div id="cabinetEmpty" class="drawer-note drawer-empty" hidden>
+      <p><strong>Nothing filed yet.</strong><br>Run an intake and it'll be filed here.</p>
+      <button id="cabinetStart" type="button">Start an intake</button>
+    </div>
+    <ul id="cabinetList" class="cabinet-list drawer-list" role="list"></ul>
+    <button id="cabinetMore" class="text-link drawer-more" type="button" hidden>Show more</button>
+    <div class="drawer-foot" id="cabinetFoot" hidden>
+      <button id="cabinetExport" class="drawer-export" type="button" aria-disabled="true">Export selected</button>
+      <button id="cabinetExportCancel" class="text-link" type="button" hidden>Cancel</button>
+      <p id="cabinetHelper" class="drawer-helper">Select at least one intake.</p>
+    </div>
+    <p id="cabinetLive" class="visually-hidden" aria-live="polite"></p>
+    <p id="cabinetAlert" class="drawer-alert" role="alert"></p>
+  </dialog>
+
+  <div id="toast" class="toast" hidden>
+    <span id="toastText" role="status" aria-live="polite"></span>
+    <span id="toastActions" class="toast-actions"></span>
+    <button id="toastClose" class="toast-x" type="button" aria-label="Dismiss">×</button>
+  </div>
+
   <!-- Command palette -->
   <dialog id="commandPalette" class="palette" aria-label="Command palette">
     <div class="palette-search">
@@ -220,7 +295,7 @@
 
   <!-- How-to dialog (mirrors Tia's "Learn how to use" dialog). -->
   <dialog id="diaHelpDialog" class="help-dialog" aria-labelledby="diaHelpTitle">
-    <h2 id="diaHelpTitle">Learn how to use DIA</h2>
+    <h2 id="diaHelpTitle">Help &amp; settings</h2>
     <p>DIA turns a discovery questionnaire into a scored opportunity and three ready-to-use documents: a client profile, an opportunity analysis, and a proposal draft.</p>
     <ol>
       <li>Paste a completed questionnaire into the box, or choose <strong>Load sample</strong>.</li>
@@ -228,11 +303,23 @@
       <li>Review the tier, score, and validation issues, then switch between Profile, Analysis, and Proposal.</li>
       <li>Ask DIA follow-up questions. Press Enter to send and Shift + Enter for a new line. This uses the live Gemini agent.</li>
       <li>Load a document into the Draft Editor to polish it into an email, then copy or download it.</li>
+      <li>Drop a .txt, .md, .csv, .docx, .doc, .rtf or .json file on the tray (or press <kbd class="kbd-hint">Ctrl/⌘</kbd> + <kbd class="kbd-hint">O</kbd>) to fill the questionnaire.</li>
+      <li>Every run is filed in the cabinet for this browser tab (up to 15). Open it with <kbd class="kbd-hint">Ctrl/⌘</kbd> + <kbd class="kbd-hint">Shift</kbd> + <kbd class="kbd-hint">F</kbd> to reopen or export PDF, Markdown, JSON or a .zip.</li>
     </ol>
     <p class="help-tip">Press <kbd class="kbd-hint">⌘K</kbd> anywhere for the command palette, or <kbd class="kbd-hint">/</kbd> to jump to the input.</p>
+    <section class="help-settings" aria-labelledby="iconStyleTitle">
+      <h3 id="iconStyleTitle">Icon style</h3>
+      <div class="icon-style-control" role="radiogroup" aria-labelledby="iconStyleTitle" aria-describedby="iconStyleHelp">
+        <button type="button" role="radio" class="icon-style-option" data-icon-style="line" aria-checked="true" tabindex="0"><span class="icon" data-icon="cabinet" data-icon-set="line" aria-hidden="true"></span>Line</button>
+        <button type="button" role="radio" class="icon-style-option" data-icon-style="zelda" aria-checked="false" tabindex="-1"><span class="icon" data-icon="cabinet" data-icon-set="zelda" aria-hidden="true"></span>Zelda</button>
+        <button type="button" role="radio" class="icon-style-option" data-icon-style="dia-pixel" aria-checked="false" tabindex="-1"><span class="icon" data-icon="cabinet" data-icon-set="dia-pixel" aria-hidden="true"></span>Dia pixel</button>
+      </div>
+      <p id="iconStyleHelp" class="setting-note">Changes the tray and cabinet icons. Saved on this device.</p>
+    </section>
     <form method="dialog"><button class="help-close" autofocus>Close</button></form>
   </dialog>
 
+  <script src="/static/vendor/jszip.min.js" defer></script>
   <script src="/static/app.js"></script>
 </body>
 </html>

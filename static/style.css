@@ -929,3 +929,143 @@ html[data-theme="light"] .tittle::after { opacity: 1; }
 html[data-theme="light"] .action-btn { box-shadow: 0 4px 12px rgba(60, 66, 74, 0.18), inset 0 2px 2px rgba(255, 255, 255, 0.9), inset 0 -2px 3px rgba(60, 66, 74, 0.22); }
 html[data-theme="light"] .action-btn:hover,
 html[data-theme="light"] .action-btn:focus-visible { box-shadow: 0 6px 18px rgba(60, 66, 74, 0.24), 0 0 16px rgba(var(--accent-rgb), 0.45), inset 0 2px 3px #ffffff, inset 0 -2px 4px rgba(60, 66, 74, 0.28); }
+
+
+/* ==========================================================================
+   Intake tray + filing cabinet (feature/intake-tray-cabinet).
+   Motion for the cabinet stack lives in /static/cabinet-fan.css only.
+   ========================================================================== */
+:root { --control-focus: #c3c8cf; }                  /* new controls, dark: >=3:1 on #0c0c0e */
+html[data-theme="light"] { --control-focus: #5f6670; } /* new controls, light: >=3:1 on #f3f1ec */
+
+/* Icon slots: one source file per icon per set. Line icons stay silver-on-ink in
+   BOTH themes via a dedicated token (not the theme --accent). */
+.icon { display: grid; place-items: center; line-height: 0; --accent: var(--icon-accent, #A3A9B1); --mark: var(--icon-mark, #DFA81C); }
+.icon svg { width: 20px; height: 20px; }
+.icon .px { width: 32px; height: 32px; image-rendering: pixelated; image-rendering: crisp-edges; } /* 2x of 16px sprite */
+.icon-active { display: none; }
+.cabinet-btn.open .icon-idle,
+.tray-icon.drop-over .icon-idle { display: none; }
+.cabinet-btn.open .icon-active,
+.tray-icon.drop-over .icon-active { display: grid; }
+.cabinet { --fan-silver: #9EA4AC; }                  /* badge silver in both themes */
+.cabinet-btn { color: var(--text); }
+.cabinet-btn:hover { border-color: var(--fan-silver); }
+.cabinet-badge { position: absolute; top: -4px; right: -4px; box-shadow: 0 0 0 2px var(--bg); }
+
+/* Tray (upload) */
+.dock-row { display: flex; align-items: center; gap: 10px; margin: 0 0 10px 4px; }
+.dock-icon {
+  width: 44px; height: 44px; display: grid; place-items: center; padding: 0;
+  border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text);
+  cursor: pointer; transition: border-color 140ms linear, background-color 140ms linear;
+}
+.dock-icon:hover { border-color: #9EA4AC; }
+.dock-icon:focus-visible,
+.drawer button:focus-visible, .drawer input:focus-visible,
+.toast button:focus-visible, .file-chip button:focus-visible,
+#uploadLink:focus-visible, #uploadCancel:focus-visible, #downloadPdf:focus-visible { outline: 2px solid var(--control-focus); outline-offset: 2px; }
+.dock-icon.busy { opacity: 0.6; cursor: progress; }
+.dock-hint { color: var(--muted); font: 400 12px var(--mono, "JetBrains Mono", monospace); opacity: 0; transition: opacity 140ms linear; }
+.dock-row:hover .dock-hint, body.file-dragging .dock-hint { opacity: 1; }
+body.file-dragging .dock-hint::after { content: " · release to add"; }
+body.file-dragging .tray-icon { border-color: var(--icon-mark, #DFA81C); }
+/* Drag-over: dashed outline on the composer, no scrim. */
+body.file-dragging #intakeComposer { outline: 2px dashed var(--control-focus); outline-offset: 4px; }
+#intakeComposer.is-reading { opacity: 0.7; }
+.file-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px 4px; }
+.file-chip {
+  display: inline-flex; align-items: center; gap: 6px; padding: 3px 4px 3px 10px;
+  border: 1px solid var(--border); border-radius: 9999px; background: var(--surface);
+  color: var(--muted); font: 400 12px var(--mono, "JetBrains Mono", monospace);
+}
+.chip-x { border: 0; background: transparent; color: var(--muted); cursor: pointer; min-width: 24px; min-height: 24px; border-radius: 50%; }
+.intake-error { margin: 10px 4px 0; padding: 10px 14px; border: 1px solid #c2410c; border-radius: 10px; color: var(--text); background: rgba(194, 65, 12, 0.08); font-size: 14px; }
+.intake-error p { margin: 0; }
+.intake-error p + p { margin-top: 4px; }
+
+
+/* Cabinet drawer: right side, ~380px; bottom sheet on mobile */
+.drawer {
+  position: fixed; inset: 0 0 0 auto; margin: 0; width: min(380px, 100vw); max-width: 100vw; height: 100dvh; max-height: 100dvh;
+  padding: 20px; border: 0; border-left: 1px solid var(--border); background: var(--bg); color: var(--text);
+  box-shadow: -18px 0 48px rgba(0, 0, 0, 0.18); overflow-y: auto;
+}
+/* Drawer slide only when motion is welcome; otherwise it simply appears (flows.md 6.5). */
+@media (prefers-reduced-motion: no-preference) {
+  .drawer { transform: translateX(16px); opacity: 0; transition: transform 200ms cubic-bezier(0.22, 1, 0.36, 1), opacity 160ms linear; }
+  .drawer.is-open { transform: none; opacity: 1; }
+}
+.drawer::backdrop { background: rgba(0, 0, 0, 0.28); }
+.drawer-head { display: flex; align-items: center; gap: 8px; }
+.drawer-head h2 { margin: 0; flex: 1; font: 700 20px/1.3 var(--sans); }
+.drawer-head h2:focus { outline: none; }
+.drawer-sub { margin: 2px 0 14px; color: var(--muted); font: 400 12px var(--mono, monospace); }
+.drawer button { font: 500 13px var(--sans); color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; cursor: pointer; min-height: 32px; }
+.drawer button:hover { border-color: #9EA4AC; }
+.drawer button[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; }
+.drawer-select-bar { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; font-size: 13px; }
+.drawer-select-bar [aria-live] { margin-left: auto; color: var(--muted); font-family: var(--mono, monospace); }
+.drawer-note { margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; font-size: 13px; }
+.drawer-note p { margin: 0 0 8px; color: var(--muted); }
+.drawer-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.drawer-card article { display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.card-check { grid-row: 1 / span 2; align-self: start; padding-top: 2px; }
+.card-check[hidden] { display: none; }
+.card-check input { width: 18px; height: 18px; accent-color: #5f6670; }
+.card-body { grid-column: 2; min-width: 0; }
+.card-title { margin: 0; font: 500 14px/1.3 var(--sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card-meta, .card-exported { margin: 2px 0 0; color: var(--muted); font: 400 11px/1.4 var(--mono, monospace); }
+.card-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; }
+.card-actions[hidden] { display: none; }
+.card-remove { margin-left: auto; }
+.card-status { grid-column: 1 / -1; margin: 0; color: var(--muted); font-size: 12px; min-height: 0; }
+.card-status:empty { display: none; }
+.drawer-more { margin: 12px 0 0; width: 100%; }
+.drawer-foot { position: sticky; bottom: -20px; margin: 14px -20px -20px; padding: 12px 20px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; background: var(--bg); border-top: 1px solid var(--border); }
+.drawer-foot p { margin: 0; width: 100%; color: var(--muted); font-size: 12px; }
+.drawer-foot p[hidden] { display: none; }
+#cabinetAlert:empty { display: none; }
+#cabinetAlert { margin: 12px 0 0; color: var(--text); font-size: 13px; }
+@media (max-width: 600px) {
+  .drawer { inset: auto 0 0 0; width: 100vw; height: auto; max-height: 85dvh; border-left: 0; border-top: 1px solid var(--border); border-radius: 16px 16px 0 0; }
+  .drawer button, .card-check input { min-height: 44px; }
+  .card-check input { min-width: 24px; }
+}
+
+/* Toast */
+.toast {
+  position: fixed; left: 50%; bottom: 24px; z-index: 60; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 10px; max-width: min(560px, calc(100vw - 32px));
+  padding: 10px 10px 10px 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22); font-size: 14px;
+}
+.toast[hidden] { display: none; }
+#toastActions { display: flex; gap: 6px; }
+.toast button { border: 1px solid var(--border); border-radius: 8px; background: transparent; color: var(--text); padding: 5px 10px; cursor: pointer; font: 500 13px var(--sans); }
+#toastClose { border: 0; font-size: 16px; }
+
+@media (prefers-reduced-motion: no-preference) and (max-width: 600px) {
+  .drawer { transform: translateY(16px); }
+  .drawer.is-open { transform: none; }
+}
+.drawer [hidden], .dock-row [hidden], .file-chips[hidden], .intake-error[hidden] { display: none !important; }
+
+/* Help & settings: Icon style segmented control (glyph/icon-setting.md) */
+.help-settings { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); }
+.help-settings h3 { margin: 0 0 10px; font: 600 15px var(--sans); text-transform: none; }
+.setting-note { margin: 8px 0 0 !important; font-size: 12px; }
+.icon-style-control { display: inline-flex; gap: 4px; padding: 4px; border: 1px solid var(--border); border-radius: 12px; background: var(--raised, var(--surface)); --accent: #A3A9B1; }
+.icon-style-option { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px 6px 8px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--muted); font: 500 13px var(--sans); cursor: pointer; }
+.icon-style-option .icon svg { width: 32px; height: 32px; }
+.icon-style-option[aria-checked="true"] { background: var(--surface); border-color: #9EA4AC; color: var(--text); font-weight: 600; }
+html:not([data-theme="light"]) .icon-style-option[aria-checked="true"] { background: #2a2a2e; border-color: #A3A9B1; }
+.icon-style-option:focus-visible { outline: 2px solid #7C828A; outline-offset: 2px; }
+html:not([data-theme="light"]) .icon-style-option:focus-visible { outline-color: #D9DCE0; }
+/* Badge + count stay silver in both themes (dark --accent-deep is gold). */
+.cabinet .cabinet-badge, .cabinet .fan-count { background: #9EA4AC; }
+#cabinetSelectAll { width: 18px; height: 18px; accent-color: #5f6670; }
+@media (max-width: 600px) {
+  .icon-style-control { display: flex; width: 100%; }
+  .icon-style-option { flex: 1; justify-content: center; min-height: 44px; }
+}

@@ -6,3 +6,8 @@ pytest==9.1.1
 requests==2.34.2
 obsws-python==1.8.0
 obs-websocket-py==1.0
+python-docx==1.2.0
+striprtf==0.0.34
+weasyprint==70.0
+Jinja2==3.1.6
+Markdown==3.11.2

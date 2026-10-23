@@ -7,8 +7,9 @@ import json
 import logging
 import mimetypes
 import os
+import re
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from client_discovery.core import (
     generate_documents,
@@ -33,6 +34,10 @@ PUBLIC_FILES = {
     "/": BASE_DIR / "templates" / "index.html",
     "/static/app.js": BASE_DIR / "static" / "app.js",
     "/static/style.css": BASE_DIR / "static" / "style.css",
+    "/static/cabinet-fan.css": BASE_DIR / "static" / "cabinet-fan.css",
+    "/static/pixel-hover.css": BASE_DIR / "static" / "pixel-hover.css",
+    "/static/fanout-pixel.css": BASE_DIR / "static" / "fanout-pixel.css",
+    "/static/vendor/jszip.min.js": BASE_DIR / "static" / "vendor" / "jszip.min.js",
 }
 # Runtime sample lives outside tests/ so it ships in the Cloud Run image even
 # when test files are excluded by .dockerignore.
@@ -40,6 +45,19 @@ SAMPLE_PATHS = (
     BASE_DIR / "samples" / "sample_questionnaire.md",
     BASE_DIR / "tests" / "fixtures" / "complete_questionnaire.md",
 )
+
+
+ICON_DIR = BASE_DIR / "static" / "icons"
+ICON_PATH = re.compile(r"^/static/icons/((?:[a-z0-9-]{1,32}/)?[a-z0-9][a-z0-9@-]{0,63}\.(?:svg|png|webp|gif))$")
+
+
+def icon_file(path: str) -> Path | None:
+    """Swappable UI icon sets: /static/icons/<set>/<name>.svg|png (no traversal)."""
+    match = ICON_PATH.match(path)
+    if not match:
+        return None
+    candidate = ICON_DIR / match.group(1)
+    return candidate if candidate.is_file() else None
 
 
 def read_sample_questionnaire() -> str:
@@ -88,6 +106,8 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
 
         file_path = PUBLIC_FILES.get(path)
         if file_path is None:
+            file_path = icon_file(path)
+        if file_path is None:
             self.send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
             return
 
@@ -100,6 +120,12 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/agent":
             self.handle_agent()
+            return
+        if path == "/api/extract":
+            self.handle_extract()
+            return
+        if path == "/api/pdf":
+            self.handle_pdf()
             return
         self.send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
 
@@ -127,6 +153,70 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
         # locally and the intake surfaced issues. It never affects the response.
         if response.get("issues") and _obs_capture_enabled():
             self._trigger_obs_capture()
+
+    def handle_extract(self) -> None:
+        """Raw file body in, questionnaire text out. Filename via X-Filename or ?name=."""
+        from client_discovery.extract import MAX_UPLOAD_BYTES, ExtractionError, extract_text
+
+        query = parse_qs(urlparse(self.path).query)
+        filename = unquote(self.headers.get("X-Filename", "")) or (query.get("name") or [""])[0]
+        try:
+            content_length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            content_length = -1
+        if content_length < 0:
+            self.send_json({"error": "invalid content length"}, HTTPStatus.BAD_REQUEST)
+            return
+        if content_length > MAX_UPLOAD_BYTES:
+            self.close_connection = True
+            self.send_json(
+                {"error": "That file is over 5 MB. Try a smaller export of the questionnaire."},
+                HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+            )
+            return
+        data = self.rfile.read(content_length)
+        try:
+            text = extract_text(filename, data)
+        except ExtractionError as error:
+            self.send_json({"error": str(error)}, HTTPStatus(error.status))
+            return
+        except Exception as error:  # noqa: BLE001 - never 500 with a stack trace
+            logger.warning("extraction failed for %s: %s", filename, error)
+            self.send_json({"error": "That file couldn't be read. Try saving it as .txt or .docx."}, HTTPStatus.BAD_REQUEST)
+            return
+        self.send_json({"filename": filename, "questionnaire": text, "characters": len(text)})
+
+    def handle_pdf(self) -> None:
+        """Render the formatted intake report. Body: {questionnaire} or {result}, optional date."""
+        from client_discovery.report import pdf_filename, render_pdf
+
+        try:
+            payload = self.read_json()
+            questionnaire = str(payload.get("questionnaire") or "")
+            if questionnaire.strip():
+                result = build_intake_response(questionnaire)
+            elif isinstance(payload.get("result"), dict):
+                result = payload["result"]
+            else:
+                raise ValueError("questionnaire or result is required")
+            report_date = payload.get("date")
+            body = render_pdf(result, report_date=str(report_date) if report_date else None)
+        except json.JSONDecodeError:
+            self.send_json({"error": "invalid json"}, HTTPStatus.BAD_REQUEST)
+            return
+        except ValueError as error:
+            self.send_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
+            return
+        except Exception as error:  # noqa: BLE001
+            logger.warning("pdf render failed: %s", error)
+            self.send_json({"error": "PDF rendering failed on the server."}, HTTPStatus.INTERNAL_SERVER_ERROR)
+            return
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "application/pdf")
+        self.send_header("Content-Disposition", f'attachment; filename="{pdf_filename(result)}"')
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def _record_engagement(self, response: dict[str, object]) -> None:
         try:

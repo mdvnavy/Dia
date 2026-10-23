@@ -1,0 +1,352 @@
+/* Source: glyph/fanout.css v3 (straight-down stack), copied verbatim. Single home of the
+ * cabinet stack open/close motion; JS counterpart: CabinetFan in static/app.js. */
+/* DIA filing cabinet: quick-peek STACK (v3: straight vertical drawer stack; replaces the arc).
+ * The fan is a PEEK, not the cabinet. The full cabinet is the right-side drawer (~380px)
+ * from flows.md §3.2, which owns "Show more" paging (5 -> 10 -> 15).
+ *
+ * Markup:
+ *   <div class="cabinet" data-open="false">
+ *     <button class="cabinet-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="fan"
+ *             aria-label="Cabinet, 3 unexported">
+ *       …cabinet.svg (aria-hidden)…
+ *       <span class="cabinet-badge" aria-hidden="true">3</span>   (only when unexported > 0; 9+ cap)
+ *     </button>
+ *     <ul class="fan" id="fan" role="menu" aria-label="Recent intakes">
+ *       <li style="--i:1"><button class="fan-card" role="menuitem">
+ *         <span class="fan-title">Harbourline Ceramics</span>
+ *         <span class="fan-meta">3:12 AM · Tier B</span>
+ *         <span class="fan-reveal">Score <span class="fan-score">72</span></span>
+ *       </button></li>   … up to 5
+ *       <li class="fan-open" style="--i:6"><button class="fan-open-btn" role="menuitem">
+ *         Open cabinet <span class="fan-count" aria-hidden="true">12</span></button></li>
+ *     </ul>
+ *   </div>
+ * JS toggles data-open="true|false" on .cabinet and aria-expanded on the button.
+ * The button is never disabled. Routing (JS):
+ *   0 intakes                    -> open the drawer's empty state ("Start an intake"), no fan
+ *   prefers-reduced-motion       -> open the drawer directly, no fan
+ *   <=600px (mobile)             -> open the bottom sheet directly, no fan
+ *   otherwise                    -> fan; slot 6 "Open cabinet (N)" is ALWAYS present
+ * The CSS below also hides the fan under reduced motion and on mobile as a guard.
+ *
+ * Colour rule: mustard (--mark) is NOT used anywhere in the fan. It is reserved for the
+ * drag-over cue on the tray. Active/current and exported markers use muted ink.
+ */
+
+/* ---- Dia motion tokens (v4) ----
+ * Sources: github.com/mdvnavy/components @ 24ca6589b67f16cfbe255275170a6f4c8b932357 (repo-relative paths below).
+ * Springs are converted to CSS linear() with spring_to_linear.py (0.5px rest rule, Glyph's choice);
+ * each has a cubic-bezier fallback for browsers without linear(). Full table: motion-from-components.md. */
+:root {
+  /* componentry/packages/ui/src/lib/ease.ts EASE_OUT [0.16,1,0.3,1] (also amicro/registry/ui/entrance/fade-down.tsx, "easeOutExpo") */
+  --dia-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  /* Dia's own (not from the repo): quick ease-in for dismissals */
+  --dia-ease-in: cubic-bezier(0.55, 0, 0.75, 0.2);
+  /* Dia's own (not from the repo): Show more reveal ease-out */
+  --dia-ease-reveal: cubic-bezier(0, 0, 0.2, 1);
+  /* componentry/packages/ui/src/lib/ease.ts EASE_DRAWER [0.32,0.72,0,1]: fallback for --dia-spring-panel */
+  --dia-ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  /* componentry/packages/ui/src/lib/ease.ts SPRING_PANEL {stiffness 420, damping 40, mass 0.5}, zeta 1.38, no overshoot,
+     converted for a 380px travel -> 552ms */
+  --dia-spring-panel: var(--dia-ease-drawer);
+  --dia-dur-panel: 552ms;
+  /* componentry/packages/ui/src/lib/ease.ts SPRING_LAYOUT {stiffness 360, damping 32, mass 0.6}, zeta 1.09, no overshoot,
+     converted for the 28px tuck travel -> 286ms */
+  --dia-spring-layout: var(--dia-ease-out);
+  --dia-dur-layout: 286ms;
+  /* Dia's own durations (kept; the repo's 500-800ms entrance durations are too slow for a menu peek) */
+  --dia-dur-stack-open: 280ms;
+  --dia-dur-stack-close: 180ms;
+  --dia-stagger-open: 30ms;
+  --dia-stagger-close: 18ms;
+  --dia-dur-lift: 160ms;
+  --dia-dur-reveal: 160ms;
+  --dia-dur-fade-reduced: 120ms;   /* flows.md §6.5: drawer opacity-only fade under reduced motion */
+  /* ui-prototypes/2026-07-28_tia_teacher_inverse_workspace_interface.html slideUp (300ms ease, 12px rise); the app's style.css has the same keyframes */
+  --dia-dur-toast-in: 300ms;
+  --dia-ease-toast: ease;
+}
+@supports (transition-timing-function: linear(0, 1)) {
+  :root {
+    --dia-spring-panel: linear(0, 0.228, 0.485, 0.663, 0.78, 0.856, 0.906, 0.939, 0.96, 0.974, 0.983, 0.989, 0.993, 0.995, 0.997, 0.998, 1);
+    --dia-spring-layout: linear(0, 0.074, 0.212, 0.363, 0.499, 0.613, 0.701, 0.773, 0.828, 0.87, 0.902, 0.926, 0.944, 0.958, 0.969, 0.976, 1);
+  }
+}
+
+.cabinet {
+  --fan-card-w: 240px;
+  --fan-card-h: 76px;         /* full card; only the top --fan-step shows when stacked */
+  --fan-step: 48px;           /* y step between cards: title + meta band stays readable */
+  --fan-tuck: calc(var(--fan-card-h) - var(--fan-step));   /* 28px tucked under the next card */
+  --fan-lift: -4px;           /* hovered/focused card rises; componentry/apps/web/app/sponsors/page.tsx card hover translate3d(0,-4px,0) */
+  --fan-hover-dur: var(--dia-dur-lift);
+  --fan-hover-ease: var(--dia-ease-out);   /* ease.ts EASE_OUT */
+  --fan-radius: 12px;
+  --fan-open-dur: var(--dia-dur-stack-open);
+  --fan-close-dur: var(--dia-dur-stack-close);
+  --fan-open-ease: var(--dia-ease-out);    /* ease.ts EASE_OUT (was 0.22,1,0.36,1) */
+  --fan-close-ease: var(--dia-ease-in);
+  --fan-open-stagger: var(--dia-stagger-open);
+  --fan-close-stagger: var(--dia-stagger-close);
+  --fan-shift-dur: var(--dia-dur-layout);
+  --fan-shift-ease: var(--dia-spring-layout);   /* ease.ts SPRING_LAYOUT -> linear() */
+
+  --fan-surface: var(--surface, #fdfcfa);
+  --fan-border: var(--border, #d9d4c9);
+  --fan-ink: var(--text, #16150f);
+  --fan-muted: var(--muted, #56524b);
+  --fan-silver: var(--accent-deep, #9EA4AC);
+  --fan-ring: #7C828A;        /* focus ring, light: 3.8:1 on --surface (#9EA4AC was 2.45:1) */
+  --fan-chip-bg: #D9DCE0;     /* score chip: silver fill, pinned in both themes */
+  --fan-chip-ink: #16150f;    /* score chip text, pinned */
+  --fan-badge-ink: #16150f;   /* count badge text, pinned in both themes */
+  --fan-shadow: 0 10px 28px rgba(28, 20, 8, 0.12), 0 2px 6px rgba(28, 20, 8, 0.06);
+  --fan-shadow-hover: 0 14px 34px rgba(28, 20, 8, 0.16), 0 2px 6px rgba(28, 20, 8, 0.08);
+  /* overlap depth: a 1px top edge + a short shadow cast UP onto the card behind */
+  --fan-edge: 0 -1px 0 rgba(28, 20, 8, 0.06), 0 -6px 12px -8px rgba(28, 20, 8, 0.18);
+
+  position: relative;
+  display: inline-block;
+}
+
+/* Dark theme keeps its previous ring (the app's dark --accent-deep). */
+:root[data-theme="dark"] .cabinet { --fan-ring: var(--fan-silver); }
+
+/* ---- Top-bar button + unexported badge ---- */
+.cabinet-btn {
+  position: relative;
+  width: 36px; height: 36px;
+  display: grid; place-items: center;
+  border: 1px solid var(--fan-border);
+  border-radius: 50%;
+  background: var(--fan-surface);
+  color: var(--fan-ink);
+  cursor: pointer;
+}
+.cabinet-btn svg { width: 18px; height: 18px; }
+.cabinet-btn:focus-visible { outline: 2px solid var(--fan-ring); outline-offset: 3px; }
+@media (max-width: 600px) { .cabinet-btn { width: 44px; height: 44px; } }
+
+/* Count badge: silver-deep ground, ink text (flows.md §0.1 #2). Also used for N in "Open cabinet". */
+.cabinet-badge,
+.fan-count {
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 9999px;
+  background: var(--accent-deep, #9EA4AC);
+  color: var(--fan-badge-ink);
+  font: 600 10px/16px "JetBrains Mono", ui-monospace, monospace;
+  text-align: center;
+}
+.cabinet-badge {
+  position: absolute;
+  top: -4px; right: -5px;
+  box-shadow: 0 0 0 2px var(--bg, #f3f1ec);   /* knock-out ring against the top bar */
+}
+.fan-count { display: inline-block; margin-left: 6px; vertical-align: 1px; }
+
+/* ---- Stack: drops straight DOWN from the top-right button, like folders in a drawer ----
+ * Slot n rests at y = (n-1) * --fan-step. Each later card sits IN FRONT (higher z) and covers
+ * the lower --fan-tuck of the card above it, so every card shows its title + meta band.
+ * No rotation, no x offset. */
+.fan {
+  position: absolute;
+  top: calc(100% + 12px);
+  right: -6px;
+  width: var(--fan-card-w);
+  height: 0;
+  margin: 0; padding: 0;
+  list-style: none;
+  pointer-events: none;
+  z-index: 40;
+}
+.fan > li {
+  --y: calc((var(--i, 1) - 1) * var(--fan-step));
+  --nudge: 0px;
+  position: absolute;
+  top: 0; right: 0;
+  z-index: var(--i, 1);                 /* later = in front */
+  transform: translateY(-12px) scale(0.96);
+  transform-origin: 50% 0%;
+  opacity: 0;
+  translate: 0 var(--nudge);            /* hover shift lives on `translate`, not `transform` */
+  transition:
+    transform var(--fan-close-dur) var(--fan-close-ease) calc((6 - var(--i, 1)) * var(--fan-close-stagger)),  /* close: farthest first */
+    opacity var(--fan-close-dur) linear calc((6 - var(--i, 1)) * var(--fan-close-stagger)),
+    translate var(--fan-shift-dur) var(--fan-shift-ease) 0ms;
+}
+/* "Open cabinet (N)" sits under the fully visible 5th card, 10px gap:
+   y = 4 * step + card-h + 10 = 278px with the defaults. With n < 5 cards JS sets --i = n + 1
+   and --y-open: calc((n - 1) * step + card-h + 10px). */
+.fan > li.fan-open { --y: var(--y-open, calc(4 * var(--fan-step) + var(--fan-card-h) + 10px)); }
+
+.cabinet[data-open="true"] .fan { pointer-events: auto; }
+.cabinet[data-open="true"] .fan > li {
+  transform: translateY(var(--y)) scale(1);
+  opacity: 1;
+  transition:
+    transform var(--fan-open-dur) var(--fan-open-ease) calc((var(--i, 1) - 1) * var(--fan-open-stagger)),  /* open: nearest first */
+    opacity calc(var(--fan-open-dur) * 0.6) linear calc((var(--i, 1) - 1) * var(--fan-open-stagger)),
+    translate var(--fan-shift-dur) var(--fan-shift-ease) 0ms;
+}
+/* Hover/focus reveal: cards BELOW the hovered one shift down by the tucked band, so the hovered
+   card's lower band (score) shows. SPRING_LAYOUT (ease.ts) as linear(), 286ms, no delay, no overshoot.
+   Because it's on `translate`, moving between cards retargets smoothly and never picks up the stagger. */
+.cabinet[data-open="true"] .fan > li:is(:hover, :focus-within) ~ li { --nudge: var(--fan-tuck); }
+
+/* ---- Card (peek: one button = Reopen; full actions live in the drawer) ----
+ * Top band (always visible, 48px): title + meta (time · tier, or the exported tick).
+ * Lower band (28px, tucked until hover/focus, or on the last card): score chip. */
+.fan-card {
+  box-sizing: border-box;
+  position: relative;
+  width: var(--fan-card-w);
+  height: var(--fan-card-h);
+  display: grid;
+  grid-template-rows: 18px 16px 1fr;
+  row-gap: 2px;
+  align-content: start;
+  padding: 8px 14px 0;
+  text-align: left;
+  border: 1px solid var(--fan-border);
+  border-radius: var(--fan-radius);
+  background: var(--fan-surface);
+  color: var(--fan-ink);
+  box-shadow: var(--fan-edge), 0 2px 6px rgba(28, 20, 8, 0.05);
+  font: 500 13px/18px Inter, ui-sans-serif, system-ui, sans-serif;
+  cursor: pointer;
+  transition: transform var(--fan-hover-dur) var(--fan-hover-ease),
+              box-shadow var(--fan-hover-dur) linear, border-color var(--fan-hover-dur) linear;
+}
+.fan > li:nth-child(1) .fan-card { box-shadow: var(--fan-shadow); }   /* front of drawer: full shadow */
+.fan-title { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.fan-meta {
+  font: 400 11px/16px "JetBrains Mono", ui-monospace, monospace;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--fan-muted);
+}
+.fan-exported { color: var(--fan-muted); }      /* "✓ 2026-10-22", muted ink, never mustard */
+.fan-reveal {                                    /* lower band */
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font: 500 9.5px/1 "JetBrains Mono", ui-monospace, monospace;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--fan-muted);
+}
+.fan-score {
+  min-width: 30px;
+  padding: 3px 6px;
+  border: 1px solid var(--fan-silver);
+  border-radius: 6px;
+  background: var(--fan-chip-bg);
+  color: var(--fan-chip-ink);
+  font: 600 11px/1 "JetBrains Mono", ui-monospace, monospace;
+  letter-spacing: 0;
+  text-align: center;
+}
+/* Current/active intake: small muted-ink dot. Mustard is reserved for drag-over. */
+.fan-card[aria-current="true"] .fan-title::before {
+  content: "";
+  display: inline-block;
+  width: 6px; height: 6px;
+  margin: 0 7px 1px 0;
+  border-radius: 50%;
+  background: var(--fan-muted);
+  vertical-align: middle;
+}
+
+.fan-card:hover,
+.fan-card:focus-visible {
+  transform: translateY(var(--fan-lift));
+  border-color: var(--fan-silver);
+  box-shadow: var(--fan-edge), var(--fan-shadow-hover);
+}
+.fan-card:focus-visible { outline: 2px solid var(--fan-ring); outline-offset: 2px; }
+/* Reduced-motion guard for any card that renders anyway (componentry/apps/web/app/sponsors/page.tsx pattern:
+   motion-reduce:transform-none + motion-reduce:transition-colors): keep colour/shadow, drop movement. */
+@media (prefers-reduced-motion: reduce) {
+  .fan-card { transition-property: border-color, box-shadow; }
+  .fan-card:hover, .fan-card:focus-visible { transform: none; }
+  .fan > li { translate: none; }
+}
+
+/* ---- Last slot: "Open cabinet (N)" -> closes the fan, opens the drawer ---- */
+.fan-open { display: flex; justify-content: flex-end; width: var(--fan-card-w); }
+.fan-open-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px 6px 14px;
+  border: 1px solid var(--fan-border);
+  border-radius: 9999px;
+  background: var(--fan-surface);
+  color: var(--fan-ink);
+  box-shadow: var(--fan-shadow);
+  font: 500 12px/1.2 Inter, ui-sans-serif, system-ui, sans-serif;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.fan-open-btn:hover { border-color: var(--fan-silver); }
+.fan-open-btn:focus-visible { outline: 2px solid var(--fan-ring); outline-offset: 2px; }
+
+/* Guards: no fan under reduced motion or on mobile; JS opens the drawer / sheet instead. */
+@media (prefers-reduced-motion: reduce) { .fan { display: none; } }
+@media (max-width: 600px) { .fan { display: none; } }
+
+/* ---- Drawer "Show more" reveal (5 -> 10 -> 15) ----
+ * Add .is-new to the (max 5) newly revealed <li>s with --k = 0..4, then remove it next frame
+ * or after 320ms. Only the new cards animate; existing cards never move. */
+.cabinet-list > li.is-new {
+  animation: cabinet-reveal var(--dia-dur-reveal) var(--dia-ease-reveal) both;   /* Dia's own; nothing in the repo fit better */
+  animation-delay: calc(min(var(--k, 0), 4) * var(--dia-stagger-open));          /* capped at 5 cards */
+}
+@keyframes cabinet-reveal {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cabinet-list > li.is-new { animation-name: cabinet-reveal-fade; }
+  @keyframes cabinet-reveal-fade { from { opacity: 0; } to { opacity: 1; } }
+}
+
+/* ---- Drawer open / close (suggested hook: the cabinet <dialog class="cabinet-drawer">; Forge owns the name) ----
+ * componentry/packages/ui/src/lib/ease.ts SPRING_PANEL ("overlay panel entrances: modals and sheets") as linear(),
+ * 552ms for the ~380px slide, the same curve both ways; EASE_DRAWER cubic-bezier is the fallback.
+ * Reduced motion (flows.md §6.5): <=120ms opacity only, no slide. */
+.cabinet-drawer {
+  translate: 100% 0;
+  transition: translate var(--dia-dur-panel) var(--dia-spring-panel), overlay var(--dia-dur-panel) allow-discrete,
+              display var(--dia-dur-panel) allow-discrete;
+}
+.cabinet-drawer[open] { translate: 0 0; }
+@starting-style { .cabinet-drawer[open] { translate: 100% 0; } }
+.cabinet-drawer::backdrop { opacity: 0; transition: opacity var(--dia-dur-panel) var(--dia-spring-panel); }
+.cabinet-drawer[open]::backdrop { opacity: 1; }
+@starting-style { .cabinet-drawer[open]::backdrop { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .cabinet-drawer, .cabinet-drawer[open] { translate: none; }
+  @starting-style { .cabinet-drawer[open] { translate: none; } }
+  .cabinet-drawer { opacity: 0; transition: opacity var(--dia-dur-fade-reduced) linear, overlay var(--dia-dur-fade-reduced) allow-discrete,
+                    display var(--dia-dur-fade-reduced) allow-discrete; }
+  .cabinet-drawer[open] { opacity: 1; }
+  @starting-style { .cabinet-drawer[open] { opacity: 0; } }
+}
+
+/* ---- Toast entrance (suggested hook: .toast) ----
+ * ui-prototypes/2026-07-28_tia_teacher_inverse_workspace_interface.html slideUp: opacity 0 -> 1, translateY(12px) -> 0,
+ * 300ms ease (the app's style.css already has the same slideUp). No exit motion is defined in the repo or in Dia. */
+.toast { animation: dia-toast-in var(--dia-dur-toast-in) var(--dia-ease-toast) both; }
+@keyframes dia-toast-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .toast { animation-name: dia-toast-fade; }
+  @keyframes dia-toast-fade { from { opacity: 0; } to { opacity: 1; } }
+}
+
+/* ---- Tray drag-over: unchanged. Nothing in the repo matched a drop-target cue; see pixel/pixel-hover.css px-bob
+ * (400ms steps(1)) for the pixel styles. Mustard stays drag-over only. ---- */
