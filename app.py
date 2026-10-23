@@ -34,7 +34,7 @@ MAX_REQUEST_BYTES = 10 * 1024 * 1024
 PUBLIC_FILES = {
     "/": BASE_DIR / "templates" / "index.html",
     "/static/app.js": BASE_DIR / "static" / "app.js",
-    "/static/owner-key.js": BASE_DIR / "static" / "owner-key.js",
+    "/static/google-signin.js": BASE_DIR / "static" / "google-signin.js",
     "/static/style.css": BASE_DIR / "static" / "style.css",
 }
 # Runtime sample lives outside tests/ so it ships in the Cloud Run image even
@@ -72,6 +72,8 @@ def build_intake_response(questionnaire: str) -> dict[str, object]:
 # Separate burst guard for /api/agent/status so page loads don't eat the
 # agent's burst allowance; when exceeded, status just omits the quota.
 status_rate_limiter = RateLimiter()
+# Sign-in attempts get their own burst guard (each one may fetch Google certs).
+auth_rate_limiter = RateLimiter()
 
 
 class ClientDiscoveryHandler(BaseHTTPRequestHandler):
@@ -91,6 +93,9 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
         if path == "/api/agent/status":
             self.handle_agent_status()
             return
+        if path == "/api/auth/config":
+            self.handle_auth_config()
+            return
 
         file_path = PUBLIC_FILES.get(path)
         if file_path is None:
@@ -106,6 +111,12 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/agent":
             self.handle_agent()
+            return
+        if path == "/api/auth/session":
+            self.handle_auth_session()
+            return
+        if path == "/api/auth/logout":
+            self.handle_auth_logout()
             return
         self.send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
 
@@ -164,6 +175,86 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
 
     # --- live agent ---------------------------------------------------------
 
+    def _secure_request(self) -> bool:
+        return bool(os.environ.get("K_SERVICE")) or (
+            self.headers.get("X-Forwarded-Proto", "").lower() == "https"
+        )
+
+    def _queue_header(self, name: str, value: str) -> None:
+        pending = getattr(self, "_pending_headers", None)
+        if pending is None:
+            pending = self._pending_headers = []
+        pending.append((name, value))
+
+    def _auth_state(self) -> dict[str, object]:
+        from agent_auth import is_owner_email, session_email
+
+        email = session_email(self.headers)
+        return {"signed_in": bool(email), "email": email, "owner": is_owner_email(email)}
+
+    def handle_auth_config(self) -> None:
+        from agent_auth import google_client_id, sign_in_enabled
+
+        enabled = sign_in_enabled()
+        self.send_json(
+            {
+                "enabled": enabled,
+                "google_client_id": google_client_id() if enabled else None,
+                **self._auth_state(),
+            }
+        )
+
+    def handle_auth_session(self) -> None:
+        from agent_auth import (
+            SignInError,
+            client_ip,
+            is_owner_email,
+            make_session,
+            session_cookie_header,
+            sign_in_enabled,
+            verify_google_credential,
+        )
+
+        if not sign_in_enabled():
+            self.send_json({"error": "Google sign-in is not configured."}, HTTPStatus.NOT_FOUND)
+            return
+        # JSON only: a cross-site <form> can't send application/json without a
+        # CORS preflight, so this also blocks login CSRF.
+        if not self.headers.get("Content-Type", "").lower().startswith("application/json"):
+            self.send_json({"error": "json body required"}, HTTPStatus.UNSUPPORTED_MEDIA_TYPE)
+            return
+        allowed, retry_after = auth_rate_limiter.check(
+            client_ip(self.headers, self.client_address[0])
+        )
+        if not allowed:
+            self.send_json(
+                {"error": "Too many sign-in attempts. Give it a minute and try again."},
+                HTTPStatus.TOO_MANY_REQUESTS,
+                extra_headers={"Retry-After": str(retry_after)},
+            )
+            return
+        try:
+            payload = self.read_json()
+            identity = verify_google_credential(str(payload.get("credential", "")))
+        except SignInError as error:
+            self.send_json({"error": str(error)}, HTTPStatus.UNAUTHORIZED)
+            return
+        except (json.JSONDecodeError, ValueError):
+            self.send_json({"error": "invalid json"}, HTTPStatus.BAD_REQUEST)
+            return
+        self._queue_header(
+            "Set-Cookie", session_cookie_header(make_session(identity), self._secure_request())
+        )
+        self.send_json(
+            {"signed_in": True, "email": identity.email, "owner": is_owner_email(identity.email)}
+        )
+
+    def handle_auth_logout(self) -> None:
+        from agent_auth import clear_session_cookie_header
+
+        self._queue_header("Set-Cookie", clear_session_cookie_header(self._secure_request()))
+        self.send_json({"signed_in": False, "email": None, "owner": False})
+
     def _visitor_keys(self) -> list[str]:
         """Quota buckets for this request; mints the visitor cookie if needed."""
         from agent_auth import client_ip
@@ -178,31 +269,25 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
         visitor_id = parse_cookie(self.headers.get("Cookie"))
         if not valid_visitor_id(visitor_id):
             visitor_id = new_visitor_id()
-            secure = bool(os.environ.get("K_SERVICE")) or (
-                self.headers.get("X-Forwarded-Proto", "").lower() == "https"
+            self._queue_header(
+                "Set-Cookie", visitor_cookie_header(visitor_id, self._secure_request())
             )
-            self._pending_headers = {
-                **getattr(self, "_pending_headers", {}),
-                "Set-Cookie": visitor_cookie_header(visitor_id, secure),
-            }
         ip = client_ip(self.headers, self.client_address[0])
         return visitor_keys(ip, visitor_id)
 
     def handle_agent_status(self) -> None:
-        from agent_auth import client_ip, configured_mode, is_owner, supplied_owner_token
+        from agent_auth import client_ip, configured_mode
         from agent_quota import get_quota
         from agent_runtime import is_configured
 
         payload: dict[str, object] = {
             "configured": is_configured(),
             "auth": configured_mode(),
+            **self._auth_state(),
         }
-        if is_owner(self.headers):
-            payload.update(owner=True, quota=None)
+        if payload["owner"]:
+            payload["quota"] = None
         else:
-            payload["owner"] = False
-            if supplied_owner_token(self.headers):
-                payload["owner_key"] = "invalid"
             keys = self._visitor_keys()
             allowed, _ = status_rate_limiter.check(
                 client_ip(self.headers, self.client_address[0])
@@ -214,19 +299,14 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
         self.send_json(payload)
 
     def handle_agent(self) -> None:
-        from agent_auth import (
-            agent_rate_limiter,
-            client_ip,
-            is_owner,
-            supplied_owner_token,
-        )
+        from agent_auth import agent_rate_limiter, client_ip, is_owner
         from agent_quota import get_quota, limit_message
         from agent_runtime import AgentNotConfigured, is_configured, run_agent
 
         owner = is_owner(self.headers)
         if not owner:
-            # Burst guard first, so bad owner keys and scripted clients are
-            # throttled before anything else (including the quota store).
+            # Burst guard first, so scripted clients are throttled before
+            # anything else (including the quota store). Owners skip it.
             allowed, retry_after = agent_rate_limiter.check(
                 client_ip(self.headers, self.client_address[0])
             )
@@ -235,18 +315,6 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
                     {"error": "Too many questions at once. Give it a minute and try again."},
                     HTTPStatus.TOO_MANY_REQUESTS,
                     extra_headers={"Retry-After": str(retry_after)},
-                )
-                return
-            if supplied_owner_token(self.headers):
-                self.send_json(
-                    {
-                        "error": (
-                            "Owner key not recognised. Fix or remove it in "
-                            "Help & settings to ask as a visitor."
-                        )
-                    },
-                    HTTPStatus.UNAUTHORIZED,
-                    extra_headers={"WWW-Authenticate": 'Bearer realm="dia-owner"'},
                 )
                 return
 
@@ -340,9 +408,9 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
-        headers = {**getattr(self, "_pending_headers", {}), **(extra_headers or {})}
-        self._pending_headers = {}
-        for name, value in headers.items():
+        headers = [*(getattr(self, "_pending_headers", None) or []), *(extra_headers or {}).items()]
+        self._pending_headers = []
+        for name, value in headers:
             self.send_header(name, value)
         self.end_headers()
         self.wfile.write(body)

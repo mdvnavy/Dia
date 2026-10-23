@@ -1,34 +1,54 @@
-"""Owner sign-in, client identification and burst limiting for ``/api/agent``.
+"""Google Sign-In owner sessions, client identification and burst limiting.
 
-Interim policy (see ``agent_quota`` for the daily visitor cap):
+Interim policy for ``/api/agent`` (see ``agent_quota`` for the daily cap):
 
-* **Visitors** may use Ask DIA anonymously, capped per day by ``agent_quota``,
-  and by a short per-IP burst guard (``DIA_AGENT_RATE_LIMIT``, default
-  ``10/60``) that keeps scripted clients from hammering the quota store.
-* **The owner** is unlimited. The owner signs in once by pasting the owner key
-  into *Help & settings* (kept in the browser's localStorage) and the UI sends
-  it as ``Authorization: Bearer <key>``. The server compares it to
-  ``DIA_OWNER_TOKEN`` in constant time. The key is never logged or echoed.
+* **Visitors** use Ask DIA anonymously, capped per calendar day by
+  ``agent_quota`` and by a short per-IP burst guard (``DIA_AGENT_RATE_LIMIT``,
+  default ``10/60``) that keeps scripted clients off the quota store.
+* **Owners** sign in with Google. The browser gets a Google ID token from
+  Google Identity Services and POSTs it once to ``/api/auth/session``. The
+  server verifies it (signature, ``aud`` = ``GOOGLE_CLIENT_ID``, ``iss``,
+  ``exp``, ``email_verified``) and sets a 12-hour HttpOnly session cookie
+  signed with ``DIA_SESSION_SECRET``. Emails in ``OWNER_EMAILS`` (comma list,
+  case-insensitive) are unlimited and skip the burst guard; any other
+  signed-in account is treated exactly like an anonymous visitor.
 
-``DIA_OWNER_TOKEN`` shorter than ``MIN_OWNER_TOKEN_LENGTH`` characters is
-ignored (with a warning) so a weak key can't become an unlimited bypass.
+Owner status is re-derived from ``OWNER_EMAILS`` on every request, so removing
+an address takes effect immediately; the cookie only carries the verified
+email. Sign-in is offered only when both ``GOOGLE_CLIENT_ID`` and a
+``DIA_SESSION_SECRET`` of at least ``MIN_SESSION_SECRET_LENGTH`` characters
+are set; otherwise the button is hidden and everyone gets the visitor cap.
+Neither the ID token nor the secret is ever logged or echoed.
 """
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import hmac
+import json
 import logging
 import os
 import threading
 import time
 from collections import deque
-from typing import Callable, Mapping
+from dataclasses import dataclass
+from typing import Any, Callable, Mapping
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_RATE_LIMIT = "10/60"
-MIN_OWNER_TOKEN_LENGTH = 32
-OWNER_HEADER = "X-DIA-Owner-Token"
+GOOGLE_ISSUERS = ("accounts.google.com", "https://accounts.google.com")
+SESSION_COOKIE = "dia_session"
+SESSION_TTL_SECONDS = 12 * 60 * 60
+SESSION_VERSION = "v1"
+MIN_SESSION_SECRET_LENGTH = 32
+# Leeway for clock skew between this instance and Google when checking exp.
+CLOCK_SKEW_SECONDS = 60
+
+
+class SignInError(ValueError):
+    """A Google ID token was rejected. The message is safe to show users."""
 
 
 def _header(headers: Mapping[str, str], name: str) -> str:
@@ -36,39 +56,184 @@ def _header(headers: Mapping[str, str], name: str) -> str:
     return value.strip() if isinstance(value, str) else ""
 
 
-def owner_token() -> str:
-    token = os.environ.get("DIA_OWNER_TOKEN", "").strip()
-    if token and len(token) < MIN_OWNER_TOKEN_LENGTH:
+def google_client_id() -> str:
+    return os.environ.get("GOOGLE_CLIENT_ID", "").strip()
+
+
+def owner_emails() -> frozenset[str]:
+    raw = os.environ.get("OWNER_EMAILS", "")
+    return frozenset(part.strip().lower() for part in raw.split(",") if part.strip())
+
+
+def is_owner_email(email: str | None) -> bool:
+    return bool(email) and email.strip().lower() in owner_emails()
+
+
+def session_secret() -> bytes:
+    secret = os.environ.get("DIA_SESSION_SECRET", "").strip()
+    if secret and len(secret) < MIN_SESSION_SECRET_LENGTH:
         logger.warning(
-            "DIA_OWNER_TOKEN is shorter than %d characters; owner bypass disabled",
-            MIN_OWNER_TOKEN_LENGTH,
+            "DIA_SESSION_SECRET is shorter than %d characters; Google sign-in disabled",
+            MIN_SESSION_SECRET_LENGTH,
         )
-        return ""
-    return token
+        return b""
+    return secret.encode("utf-8")
 
 
-def supplied_owner_token(headers: Mapping[str, str]) -> str:
-    """The owner key the client sent, if any (bearer or ``X-DIA-Owner-Token``)."""
-    supplied = _header(headers, OWNER_HEADER)
-    if supplied:
-        return supplied
-    authorization = _header(headers, "Authorization")
-    if authorization.lower().startswith("bearer "):
-        return authorization[7:].strip()
-    return ""
-
-
-def is_owner(headers: Mapping[str, str]) -> bool:
-    expected = owner_token()
-    supplied = supplied_owner_token(headers)
-    if not expected or not supplied:
-        return False
-    return hmac.compare_digest(supplied.encode("utf-8"), expected.encode("utf-8"))
+def sign_in_enabled() -> bool:
+    return bool(google_client_id() and session_secret())
 
 
 def configured_mode() -> str:
-    """``owner-key`` when an owner key is configured, else ``visitors-only``."""
-    return "owner-key" if owner_token() else "visitors-only"
+    """``google`` when Google sign-in is fully configured, else ``visitors-only``."""
+    return "google" if sign_in_enabled() else "visitors-only"
+
+
+# --- Google ID token verification ----------------------------------------------
+
+
+def _google_verify(token: str, audience: str) -> Mapping[str, Any]:
+    """Signature + standard-claim check by google-auth (fetches Google's certs)."""
+    from google.auth.transport import requests as google_requests
+    from google.oauth2 import id_token
+
+    return id_token.verify_oauth2_token(
+        token, google_requests.Request(), audience=audience, clock_skew_in_seconds=10
+    )
+
+
+# Tests replace this with a fake; production always uses google-auth.
+google_verifier: Callable[[str, str], Mapping[str, Any]] = _google_verify
+
+
+@dataclass(frozen=True)
+class GoogleIdentity:
+    email: str
+    sub: str
+    name: str = ""
+
+
+def verify_google_credential(
+    credential: str, *, now: Callable[[], float] = time.time
+) -> GoogleIdentity:
+    """Verify a GIS ``credential`` and return the identity, or raise SignInError.
+
+    google-auth already checks the signature, ``aud`` and ``exp``; the claims
+    are re-checked here so the policy holds regardless of library defaults.
+    """
+    client_id = google_client_id()
+    if not client_id:
+        raise SignInError("Google sign-in is not configured.")
+    token = (credential or "").strip()
+    if not token or len(token) > 4096:
+        raise SignInError("Missing Google credential.")
+    try:
+        claims = google_verifier(token, client_id)
+    except Exception as error:  # noqa: BLE001 - any verifier failure is a rejection
+        logger.info("Google ID token rejected: %s", type(error).__name__)
+        raise SignInError("Google sign-in failed. Try again.") from None
+
+    if claims.get("iss") not in GOOGLE_ISSUERS:
+        raise SignInError("Google sign-in failed: unexpected issuer.")
+    aud = claims.get("aud")
+    if aud != client_id and not (isinstance(aud, list) and client_id in aud):
+        raise SignInError("Google sign-in failed: token was issued for another app.")
+    try:
+        exp = float(claims.get("exp", 0))
+    except (TypeError, ValueError):
+        exp = 0.0
+    if exp + CLOCK_SKEW_SECONDS < now():
+        raise SignInError("Google sign-in expired. Sign in again.")
+    email = str(claims.get("email") or "").strip().lower()
+    if not email:
+        raise SignInError("Google account has no email address.")
+    verified = claims.get("email_verified")
+    if verified is not True and str(verified).lower() != "true":
+        raise SignInError("Google account email is not verified.")
+    sub = str(claims.get("sub") or "")
+    if not sub:
+        raise SignInError("Google sign-in failed: missing subject.")
+    return GoogleIdentity(email=email, sub=sub, name=str(claims.get("name") or ""))
+
+
+# --- signed session cookie -----------------------------------------------------
+
+
+def _b64(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+
+
+def _unb64(text: str) -> bytes:
+    return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
+
+
+def _mac(secret: bytes, body: str) -> str:
+    return _b64(hmac.new(secret, f"{SESSION_VERSION}.{body}".encode("ascii"), hashlib.sha256).digest())
+
+
+def make_session(identity: GoogleIdentity, *, now: Callable[[], float] = time.time) -> str:
+    secret = session_secret()
+    if not secret:
+        raise SignInError("Google sign-in is not configured.")
+    issued = int(now())
+    body = _b64(
+        json.dumps(
+            {"e": identity.email, "s": identity.sub, "iat": issued, "exp": issued + SESSION_TTL_SECONDS},
+            separators=(",", ":"),
+        ).encode("utf-8")
+    )
+    return f"{SESSION_VERSION}.{body}.{_mac(secret, body)}"
+
+
+def read_session(value: str | None, *, now: Callable[[], float] = time.time) -> str | None:
+    """Return the signed-in email for a valid, unexpired session cookie value."""
+    secret = session_secret()
+    if not value or not secret or not google_client_id():
+        return None
+    try:
+        version, body, mac = value.split(".")
+    except ValueError:
+        return None
+    if version != SESSION_VERSION or not hmac.compare_digest(mac, _mac(secret, body)):
+        return None
+    try:
+        data = json.loads(_unb64(body))
+        if not isinstance(data, dict) or int(data.get("exp", 0)) <= now():
+            return None
+        email = str(data.get("e") or "").strip().lower()
+    except (ValueError, TypeError):
+        return None
+    return email or None
+
+
+def session_cookie_header(value: str, secure: bool) -> str:
+    parts = [
+        f"{SESSION_COOKIE}={value}",
+        "Path=/",
+        f"Max-Age={SESSION_TTL_SECONDS}",
+        "HttpOnly",
+        "SameSite=Lax",
+    ]
+    if secure:
+        parts.append("Secure")
+    return "; ".join(parts)
+
+
+def clear_session_cookie_header(secure: bool) -> str:
+    parts = [f"{SESSION_COOKIE}=", "Path=/", "Max-Age=0", "HttpOnly", "SameSite=Lax"]
+    if secure:
+        parts.append("Secure")
+    return "; ".join(parts)
+
+
+def session_email(headers: Mapping[str, str]) -> str | None:
+    from agent_quota import parse_cookie
+
+    return read_session(parse_cookie(headers.get("Cookie"), SESSION_COOKIE))
+
+
+def is_owner(headers: Mapping[str, str]) -> bool:
+    return is_owner_email(session_email(headers))
 
 
 def _on_cloud_run() -> bool:
