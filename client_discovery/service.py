@@ -10,6 +10,7 @@ from character import root_agent
 from google.adk.agents.llm_agent import LlmAgent
 
 from client_discovery.core import (
+    client_score_dict,
     generate_documents,
     parse_questionnaire_markdown,
     score_opportunity,
@@ -97,7 +98,7 @@ def build_intake_response(questionnaire: str) -> dict[str, object]:
     return {
         "intake": asdict(intake),
         "issues": [asdict(issue) for issue in issues],
-        "score": asdict(score),
+        "score": client_score_dict(score),  # no tier price band (Ikenna: match the site)
         "documents": documents,
         **_savant_extras(intake, score, issues),
         "strategic_analysis": strategic_analysis,

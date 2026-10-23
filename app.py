@@ -13,6 +13,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from client_discovery.report_model import build_report, value_at_stake_text
 from client_discovery.core import (
+    client_score_dict,
     generate_documents,
     parse_questionnaire_markdown,
     score_opportunity,
@@ -105,7 +106,7 @@ def build_intake_response(questionnaire: str) -> dict[str, object]:
     return {
         "intake": asdict(intake),
         "issues": [asdict(issue) for issue in issues],
-        "score": asdict(score),
+        "score": client_score_dict(score),  # no tier price band (Ikenna: match the site)
         "documents": documents,
         # dia-savant §6: deterministic extras for the JSON export and the screen (no AI text).
         "value_at_stake": score.value_at_stake,
@@ -258,13 +259,13 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
     def _record_engagement(self, response: dict[str, object]) -> None:
         try:
             from client_discovery import memory
-            from client_discovery.models import ClientIntake, OpportunityScore
+            from client_discovery.models import ClientIntake
 
             if not memory.is_enabled():
                 return
             memory.record_engagement(
                 ClientIntake(**response["intake"]),
-                OpportunityScore(**response["score"]),
+                score_opportunity(ClientIntake(**response["intake"])),  # internal: the full score
                 source="/api/process",
                 documents=sorted(response.get("documents", {})),
             )

@@ -7,6 +7,7 @@ from google.adk.agents.llm_agent import LlmAgent
 from google.genai import types
 
 from client_discovery.core import (
+    client_score_dict,
     generate_documents,
     parse_questionnaire_markdown,
     score_opportunity,
@@ -39,7 +40,7 @@ def validate_intake_fields(questionnaire_markdown: str) -> list[dict]:
 def score_client_opportunity(questionnaire_markdown: str) -> dict:
     """Score a parsed intake and recommend the project tier."""
     intake = parse_questionnaire_markdown(questionnaire_markdown)
-    return score_opportunity(intake).__dict__
+    return client_score_dict(score_opportunity(intake))  # no tier price band: the agent must not quote one
 
 
 def generate_intake_documents(questionnaire_markdown: str) -> dict:

@@ -105,7 +105,7 @@ def _rebuild(result: dict[str, Any], report_date: str | None) -> dict[str, Any]:
 def build_context(result: dict[str, Any], *, report_date: str | None = None) -> dict[str, Any]:
     from dataclasses import asdict
 
-    from client_discovery.core import scrub_for_export
+    from client_discovery.core import client_score_dict, scrub_for_export
     from client_discovery.report_model import render_documents
 
     result = scrub_for_export(result)  # no AI text in client exports (persona v1.2 rule 1)
@@ -130,9 +130,8 @@ def build_context(result: dict[str, Any], *, report_date: str | None = None) -> 
         "method_and_sources": model["method_and_sources"],
         "missing": list(model["missing"]),
         "actions": list(model["actions"]),
-        "score_detail": asdict(score),
+        "score_detail": client_score_dict(score),
         "reasons": list(score.reasons),
-        "price_range": score.price_range,
         "timeline": score.timeline,
         "issues": [asdict(issue) for issue in issues],
         "intake": asdict(intake),

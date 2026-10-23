@@ -293,17 +293,15 @@ def _plural(n: int, word: str) -> str:
 
 
 def _band_label(value: int) -> str:
+    """The value-at-stake threshold a figure sits at, without a dollar range (client output shows no $X-$Y)."""
     low, mid, high = value_bands()
-    if value >= high:
-        return f"the ${high:,}-and-over band"
-    if value >= mid:
-        return f"the ${mid:,}-${high - 1:,} band"
-    if value >= low:
-        return f"the ${low:,}-${mid - 1:,} band"
-    return f"the under-${low:,} band"
+    for threshold in (high, mid, low):
+        if value >= threshold:
+            return f"at or above the ${threshold:,} threshold"
+    return f"below the ${low:,} threshold"
 
 
-def _signal_evidence(*, pain_count, sink, urgency_base, urgency, budget, price_range, budget_base, budget_fit,
+def _signal_evidence(*, pain_count, sink, urgency_base, urgency, budget, budget_base, budget_fit,
                      readiness_base, readiness_minus, tech_readiness, value_at_stake, value_partial,
                      strategic_value) -> dict:
     """'Why this tier': one sentence per sub-score naming the evidence that sets it (Proto, on #39), so the
@@ -320,7 +318,8 @@ def _signal_evidence(*, pain_count, sink, urgency_base, urgency, budget, price_r
         budget_text = f"No stated budget places budget fit at {budget_fit} of 5."
     else:
         inside = budget_base >= 3
-        budget_text = (f"A stated budget of {budget} {'inside' if inside else 'outside'} the {price_range} band"
+        # The client's own budget may be echoed; the tier's price band never is (Ikenna: match the site).
+        budget_text = (f"A stated budget of {budget} that {'fits' if inside else 'does not fit'} this tier"
                        + (f", plus 1 because the value at stake of {value_text} exceeds its top,"
                           if budget_fit > budget_base else "")
                        + f" places budget fit at {budget_fit} of 5.")
@@ -334,11 +333,28 @@ def _signal_evidence(*, pain_count, sink, urgency_base, urgency, budget, price_r
         strategic_text = (f"No computed value at stake leaves strategic value at the default {strategic_value} of 5 "
                           "until weekly hours and an hourly cost are provided.")
     else:
-        strategic_text = (f"Value at stake of {value_text}, in {_band_label(value_at_stake)}, places strategic value "
+        strategic_text = (f"Value at stake of {value_text}, {_band_label(value_at_stake)}, places strategic value "
                           f"at {strategic_value} of 5" + (" as a floor; tasks without weekly hours are excluded."
                                                           if value_partial else "."))
     return {"urgency": urgency_text, "budget_fit": budget_text, "tech_readiness": readiness_text,
             "strategic_value": strategic_text}
+
+
+# Ikenna: 'Yes, remove it to match the site' (the site says "Contact for pricing"). Tier price bands stay
+# internal: budget fit is still scored against them, and the owner workspace cross-checks them, but no
+# client-facing text, export or API response may show a band. Clients see this line instead.
+CLIENT_PRICING_TEXT = "Contact for pricing"
+CLIENT_HIDDEN_SCORE_FIELDS = ("price_range",)
+
+
+def client_score_dict(score: OpportunityScore) -> dict:
+    """The score as clients and the chat agent see it: every field except the internal tier price band."""
+    from dataclasses import asdict
+
+    data = asdict(score)
+    for name in CLIENT_HIDDEN_SCORE_FIELDS:
+        data.pop(name, None)
+    return data
 
 
 def score_opportunity(intake: ClientIntake) -> OpportunityScore:
@@ -447,7 +463,8 @@ def score_opportunity(intake: ClientIntake) -> OpportunityScore:
     tech_readiness = max(1, tech_readiness)
 
     # Budget against value: top of the budget range / value at stake.
-    budget_reason = (f"stated budget of {intake.budget} against the {price_range} band" if intake.budget.strip()
+    budget_reason = (f"stated budget of {intake.budget} {'fits' if budget_fit >= 3 else 'does not fit'} this tier"
+                     if intake.budget.strip()
                      else "no budget range was provided")
     top = _budget_top(intake.budget)
     if value_at_stake and top:
@@ -495,7 +512,7 @@ def score_opportunity(intake: ClientIntake) -> OpportunityScore:
         signal_reasons=signal_reasons,
         signal_evidence=_signal_evidence(
             pain_count=pain_count, sink=sink, urgency_base=urgency_base, urgency=urgency,
-            budget=intake.budget.strip(), price_range=price_range, budget_base=budget_base, budget_fit=budget_fit,
+            budget=intake.budget.strip(), budget_base=budget_base, budget_fit=budget_fit,
             readiness_base=readiness_base, readiness_minus=readiness_minus, tech_readiness=tech_readiness,
             value_at_stake=value_at_stake, value_partial=value_partial, strategic_value=strategic_value),
         rules_version=SCORING_RULES_VERSION,

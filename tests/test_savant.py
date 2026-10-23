@@ -324,7 +324,7 @@ def test_summary_follows_the_answer_first_template():  # §3.2, §9 item 1
     report, intake, score = report_for(SAMPLE)
     summary = report["sections"][0]["body"]
     lines = summary.split("\n\n")
-    assert lines[0] == "Northstar Studio should start with a Custom AI Agent ($2,500-$10,000, 2-4 weeks)."
+    assert lines[0] == "Northstar Studio should start with a Custom AI Agent (2-4 weeks)."
     assert lines[1] == "Today Northstar Studio runs lead triage across three forms by hand: about 6 hours a week, roughly $15,840 a year."
     assert lines[2].startswith('2 pain points slow the team, led by "Leads arrive from three forms')
     assert "Why this tier:\n\n- Urgency 3/5:" in summary and "\n- Budget fit 4/5:" in summary and "\n- Readiness 4/5:" in summary
@@ -363,13 +363,14 @@ def test_no_inputs_label_in_markdown(name):  # §8.2 (Markdown)
     assert "Inputs:" not in md and "inputs_confidence" not in md
 
 
-def test_titles_name_client_tier_price_timeline_weakest_and_missing_count():  # §8.6
+def test_titles_name_client_tier_timeline_weakest_and_missing_count():  # §8.6 (no price: Ikenna, match the site)
     for text in VARIANTS.values():
         report, intake, score = report_for(text)
         titles = " ".join([report["cover_sentence"], *report["action_titles"]])
         client = intake.company_name.strip() or "The client"
-        for needed in (client, score.tier, score.price_range, score.timeline):
+        for needed in (client, score.tier, score.timeline):
             assert needed in titles
+        assert score.price_range not in titles
         values = {label: getattr(score, key) for key, label in report_model.SIGNALS
                   if not (key == "strategic_value" and score.strategic_value_default)}
         weakest = min(values.values())
@@ -454,8 +455,8 @@ def test_no_research_statistics_in_template_text(name):  # §3.1/§2.1: the repo
 SECTION5 = """METHOD
 DIA scores each intake on four dimensions (urgency, budget fit, technical readiness,
 strategic value), 0–5 each, 20 maximum. Value at stake is hours per week × loaded
-hourly rate × 48 weeks, from the client's own answers. Tier, price range and timeline
-come from DIA's own rules. This report is generated from fixed templates; no AI-written
+hourly rate × 48 weeks, from the client's own answers. Tier and timeline come from
+DIA's own rules. This report is generated from fixed templates; no AI-written
 text appears in it.
 
 SOURCES
@@ -565,9 +566,9 @@ def test_no_inputs_label_in_pdf(name, pdfs):  # §8.2 (PDF)
 
 def test_pdf_cover_and_titles_name_the_answer(pdfs):  # §8.6 (PDF)
     flat = normalise(pdfs["sample"]["pdf"])
-    for title in ("Northstar Studio should start with a Custom AI Agent ($2,500-$10,000, 2-4 weeks).",
+    for title in ("Northstar Studio should start with a Custom AI Agent (2-4 weeks).",
                   "0 missing answers block a firm quote",
-                  "Northstar Studio fits a Custom AI Agent at $2,500-$10,000 over 2-4 weeks",
+                  "Northstar Studio fits a Custom AI Agent, delivered over 2-4 weeks",
                   "Urgency is the weakest signal at 3 of 5; budget fit leads at 4",
                   "Northstar Studio loses about $36,960 a year to 3 manual workflows"):
         assert title in flat, title
@@ -903,10 +904,10 @@ def test_why_this_tier_cites_sub_score_evidence_not_the_summary_bullets():
     assert why.splitlines() == [
         "- 2 pain points and 2 goals map to the Custom AI Agent tier.",
         "- A count of 2 pain points, plus 1 for a known time sink (finance admin), places urgency at 3 of 5.",
-        "- A stated budget of $2,500-$10,000 inside the $2,500-$10,000 band, plus 1 because the value at stake of "
+        "- A stated budget of $2,500-$10,000 that fits this tier, plus 1 because the value at stake of "
         "$36,960/yr exceeds its top, places budget fit at 4 of 5.",
         "- Having an in-house technical person and current tools places readiness at 4 of 5.",
-        "- Value at stake of $36,960/yr, in the $20,000-$49,999 band, places strategic value at 4 of 5.",
+        "- Value at stake of $36,960/yr, at or above the $20,000 threshold, places strategic value at 4 of 5.",
     ]
     summary_bullets = [line for line in report["sections"][0]["body"].splitlines() if line.startswith("- ")]
     assert summary_bullets and not set(summary_bullets) & set(why.splitlines())
@@ -915,7 +916,7 @@ def test_why_this_tier_cites_sub_score_evidence_not_the_summary_bullets():
 
 def test_why_this_tier_evidence_for_partial_missing_and_deductions():
     partial, _, _ = report_for(questionnaire(q1=PARTIAL_Q1, q2="$50 an hour"))
-    assert ("- Value at stake of at least $14,400/yr, in the $5,000-$19,999 band, places strategic value at 3 of 5 "
+    assert ("- Value at stake of at least $14,400/yr, at or above the $5,000 threshold, places strategic value at 3 of 5 "
             "as a floor; tasks without weekly hours are excluded.") in partial["sections"][3]["body"]
     thin, _, _ = report_for(VARIANTS["thin"])
     body = thin["sections"][3]["body"]
@@ -932,16 +933,16 @@ LONG_NAME = "The Northern Ontario Community Health and Wellness Cooperative Asso
 def test_client_name_counts_as_one_token_in_titles():
     report, _, _ = report_for(SAMPLE.replace("Northstar Studio", LONG_NAME))
     rec, wf = report["sections"][2]["title"], report["sections"][4]["title"]
-    assert rec == f"{LONG_NAME} fits a Custom AI Agent at $2,500-$10,000 over 2-4 weeks"
+    assert rec == f"{LONG_NAME} fits a Custom AI Agent, delivered over 2-4 weeks"
     assert wf == f"{LONG_NAME} loses about $36,960 a year to 3 manual workflows"
-    assert len(rec.split()) > 15 and report_model.title_word_count(rec, LONG_NAME) == 11
+    assert len(rec.split()) > 15 and report_model.title_word_count(rec, LONG_NAME) == 10
 
 
 def test_title_over_the_limit_uses_the_short_form_without_the_name(monkeypatch):
-    # Named forms are 11 and 10 tokens (the name is one); a 9-token limit forces both to the short form.
+    # Named forms are 10 tokens each (the name is one); a 9-token limit forces both to the short form.
     monkeypatch.setattr(report_model, "TITLE_MAX_WORDS", 9)
     report, _, _ = report_for(SAMPLE.replace("Northstar Studio", LONG_NAME))
-    assert report["sections"][2]["title"] == "A Custom AI Agent fits at $2,500-$10,000 over 2-4 weeks"
+    assert report["sections"][2]["title"] == "A Custom AI Agent fits, delivered over 2-4 weeks"
     assert report["sections"][4]["title"] == "Manual work loses about $36,960 a year to 3 manual workflows"
     assert not any(LONG_NAME in title for title in report["action_titles"])
 

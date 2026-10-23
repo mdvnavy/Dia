@@ -13,12 +13,14 @@ from datetime import date as _date
 
 from .models import ClientIntake, OpportunityScore, ValidationIssue
 
+CLIENT_PRICING_TEXT = "Contact for pricing"  # matches the site; tier price bands never reach client output
+
 # §5, verbatim. The Method and sources section prints this block exactly (only {Client} and {date} vary).
 METHOD_AND_SOURCES = """METHOD
 DIA scores each intake on four dimensions (urgency, budget fit, technical readiness,
 strategic value), 0–5 each, 20 maximum. Value at stake is hours per week × loaded
-hourly rate × 48 weeks, from the client's own answers. Tier, price range and timeline
-come from DIA's own rules. This report is generated from fixed templates; no AI-written
+hourly rate × 48 weeks, from the client's own answers. Tier and timeline come from
+DIA's own rules. This report is generated from fixed templates; no AI-written
 text appears in it.
 
 SOURCES
@@ -214,7 +216,7 @@ def recommendation_sentence(client: str, intake: ClientIntake, score: Opportunit
     pending = _pending(intake, score)
     if pending:
         return f"{client} fits a {score.tier}, pending {_join(pending)}."
-    return f"{client} should start with a {score.tier} ({score.price_range}, {score.timeline})."
+    return f"{client} should start with a {score.tier} ({score.timeline})."
 
 
 def _signal_titles(score: OpportunityScore) -> str:
@@ -285,12 +287,12 @@ def build_report(intake: ClientIntake, score: OpportunityScore, issues: list[Val
         missing_body += "\n\n**Flags to clear first**\n\n" + "\n".join(f"- {action}" for action in actions)
 
     # 03 Recommendation
-    rec_title = _fit_title(f"{client} fits a {score.tier} at {score.price_range} over {score.timeline}",
-                           f"A {score.tier} fits at {score.price_range} over {score.timeline}", client)
+    rec_title = _fit_title(f"{client} fits a {score.tier}, delivered over {score.timeline}",
+                           f"A {score.tier} fits, delivered over {score.timeline}", client)
     rec_lines = [
         f"- **Tier:** {score.tier}",
         f"- **Scope:** {score.scope}",
-        f"- **Price range:** {score.price_range}",
+        f"- **Pricing:** {CLIENT_PRICING_TEXT}",
         f"- **Timeline:** {score.timeline}",
         f"- **Next step:** {next_step}",
     ]
@@ -395,7 +397,7 @@ def build_report(intake: ClientIntake, score: OpportunityScore, issues: list[Val
         *[f"- **Scope addition:** {note}" for note in score.scope_notes],
         "", "### Investment",
         f"- **Recommended solution:** {score.tier}. {score.scope}",
-        f"- **Estimated range:** {score.price_range}",
+        f"- **Pricing:** {CLIENT_PRICING_TEXT}",
         f"- **Timeline:** {score.timeline}",
         f"- **Next step:** {next_step}",
     ])
