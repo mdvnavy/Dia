@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>DIA intake report · {{ client }}</title>
+  <meta name="author" content="BASH">
+  <meta name="generator" content="DIA - Discovery Intake Agent">
+  <link rel="stylesheet" href="intake-report.css">
+</head>
+<body>
+
+  <!-- Running header/footer strings are pulled from these via string-set. -->
+  <header class="cover">
+    <div class="cover-top">
+      <div class="cover-mark"><span class="wordmark" aria-label="DIA">D<span class="tittle">I</span>A</span></div>
+      <div class="cover-date" aria-hidden="true"><span class="meta-date">{{ date }}</span></div>
+    </div>
+
+    <h1 class="client">{{ client }}</h1>
+
+    <!-- Tier and Score: a balanced, centred pair. Label centred over value, one shared baseline. -->
+    <table class="stats" role="presentation">
+      <tr class="stat-labels">
+        <td>Tier</td>
+        <td>Score</td>
+      </tr>
+      <tr class="stat-values">
+        <td class="stat-tier" title="{{ tier_name }}">{{ tier }}</td>
+        <td class="stat-score" aria-label="Score {{ score }} out of {{ score_max }}">{{ score }}<span class="out-of">/{{ score_max }}</span></td>
+      </tr>
+    </table>
+  </header>
+
+  <section class="missing" aria-labelledby="missing-title">
+    <h2 class="block-title" id="missing-title">
+      Missing details
+      <span class="count">{{ missing|length }}</span>
+    </h2>
+    {% if missing %}
+    <ol class="issue-list">
+      {% for item in missing %}
+      <li><span class="issue-index">{{ "%02d"|format(loop.index) }}</span><span class="issue-text">{{ item }}</span></li>
+      {% endfor %}
+    </ol>
+    {% else %}
+    <p class="none">Nothing missing. The questionnaire covers every required field.</p>
+    {% endif %}
+  </section>
+
+  <section class="section" id="profile">
+    <h2 class="section-title"><span class="section-no">01</span>Profile</h2>
+    <div class="prose">{{ profile_html|safe }}</div>
+  </section>
+
+  <section class="section" id="analysis">
+    <h2 class="section-title"><span class="section-no">02</span>Analysis</h2>
+    <div class="prose">{{ analysis_html|safe }}</div>
+  </section>
+
+  <section class="section" id="proposal">
+    <h2 class="section-title"><span class="section-no">03</span>Proposal</h2>
+    <div class="prose">{{ proposal_html|safe }}</div>
+  </section>
+
+</body>
+</html>

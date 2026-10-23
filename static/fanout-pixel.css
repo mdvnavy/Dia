@@ -1,0 +1,44 @@
+/* Source: glyph/pixel/fanout-pixel.css, verbatim. Scoped to pixel icon styles. */
+/* Pixel treatment for the cabinet STACK (v3). Load AFTER ../fanout.css (and pixel-hover.css).
+ * Overrides only. Active when the Icon style setting is a pixel style:
+ *   <html data-icon-style="zelda">      pixel A, GBA-faithful colours
+ *   <html data-icon-style="dia-pixel">  pixel B, Dia palette (b-dark-* sprites in the dark theme)
+ * Line style ("line") never loads this file's rules (all selectors are scoped).
+ * Stack geometry (step 48px, tuck 28px, lift, timings) is inherited from fanout.css unchanged. */
+
+:root:is([data-icon-style="zelda"], [data-icon-style="dia-pixel"]) .cabinet {
+  --fan-radius: 4px;
+  --fan-lift: -2px;                                         /* one sprite pixel at 2x */
+  --px-shadow: 0 3px 0 0 rgba(22, 21, 15, 0.10);           /* straight down: hidden under the next card, no side stubs */
+  --px-shadow-hover: 4px 4px 0 0 rgba(22, 21, 15, 0.14);
+  --fan-edge: 0 -2px 0 0 rgba(22, 21, 15, 0.08);            /* hard 2px overlap edge, no blur */
+}
+:root:is([data-icon-style="zelda"], [data-icon-style="dia-pixel"]) .fan-card,
+:root:is([data-icon-style="zelda"], [data-icon-style="dia-pixel"]) .fan > li:nth-child(1) .fan-card {
+  box-shadow: var(--fan-edge), var(--px-shadow);
+}
+:root:is([data-icon-style="zelda"], [data-icon-style="dia-pixel"]) .fan-open-btn { box-shadow: var(--px-shadow); border-radius: 4px; gap: 8px; }
+:root:is([data-icon-style="zelda"], [data-icon-style="dia-pixel"]) .fan-card:is(:hover, :focus-visible) {
+  box-shadow: var(--fan-edge), var(--px-shadow-hover);
+  transition-timing-function: steps(2, end);                /* 2-frame pop, still 160ms */
+}
+:root:is([data-icon-style="zelda"], [data-icon-style="dia-pixel"]) .fan-score { border-radius: 2px; box-shadow: 1px 1px 0 0 var(--fan-silver); }
+:root:is([data-icon-style="zelda"], [data-icon-style="dia-pixel"]) .cabinet-btn { width: 44px; height: 44px; }
+:root:is([data-icon-style="zelda"], [data-icon-style="dia-pixel"]) .cabinet-btn .px { width: 32px; height: 32px; }   /* 2x, integer only */
+
+/* Pixel A ("Zelda"): colour comes from the sprite's own GBA palette (gen.py A_CAB).
+ * Cards stay readable: warm parchment ground + dark-brown outline + brown hard shadow.
+ * Score chip pin (#D9DCE0 / #16150f) still holds. No mustard (#DFA81C) anywhere. */
+:root[data-icon-style="zelda"] .cabinet {
+  --fan-surface: #fffbea;        /* A paper */
+  --fan-border: #2c1a12;         /* A outline */
+  --fan-muted: #76411e;          /* A shade, 7.9:1 on #fffbea */
+  --fan-silver: #ab632e;         /* A mid: hover border + chip shadow */
+  --fan-ring: #ab632e;           /* Zelda's own focus ring, 4.4:1 on #fffbea. Dia pixel inherits #7C828A from fanout.css */
+  --px-shadow: 0 3px 0 0 #e3cf9c;
+  --px-shadow-hover: 4px 4px 0 0 #d38a4a;
+  --fan-edge: 0 -2px 0 0 #e3cf9c;
+}
+:root[data-icon-style="zelda"] .fan-card,
+:root[data-icon-style="zelda"] .fan-open-btn { border-width: 2px; }
+:root[data-icon-style="zelda"] .fan-score { box-shadow: 1px 1px 0 0 #2c1a12; border-color: #2c1a12; }
