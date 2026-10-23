@@ -1,32 +1,38 @@
-"""Daily visitor quota for /api/agent (agent_quota.py + app.py wiring)."""
+"""Lockdown v2 quota: 10 generations + 5 Ask DIA per signed-in user per ET day.
+
+The server is the only source of truth: counts are keyed on the verified
+Google ``sub``, charged atomically before the work, and refunded on a
+server error. Nothing the client sends (cookies, headers, body fields,
+local storage) can mint quota.
+"""
+
+from __future__ import annotations
 
 import datetime as dt
-import http.client
 import json
 import threading
-from http.server import ThreadingHTTPServer
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
 import agent_auth
 import agent_quota
-import app
 from agent_quota import (
+    ASK,
+    GENERATIONS,
     DailyQuota,
     FirestoreQuotaStore,
     InMemoryQuotaStore,
+    QuotaConflict,
+    QuotaUnavailable,
     limit_message,
-    normalise_ip,
     quota_day,
-    visitor_keys,
+    user_key,
 )
-from app import ClientDiscoveryHandler
+from lockdown_support import gate_env, server  # noqa: F401
 
-CLIENT_ID = "1234-test.apps.googleusercontent.com"
-# Test-only signing key, not a real secret.
-TEST_SESSION_KEY = "unit-test-session-signing-key-0123456789abcdef"
 UTC = dt.timezone.utc
-ET = agent_quota.quota_tz()
+QUESTIONNAIRE = {"questionnaire": "Company: Example Co\nProblem: intake takes too long"}
 
 
 class Clock:
@@ -37,595 +43,527 @@ class Clock:
         return self.when
 
 
-class FakeStore:
-    """In-memory fake of the QuotaStore interface that records calls."""
-
-    def __init__(self) -> None:
-        self.counts: dict[tuple[str, str], int] = {}
-        self.calls: list[tuple] = []
-        self.fail = False
-
-    def incr(self, keys, day, expire_at):
-        self.calls.append(("incr", tuple(keys), day, expire_at))
-        if self.fail:
-            raise ConnectionError("store down")
-        out = []
-        for key in keys:
-            self.counts[(day, key)] = self.counts.get((day, key), 0) + 1
-            out.append(self.counts[(day, key)])
-        return out
-
-    def get(self, keys, day):
-        self.calls.append(("get", tuple(keys), day))
-        if self.fail:
-            raise ConnectionError("store down")
-        return [self.counts.get((day, key), 0) for key in keys]
+# --- policy units -------------------------------------------------------------
 
 
-@pytest.fixture(autouse=True)
-def _env(monkeypatch):
-    for name in (
-        "GOOGLE_CLIENT_ID",
-        "OWNER_EMAILS",
-        "DIA_SESSION_SECRET",
-        "K_SERVICE",
-        "DIA_TRUST_FORWARDED_FOR",
-        "DIA_AGENT_RATE_LIMIT",
-        "DIA_AGENT_DAILY_LIMIT",
-        "DIA_QUOTA_STORE",
-        "DIA_VISITOR_SALT",
-        "GOOGLE_API_KEY",
-        "ASK_DIA_ENABLED",
-    ):
-        monkeypatch.delenv(name, raising=False)
-    monkeypatch.setenv("DIA_AGENT_RATE_LIMIT", "0")  # isolate the daily cap
-    agent_auth.agent_rate_limiter.reset()
-    app.status_rate_limiter.reset()
-    app.auth_rate_limiter.reset()
-    agent_quota.set_quota(None)
-    yield
-    agent_quota.set_quota(None)
-    agent_auth.agent_rate_limiter.reset()
-    app.status_rate_limiter.reset()
+def test_default_limits_are_10_generations_and_5_ask(gate_env):
+    quota = DailyQuota(InMemoryQuotaStore())
+    usage = quota.usage("sub-a")
+    assert usage[GENERATIONS] == {"limit": 10, "used": 0, "remaining": 10}
+    assert usage[ASK] == {"limit": 5, "used": 0, "remaining": 5}
+    assert usage["timezone"] == "America/Toronto"
 
 
-# --- day boundary ---------------------------------------------------------
+def test_buckets_are_independent(gate_env):
+    quota = DailyQuota(InMemoryQuotaStore())
+    assert all(quota.consume(ASK, "s").allowed for _ in range(5))
+    assert not quota.consume(ASK, "s").allowed
+    assert quota.consume(GENERATIONS, "s").allowed
+    assert quota.peek(GENERATIONS, "s").remaining == 9
 
 
-def test_quota_day_is_new_york_calendar_day():
-    # 03:30 UTC on Oct 23 is still Oct 22 in New York (UTC-4 in October).
-    day, reset = quota_day(dt.datetime(2026, 10, 23, 3, 30, tzinfo=UTC))
-    assert day == "2026-10-22"
-    assert reset == dt.datetime(2026, 10, 23, tzinfo=ET)
-    assert reset.utcoffset() == dt.timedelta(hours=-4)
-    # Winter: UTC-5.
-    day, reset = quota_day(dt.datetime(2026, 12, 1, 4, 59, tzinfo=UTC))
-    assert day == "2026-11-30"
-    assert reset.astimezone(UTC) == dt.datetime(2026, 12, 1, 5, 0, tzinfo=UTC)
+def test_limits_configurable_and_zero_means_none(gate_env, monkeypatch):
+    monkeypatch.setenv("DIA_ASK_DAILY_LIMIT", "0")
+    monkeypatch.setenv("DIA_GENERATION_DAILY_LIMIT", "junk")
+    quota = DailyQuota(InMemoryQuotaStore())
+    assert not quota.consume(ASK, "s").allowed
+    assert quota.peek(GENERATIONS, "s").limit == 10
 
 
-# --- policy with the store interface -------------------------------------
+def test_midnight_et_boundary(gate_env):
+    # 23:59:59 EDT on Oct 23 is 03:59:59Z on Oct 24.
+    clock = Clock(dt.datetime(2026, 10, 24, 3, 59, 59, tzinfo=UTC))
+    quota = DailyQuota(InMemoryQuotaStore(), clock=clock)
+    for _ in range(5):
+        assert quota.consume(ASK, "s").allowed
+    result = quota.consume(ASK, "s")
+    assert not result.allowed
+    assert result.reset_at == dt.datetime(2026, 10, 24, 4, 0, tzinfo=UTC)
+    assert result.retry_after(clock()) == 2
+    clock.when = dt.datetime(2026, 10, 24, 4, 0, 0, tzinfo=UTC)  # midnight ET
+    assert quota.consume(ASK, "s").allowed
+    assert quota.peek(ASK, "s").remaining == 4
 
 
-def test_tenth_ok_eleventh_denied_with_fake_store():
-    store = FakeStore()
-    quota = DailyQuota(store, clock=Clock(dt.datetime(2026, 10, 23, 15, tzinfo=UTC)))
-    keys = visitor_keys("198.51.100.9", "visitor-cookie-abcdef123456")
-    results = [quota.consume(keys) for _ in range(11)]
-    assert all(r.allowed for r in results[:10])
-    assert results[9].remaining == 0
-    assert not results[10].allowed
-    assert results[10].remaining == 0
-    # Both buckets were charged in one store call per request.
-    assert all(len(call[1]) == 2 for call in store.calls if call[0] == "incr")
-    # Once over, the instance remembers and stops hitting the store today.
-    calls_before = len(store.calls)
-    assert not quota.consume(keys).allowed
-    assert len(store.calls) == calls_before
+def test_midnight_is_toronto_not_utc_and_handles_dst(gate_env):
+    # UTC midnight is 8 pm ET: still the same quota day.
+    assert quota_day(dt.datetime(2026, 10, 23, 23, 59, tzinfo=UTC))[0] == "2026-10-23"
+    assert quota_day(dt.datetime(2026, 10, 24, 0, 1, tzinfo=UTC))[0] == "2026-10-23"
+    # Nov 1 2026: DST ends; next midnight is 05:00Z (EST).
+    day, reset = quota_day(dt.datetime(2026, 11, 1, 12, 0, tzinfo=UTC))
+    assert day == "2026-11-01" and reset.astimezone(UTC) == dt.datetime(2026, 11, 2, 5, 0, tzinfo=UTC)
 
 
-def test_resets_at_new_york_midnight_with_mocked_clock():
-    clock = Clock(dt.datetime(2026, 10, 23, 23, 59, 30, tzinfo=ET))
-    quota = DailyQuota(FakeStore(), clock=clock)
-    keys = visitor_keys("198.51.100.9", None)
-    for _ in range(10):
-        assert quota.consume(keys).allowed
-    denied = quota.consume(keys)
-    assert not denied.allowed
-    assert denied.retry_after(clock()) == 31  # seconds until midnight ET (+1)
-
-    clock.when = dt.datetime(2026, 10, 24, 0, 0, 1, tzinfo=ET)
-    fresh = quota.consume(keys)
-    assert fresh.allowed and fresh.used == 1
+def test_user_key_hashes_sub(gate_env):
+    key = user_key("1234567890")
+    assert key.startswith("sub-") and "1234567890" not in key
+    assert key == user_key("1234567890") != user_key("1234567891")
 
 
-def test_clearing_cookie_does_not_reset_cap():
-    quota = DailyQuota(FakeStore(), clock=Clock(dt.datetime(2026, 10, 23, 15, tzinfo=UTC)))
-    for _ in range(10):
-        assert quota.consume(visitor_keys("198.51.100.9", "cookie-one-abcdefghijkl")).allowed
-    # Same IP, new cookie (cookies cleared): still capped by the IP bucket.
-    assert not quota.consume(visitor_keys("198.51.100.9", "cookie-two-abcdefghijkl")).allowed
-    # Same cookie from a new network: still capped by the cookie bucket.
-    assert not quota.consume(visitor_keys("203.0.113.50", "cookie-one-abcdefghijkl")).allowed
-    # A genuinely different visitor is unaffected.
-    assert quota.consume(visitor_keys("203.0.113.77", "cookie-three-abcdefghij")).allowed
+def test_limit_messages_are_calm():
+    assert limit_message(GENERATIONS, 10) == "You've used today's 10 generations. More at midnight ET."
+    assert limit_message(ASK, 5) == "You've used today's 5 Ask DIA questions. More at midnight ET."
+    for text in (limit_message(GENERATIONS, 10), limit_message(ASK, 5)):
+        lowered = text.lower()
+        assert not any(w in lowered for w in ("$", "price", "upgrade", "pro", "hurry", "now", "!"))
 
 
-def test_store_failure_falls_back_to_in_memory_cap():
-    store = FakeStore()
-    store.fail = True
-    quota = DailyQuota(store, clock=Clock(dt.datetime(2026, 10, 23, 15, tzinfo=UTC)))
-    keys = visitor_keys("198.51.100.9", None)
-    results = [quota.consume(keys).allowed for _ in range(11)]
-    assert results == [True] * 10 + [False]  # still capped, never unlimited
-    assert quota.peek(keys).used == 11
+def test_refund_never_goes_negative(gate_env):
+    quota = DailyQuota(InMemoryQuotaStore())
+    quota.refund(ASK, "s")
+    assert quota.peek(ASK, "s").used == 0
 
 
-def test_in_memory_store_counts_per_day_and_drops_old_days():
-    store = InMemoryQuotaStore()
-    expire = dt.datetime(2026, 10, 25, tzinfo=UTC)
-    assert store.incr(["a", "b"], "2026-10-23", expire) == [1, 1]
-    assert store.incr(["a"], "2026-10-23", expire) == [2]
-    assert store.get(["a", "b", "c"], "2026-10-23") == [2, 1, 0]
-    assert store.incr(["a"], "2026-10-24", expire) == [1]
-    assert store.get(["a"], "2026-10-23") == [0]  # previous day pruned
+def test_in_memory_store_is_atomic_under_threads(gate_env):
+    quota = DailyQuota(InMemoryQuotaStore())
+    with ThreadPoolExecutor(50) as pool:
+        results = list(pool.map(lambda _: quota.consume(GENERATIONS, "s").allowed, range(200)))
+    assert results.count(True) == 10
 
 
-def test_keys_are_hashed_and_ipv6_collapses_to_64():
-    keys = visitor_keys("198.51.100.9", "visitor-cookie-abcdef123456")
-    assert keys[0].startswith("ip:") and keys[1].startswith("vid:")
-    assert "198.51.100.9" not in "".join(keys)
-    assert normalise_ip("2001:db8:1:2:aaaa::1") == normalise_ip("2001:db8:1:2:bbbb::9")
-    assert normalise_ip("::ffff:198.51.100.9") == "198.51.100.9"
-    # Malformed cookies are ignored rather than used as keys.
-    assert len(visitor_keys("198.51.100.9", "bad cookie;")) == 1
+def test_ask_fails_closed_generations_fail_soft(gate_env):
+    class Down:
+        def try_consume(self, *a):
+            raise ConnectionError("down")
+
+        refund = get = try_consume
+
+    quota = DailyQuota(Down(), store_name="firestore")
+    with pytest.raises(QuotaUnavailable):
+        quota.consume(ASK, "s")
+    assert quota.consume(GENERATIONS, "s").allowed  # per-instance fallback
+    assert quota.peek(GENERATIONS, "s").used == 1
 
 
-def test_limit_message_is_friendly():
-    assert limit_message(10) == "You've used today's 10 questions. Come back tomorrow!"
+# --- Firestore REST transport (fake) --------------------------------------------
 
 
-# --- Firestore REST store with a fake session ----------------------------
-
-
-class FakeResponse:
-    def __init__(self, payload):
-        self._payload = payload
-
-    def raise_for_status(self):
-        return None
+class Resp:
+    def __init__(self, status: int, body: dict | None = None) -> None:
+        self.status_code = status
+        self._body = body or {}
 
     def json(self):
-        return self._payload
+        return self._body
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise RuntimeError(f"HTTP {self.status_code}")
 
 
-class FakeSession:
-    def __init__(self):
-        self.counts = {}
-        self.posts = []
+class FakeFirestore:
+    """Optimistic-concurrency fake of the Firestore REST transaction API.
+
+    A commit fails with 409 ABORTED if the document changed after the
+    transaction read it, which is how real read-write transactions behave.
+    """
+
+    def __init__(self, forced_conflicts: int = 0) -> None:
+        self.docs: dict[str, dict] = {}
+        self.versions: dict[str, int] = {}
+        self.txns: dict[str, dict] = {}
+        self.lock = threading.Lock()
+        self.calls: list[tuple] = []
+        self.forced_conflicts = forced_conflicts
+        self.n = 0
+
+    def _name(self, url: str) -> str:
+        return url.split("/v1/", 1)[1]
 
     def post(self, url, json=None, timeout=None):
-        self.posts.append((url, json, timeout))
-        if url.endswith(":commit"):
-            results = []
+        with self.lock:
+            op = url.rsplit(":", 1)[1]
+            self.calls.append((op, json))
+            if op == "beginTransaction":
+                assert json == {"options": {"readWrite": {}}}
+                self.n += 1
+                txn = f"t{self.n}"
+                self.txns[txn] = {}
+                return Resp(200, {"transaction": txn})
+            if op == "rollback":
+                self.txns.pop(json["transaction"], None)
+                return Resp(200)
+            assert op == "commit"
+            txn = json.get("transaction")
+            reads = self.txns.pop(txn, {}) if txn else {}
+            if txn and self.forced_conflicts:
+                self.forced_conflicts -= 1
+                return Resp(409, {"error": {"status": "ABORTED"}})
+            if any(self.versions.get(name, 0) != v for name, v in reads.items()):
+                return Resp(409, {"error": {"status": "ABORTED"}})
             for write in json["writes"]:
-                name = write["update"]["name"]
-                self.counts[name] = self.counts.get(name, 0) + 1
-                results.append({"transformResults": [{"integerValue": str(self.counts[name])}]})
-            return FakeResponse({"writeResults": results})
-        if url.endswith(":batchGet"):
-            out = []
-            for name in json["documents"]:
-                if name in self.counts:
-                    out.append({"found": {"name": name, "fields": {"count": {"integerValue": str(self.counts[name])}}}})
+                if "update" in write:
+                    name = write["update"]["name"]
+                    self.docs[name] = {"name": name, "fields": write["update"]["fields"]}
                 else:
-                    out.append({"missing": name})
-            return FakeResponse(out)
-        raise AssertionError(url)
+                    name = write["transform"]["document"]
+                    if write.get("currentDocument") == {"exists": True} and name not in self.docs:
+                        return Resp(404)
+                    field = self.docs[name]["fields"]["count"]
+                    delta = int(write["transform"]["fieldTransforms"][0]["increment"]["integerValue"])
+                    field["integerValue"] = str(int(field["integerValue"]) + delta)
+                self.versions[name] = self.versions.get(name, 0) + 1
+            return Resp(200, {"commitTime": "2026-10-23T00:00:00Z"})
+
+    def get(self, url, params=None, timeout=None):
+        with self.lock:
+            name = self._name(url)
+            self.calls.append(("get", params))
+            txn = (params or {}).get("transaction")
+            if txn:
+                self.txns.setdefault(txn, {})[name] = self.versions.get(name, 0)
+            if name not in self.docs:
+                return Resp(404)
+            return Resp(200, self.docs[name])
+
+    def count(self) -> int:
+        return sum(int(d["fields"]["count"]["integerValue"]) for d in self.docs.values())
 
 
-def test_firestore_store_uses_atomic_increment_commit():
-    session = FakeSession()
-    store = FirestoreQuotaStore(project="demo-proj", session_factory=lambda: session)
-    expire = dt.datetime(2026, 10, 25, 4, tzinfo=UTC)
-    assert store.incr(["ip:abc", "vid:def"], "2026-10-23", expire) == [1, 1]
-    assert store.incr(["ip:abc"], "2026-10-23", expire) == [2]
-    url, body, timeout = session.posts[0]
-    assert url == (
-        "https://firestore.googleapis.com/v1/projects/demo-proj/databases/(default)/documents:commit"
+def firestore(fake, **kw):
+    return FirestoreQuotaStore(
+        project="demo-project", database="dia-quota", collection="dia_agent_quota",
+        session_factory=lambda: fake, sleep=lambda s: None, **kw,
     )
-    write = body["writes"][0]
-    assert write["update"]["name"].endswith("/documents/dia_agent_quota/2026-10-23_ip-abc")
-    assert write["update"]["fields"]["expire_at"] == {"timestampValue": "2026-10-25T04:00:00Z"}
-    assert write["updateTransforms"] == [{"fieldPath": "count", "increment": {"integerValue": "1"}}]
-    assert timeout and timeout <= 5
-    assert store.get(["ip:abc", "vid:def", "vid:none"], "2026-10-23") == [2, 1, 0]
 
 
-def test_store_from_env(monkeypatch):
-    assert agent_quota.store_from_env() == (None, "memory")
+def test_firestore_doc_name_and_fields(gate_env):
+    fake = FakeFirestore()
+    quota = DailyQuota(firestore(fake), clock=Clock(dt.datetime(2026, 10, 23, 16, 0, tzinfo=UTC)))
+    assert quota.consume(ASK, "s").allowed
+    (name, doc), = fake.docs.items()
+    assert name.startswith("projects/demo-project/databases/dia-quota/documents/dia_agent_quota/2026-10-23_ask-sub-")
+    assert doc["fields"]["count"] == {"integerValue": "1"}
+    assert doc["fields"]["bucket"] == {"stringValue": "ask"}
+    # TTL field: a day after the reset, in UTC.
+    assert doc["fields"]["expire_at"] == {"timestampValue": "2026-10-25T04:00:00Z"}
+
+
+def test_firestore_env_selects_project_and_database(gate_env, monkeypatch):
     monkeypatch.setenv("DIA_QUOTA_STORE", "firestore")
+    monkeypatch.setenv("DIA_FIRESTORE_PROJECT", "demo-project")
+    monkeypatch.setenv("DIA_FIRESTORE_DATABASE", "dia-quota")
     store, name = agent_quota.store_from_env()
-    assert name == "firestore" and isinstance(store, FirestoreQuotaStore)
+    assert name == "firestore"
+    assert store.doc_name("ask", "k", "2026-10-23").startswith("projects/demo-project/databases/dia-quota/")
 
 
-# --- /api/agent end to end -----------------------------------------------
+def test_firestore_at_limit_rolls_back(gate_env, monkeypatch):
+    monkeypatch.setenv("DIA_ASK_DAILY_LIMIT", "2")
+    fake = FakeFirestore()
+    quota = DailyQuota(firestore(fake))
+    assert [quota.consume(ASK, "s").allowed for _ in range(3)] == [True, True, False]
+    assert [c[0] for c in fake.calls][-3:] == ["beginTransaction", "get", "rollback"]
 
 
-def _serve():
-    server = ThreadingHTTPServer(("127.0.0.1", 0), ClientDiscoveryHandler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    return server, thread
+def test_firestore_conflict_is_retried(gate_env):
+    fake = FakeFirestore(forced_conflicts=3)
+    quota = DailyQuota(firestore(fake))
+    assert quota.consume(GENERATIONS, "s").allowed
+    assert fake.count() == 1
+    assert [c[0] for c in fake.calls].count("commit") == 4
 
 
-def _call(server, method, path, headers=None, body=None):
-    conn = http.client.HTTPConnection("127.0.0.1", server.server_port)
-    conn.request(method, path, body=body, headers={"Content-Type": "application/json", **(headers or {})})
-    resp = conn.getresponse()
-    raw = resp.read().decode("utf-8")
-    headers_out = {k.lower(): v for k, v in resp.getheaders()}
-    # Keep every Set-Cookie (session + visitor can both be set).
-    headers_out["set-cookie-all"] = [v for k, v in resp.getheaders() if k.lower() == "set-cookie"]
-    if not headers_out["set-cookie-all"]:
-        del headers_out["set-cookie-all"]
-    result = resp.status, json.loads(raw), headers_out
-    conn.close()
-    return result
+def test_firestore_persistent_conflict_raises_then_fails_closed(gate_env):
+    fake = FakeFirestore(forced_conflicts=99)
+    store = firestore(fake)
+    with pytest.raises(QuotaConflict):
+        store.try_consume(ASK, "k", "2026-10-23", 5, dt.datetime(2026, 10, 25, tzinfo=UTC))
+    with pytest.raises(QuotaUnavailable):
+        DailyQuota(store).consume(ASK, "s")
+    assert fake.count() == 0
 
 
-@pytest.fixture
-def live_agent(monkeypatch):
-    """Server with a fake 'configured' agent that never calls Gemini."""
+def test_firestore_parallel_never_overspends(gate_env):
+    fake = FakeFirestore()
+    store = firestore(fake)
+    store.MAX_ATTEMPTS = 200
+    quota = DailyQuota(store)
+    with ThreadPoolExecutor(20) as pool:
+        results = list(pool.map(lambda _: quota.consume(ASK, "s").allowed, range(20)))
+    assert results.count(True) == 5
+    assert fake.count() == 5
+
+
+def test_firestore_refund_is_atomic_increment(gate_env):
+    fake = FakeFirestore()
+    quota = DailyQuota(firestore(fake))
+    quota.consume(ASK, "s")
+    quota.refund(ASK, "s")
+    assert fake.count() == 0
+    _, body = fake.calls[-1]
+    assert body["writes"][0]["currentDocument"] == {"exists": True}
+    assert "transaction" not in body
+
+
+# --- HTTP: anti-spoofing -----------------------------------------------------------
+
+
+def usage_of(server, cookie):
+    status, _, payload = server.request("GET", "/api/usage", cookie=cookie)
+    assert status == 200
+    return payload
+
+
+def test_usage_endpoint_for_free_user_and_owner(server):
+    cookie, _ = server.sign_in()
+    usage = usage_of(server, cookie)
+    assert usage["signed_in"] and not usage["owner"] and not usage["unlimited"]
+    assert usage["generations"]["remaining"] == 10 and usage["ask"]["remaining"] == 5
+    assert usage["resets_at"] and usage["timezone"] == "America/Toronto"
+    owner, _ = server.sign_in("owner-cred")
+    assert usage_of(server, owner) == {"signed_in": True, "owner": True, "unlimited": True}
+
+
+def test_process_and_agent_return_usage_and_charge(server):
+    cookie, _ = server.sign_in()
+    status, _, payload = server.request("POST", "/api/process", QUESTIONNAIRE, cookie=cookie)
+    assert status == 200 and payload["usage"]["generations"]["remaining"] == 9
+    status, _, payload = server.request("POST", "/api/agent", {"message": "hi"}, cookie=cookie)
+    assert status == 200 and payload["usage"]["ask"]["remaining"] == 4
+
+
+def test_pdf_from_questionnaire_charges_but_result_export_does_not(server):
+    cookie, _ = server.sign_in()
+    _, _, run = server.request("POST", "/api/process", QUESTIONNAIRE, cookie=cookie)
+    status, hdrs, _ = server.request("POST", "/api/pdf", {"result": run}, cookie=cookie)
+    assert status == 200 and hdrs["Content-Type"] == "application/pdf"
+    assert usage_of(server, cookie)["generations"]["used"] == 1
+    status, _, _ = server.request("POST", "/api/pdf", QUESTIONNAIRE, cookie=cookie)
+    assert status == 200
+    assert usage_of(server, cookie)["generations"]["used"] == 2
+
+
+def test_extract_and_sample_are_not_charged(server):
+    cookie, _ = server.sign_in()
+    server.request("GET", "/api/sample", cookie=cookie)
+    server.request("POST", "/api/extract", raw=b"Company: X", headers={"X-Filename": "a.txt"}, cookie=cookie)
+    usage = usage_of(server, cookie)
+    assert usage["generations"]["used"] == 0 and usage["ask"]["used"] == 0
+
+
+def test_empty_questionnaire_is_not_charged(server):
+    cookie, _ = server.sign_in()
+    status, _, _ = server.request("POST", "/api/process", {"questionnaire": "  "}, cookie=cookie)
+    assert status == 400
+    assert usage_of(server, cookie)["generations"]["used"] == 0
+
+
+def test_cap_returns_calm_429_with_numbers(server, gate_env):
+    cookie, _ = server.sign_in()
+    for _ in range(5):
+        assert server.request("POST", "/api/agent", {"message": "hi"}, cookie=cookie)[0] == 200
+    status, hdrs, payload = server.request("POST", "/api/agent", {"message": "hi"}, cookie=cookie)
+    assert status == 429
+    assert payload["error"] == "daily_limit" and payload["bucket"] == "ask"
+    assert payload["message"] == "You've used today's 5 Ask DIA questions. More at midnight ET."
+    assert payload["usage"]["ask"] == {"limit": 5, "used": 5, "remaining": 0}
+    assert int(hdrs["Retry-After"]) > 0
+    assert len(gate_env) == 5  # the 6th never reached the model
+    for _ in range(10):
+        server.request("POST", "/api/process", QUESTIONNAIRE, cookie=cookie)
+    status, _, payload = server.request("POST", "/api/process", QUESTIONNAIRE, cookie=cookie)
+    assert status == 429 and payload["bucket"] == "generations"
+    assert payload["message"] == "You've used today's 10 generations. More at midnight ET."
+
+
+def test_new_cookie_jar_or_cleared_storage_does_not_reset(server):
+    cookie, _ = server.sign_in()
+    for _ in range(5):
+        server.request("POST", "/api/agent", {"message": "hi"}, cookie=cookie)
+    # Sign out, clear everything, replay the same raw Google token: a fresh
+    # session cookie, same sub, same count.
+    server.request("POST", "/api/auth/logout", cookie=cookie)
+    fresh, _ = server.sign_in()
+    status, _, payload = server.request("POST", "/api/agent", {"message": "hi"}, cookie=fresh)
+    assert status == 429
+    # Many replays of the token mint no extra quota.
+    for _ in range(5):
+        replay, _ = server.sign_in()
+        assert server.request("POST", "/api/agent", {"message": "hi"}, cookie=replay)[0] == 429
+
+
+def test_forged_counters_fields_and_headers_are_ignored(server, gate_env):
+    cookie, _ = server.sign_in()
+    for _ in range(5):
+        server.request("POST", "/api/agent", {"message": "hi"}, cookie=cookie)
+    forged = {
+        "message": "hi", "usage": {"ask": {"remaining": 5}}, "remaining": 99, "used": 0,
+        "owner": True, "email": "owner@example.com", "unlimited": True, "sub": "sub-other",
+    }
+    headers = {
+        "X-DIA-Remaining": "5", "X-Owner-Email": "owner@example.com", "X-Email": "owner@example.com",
+        "X-Goog-Authenticated-User-Email": "accounts.google.com:owner@example.com",
+        "Authorization": "Bearer owner-cred",
+    }
+    jar = f"{cookie}; dia_vid=fresh; dia_usage=0; owner=1; email=owner@example.com"
+    status, _, payload = server.request("POST", "/api/agent", forged, headers=headers, cookie=jar)
+    assert status == 429 and payload["usage"]["owner"] is False
+    assert len(gate_env) == 5
+
+
+def test_fake_owner_email_at_sign_in_does_not_make_owner(server):
+    status, hdrs, payload = server.request(
+        "POST", "/api/auth/session",
+        {"credential": "visitor-cred", "email": "owner@example.com"},
+        headers={"X-Owner-Email": "owner@example.com"},
+    )
+    assert status == 200 and payload["owner"] is False
+    cookie = hdrs["Set-Cookie"].split(";", 1)[0]
+    assert usage_of(server, cookie)["owner"] is False
+
+
+def test_unverified_owner_email_cannot_sign_in(server):
+    status, hdrs, payload = server.request("POST", "/api/auth/session", {"credential": "unverified-owner-cred"})
+    assert status == 401 and "Set-Cookie" not in hdrs
+
+
+@pytest.mark.parametrize("cred", ["expired-cred", "wrong-aud-cred", "wrong-iss-cred", "unsigned-garbage"])
+def test_bad_tokens_get_no_session(server, cred):
+    status, hdrs, _ = server.request("POST", "/api/auth/session", {"credential": cred})
+    assert status == 401 and "Set-Cookie" not in hdrs
+
+
+def test_raw_token_is_not_a_session(server):
+    for header in ({"Authorization": "Bearer visitor-cred"}, {}):
+        status, _, _ = server.request("GET", "/api/usage", headers=header, cookie="dia_session=visitor-cred")
+        assert status == 401
+
+
+@pytest.mark.parametrize("cred", ["owner-cred", "owner2-cred", "owner3-cred"])
+def test_every_listed_owner_is_uncapped(server, gate_env, cred):
+    cookie, payload = server.sign_in(cred)
+    assert payload["owner"] is True
+    for _ in range(12):
+        status, _, body = server.request("POST", "/api/agent", {"message": "hi"}, cookie=cookie)
+        assert status == 200 and body["usage"]["unlimited"] is True
+    for _ in range(12):
+        assert server.request("POST", "/api/process", QUESTIONNAIRE, cookie=cookie)[0] == 200
+
+
+def test_spoofed_xff_first_hop_does_not_matter(server, monkeypatch):
+    monkeypatch.setenv("K_SERVICE", "dia-test")
+    cookie, _ = server.sign_in()
+    for i in range(5):
+        server.request("POST", "/api/agent", {"message": "hi"}, cookie=cookie,
+                       headers={"X-Forwarded-For": f"10.9.9.{i}, 203.0.113.5"})
+    status, _, _ = server.request(
+        "POST", "/api/agent", {"message": "hi"}, cookie=cookie,
+        headers={"X-Forwarded-For": "1.1.1.1, 2.2.2.2, 203.0.113.99"},
+    )
+    assert status == 429  # keyed on sub, never on an IP
+
+
+def test_twenty_parallel_at_four_remaining_exactly_four_succeed(server, gate_env):
+    cookie, _ = server.sign_in()
+    for _ in range(6):
+        assert server.request("POST", "/api/process", QUESTIONNAIRE, cookie=cookie)[0] == 200
+    assert usage_of(server, cookie)["generations"]["remaining"] == 4
+    barrier = threading.Barrier(20)
+
+    def go(_):
+        barrier.wait()
+        return server.request("POST", "/api/process", QUESTIONNAIRE, cookie=cookie)[0]
+
+    with ThreadPoolExecutor(20) as pool:
+        statuses = list(pool.map(go, range(20)))
+    assert statuses.count(200) == 4 and statuses.count(429) == 16
+    assert usage_of(server, cookie)["generations"]["remaining"] == 0
+
+
+def test_twenty_parallel_ask_with_four_left(server, gate_env):
+    cookie, _ = server.sign_in()
+    server.request("POST", "/api/agent", {"message": "hi"}, cookie=cookie)
+    barrier = threading.Barrier(20)
+
+    def go(_):
+        barrier.wait()
+        return server.request("POST", "/api/agent", {"message": "hi"}, cookie=cookie)[0]
+
+    with ThreadPoolExecutor(20) as pool:
+        statuses = list(pool.map(go, range(20)))
+    assert statuses.count(200) == 4
+    assert len(gate_env) == 5
+
+
+def test_charge_happens_before_the_model_and_refunds_on_error(server, monkeypatch):
     import agent_runtime
 
-    # Patch the check itself rather than faking a credential env var, so this
-    # stays independent of how the runtime is configured (API key vs Vertex).
-    monkeypatch.setattr(agent_runtime, "is_configured", lambda: True)
-    calls = []
+    cookie, _ = server.sign_in()
+    seen = []
 
-    def fake_run(message):
-        calls.append(message)
-        return f"echo: {message}"
+    def failing(message):
+        seen.append(usage_of(server, cookie)["ask"]["used"])
+        raise RuntimeError("model down")
 
-    monkeypatch.setattr(agent_runtime, "run_agent", fake_run)
-    agent_quota.set_quota(
-        DailyQuota(FakeStore(), clock=Clock(dt.datetime(2026, 10, 23, 15, tzinfo=UTC)))
-    )
-    server, thread = _serve()
-    yield server, calls
-    server.shutdown()
-    server.server_close()
-    thread.join(timeout=2)
+    monkeypatch.setattr(agent_runtime, "run_agent", failing)
+    status, _, payload = server.request("POST", "/api/agent", {"message": "hi"}, cookie=cookie)
+    assert status == 502 and seen == [1]  # charged before the call
+    assert payload["usage"]["ask"]["used"] == 0  # refunded
 
 
-ASK = json.dumps({"message": "hi"})
+def test_generation_refunds_on_server_error(server, monkeypatch):
+    import app
+
+    cookie, _ = server.sign_in()
+
+    def boom(_):
+        raise ValueError("bad questionnaire")
+
+    monkeypatch.setattr(app, "build_intake_response", boom)
+    status, _, _ = server.request("POST", "/api/process", QUESTIONNAIRE, cookie=cookie)
+    assert status == 400
+    assert usage_of(server, cookie)["generations"]["used"] == 0
 
 
-def test_endpoint_tenth_ok_eleventh_429_with_friendly_message(live_agent):
-    server, calls = live_agent
-    cookie = {"Cookie": "dia_vid=visitor-cookie-abcdef123456"}
-    for i in range(10):
-        status, payload, _ = _call(server, "POST", "/api/agent", cookie, ASK)
-        assert status == 200, payload
-        assert payload["quota"]["remaining"] == 9 - i
-    status, payload, headers = _call(server, "POST", "/api/agent", cookie, ASK)
-    assert status == 429
-    assert payload["error"] == "You've used today's 10 questions. Come back tomorrow!"
-    assert payload["quota"]["remaining"] == 0
-    assert int(headers["retry-after"]) > 0
-    assert len(calls) == 10  # the 11th never reached the agent
-
-
-def test_endpoint_mints_visitor_cookie(live_agent):
-    server, _ = live_agent
-    status, _, headers = _call(server, "POST", "/api/agent", {}, ASK)
-    assert status == 200
-    cookie = headers["set-cookie"]
-    assert cookie.startswith("dia_vid=") and "HttpOnly" in cookie and "SameSite=Lax" in cookie
-    assert "Secure" not in cookie  # plain-http local dev
-    # A request that already carries a valid cookie doesn't get a new one.
-    value = cookie.split(";")[0]
-    _, _, headers = _call(server, "POST", "/api/agent", {"Cookie": value}, ASK)
-    assert "set-cookie" not in headers
-
-
-def test_spoofed_xff_does_not_bypass_cap_on_cloud_run(live_agent, monkeypatch):
-    server, calls = live_agent
-    monkeypatch.setenv("K_SERVICE", "dia-discovery-intake")
-    monkeypatch.setenv("DIA_AGENT_DAILY_LIMIT", "3")
-    real = "198.51.100.9"  # what Google's front end appends (right-most)
-    statuses = []
-    for i in range(6):
-        headers = {"X-Forwarded-For": f"10.9.8.{i}, {real}"}  # rotating forged left hop, no cookie
-        statuses.append(_call(server, "POST", "/api/agent", headers, ASK)[0])
-    assert statuses == [200, 200, 200, 429, 429, 429]
-    assert len(calls) == 3
-
-
-def test_unconfigured_agent_and_bad_requests_are_not_charged(monkeypatch):
+def test_unconfigured_agent_is_not_charged(server, monkeypatch):
     import agent_runtime
 
     monkeypatch.setattr(agent_runtime, "is_configured", lambda: False)
-    monkeypatch.setenv("DIA_AGENT_DAILY_LIMIT", "1")
-    server, thread = _serve()
-    try:
-        for _ in range(3):
-            status, payload, _ = _call(server, "POST", "/api/agent", {}, ASK)
-            assert status == 200 and payload["configured"] is False
-        assert _call(server, "POST", "/api/agent", {}, json.dumps({"message": ""}))[0] == 400
-        assert agent_quota.get_quota().peek(visitor_keys("127.0.0.1", None)).used == 0
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=2)
+    cookie, _ = server.sign_in()
+    status, _, payload = server.request("POST", "/api/agent", {"message": "hi"}, cookie=cookie)
+    assert status == 200 and payload["configured"] is False
+    assert usage_of(server, cookie)["ask"]["used"] == 0
 
 
-def test_burst_guard_still_applies_to_visitors(live_agent, monkeypatch):
-    server, _ = live_agent
-    monkeypatch.setenv("DIA_AGENT_RATE_LIMIT", "2/60")
-    statuses = [_call(server, "POST", "/api/agent", {}, ASK)[0] for _ in range(3)]
-    assert statuses == [200, 200, 429]
-    _, payload, _ = _call(server, "POST", "/api/agent", {}, ASK)
-    assert "Too many questions at once" in payload["error"]
-
-
-# --- Google sign-in end to end ------------------------------------------------
-
-
-def _claims(email, **overrides):
-    import time
-
-    base = {
-        "iss": "accounts.google.com",
-        "aud": CLIENT_ID,
-        "exp": time.time() + 3600,
-        "sub": f"sub-{email}",
-        "email": email,
-        "email_verified": True,
-    }
-    base.update(overrides)
-    return base
-
-
-@pytest.fixture
-def google(monkeypatch):
-    monkeypatch.setenv("GOOGLE_CLIENT_ID", CLIENT_ID)
-    monkeypatch.setenv("DIA_SESSION_SECRET", TEST_SESSION_KEY)
-    monkeypatch.setenv("OWNER_EMAILS", "Owner@Example.com")
-    tokens = {
-        "owner-cred": _claims("owner@example.com"),
-        "visitor-cred": _claims("visitor@example.com"),
-        "bad-aud": _claims("owner@example.com", aud="other.apps.googleusercontent.com"),
-        "bad-iss": _claims("owner@example.com", iss="https://evil.example.com"),
-        "tok-old": _claims("owner@example.com", exp=1_000),
-        "unverified": _claims("owner@example.com", email_verified=False),
-    }
-
-    def fake_verify(token, audience):
-        if token not in tokens:
-            raise ValueError("bad signature")
-        return tokens[token]
-
-    monkeypatch.setattr(agent_auth, "google_verifier", fake_verify)
-    return tokens
-
-
-def _sign_in(server, credential):
-    status, payload, headers = _call(
-        server, "POST", "/api/auth/session", {}, json.dumps({"credential": credential})
-    )
-    cookies = [c for c in headers.get("set-cookie-all", []) if c.startswith("dia_session=")]
-    session = cookies[0].split(";")[0] if cookies else None
-    return status, payload, session, cookies
-
-
-def test_auth_config_hides_sign_in_without_client_id(live_agent, monkeypatch):
-    server, _ = live_agent
-    _, payload, _ = _call(server, "GET", "/api/auth/config")
-    assert payload["enabled"] is False and payload["google_client_id"] is None
-    status, _, _ = _call(server, "POST", "/api/auth/session", {}, json.dumps({"credential": "x"}))
-    assert status == 404
-    # The cap still applies with sign-in off.
-    monkeypatch.setenv("DIA_AGENT_DAILY_LIMIT", "1")
-    assert _call(server, "POST", "/api/agent", {}, ASK)[0] == 200
-    assert _call(server, "POST", "/api/agent", {}, ASK)[0] == 429
-
-
-def test_auth_config_exposes_client_id_when_configured(live_agent, google):
-    server, _ = live_agent
-    _, payload, _ = _call(server, "GET", "/api/auth/config")
-    assert payload == {
-        "enabled": True,
-        "google_client_id": CLIENT_ID,
-        "signed_in": False,
-        "email": None,
-        "owner": False,
-    }
-    assert TEST_SESSION_KEY not in json.dumps(payload)
-
-
-def test_valid_owner_is_unlimited_and_skips_burst_guard(live_agent, google, monkeypatch):
-    server, calls = live_agent
-    monkeypatch.setenv("DIA_AGENT_DAILY_LIMIT", "1")
-    monkeypatch.setenv("DIA_AGENT_RATE_LIMIT", "2/60")
-    status, payload, session, cookies = _sign_in(server, "owner-cred")
-    assert status == 200 and payload == {"signed_in": True, "email": "owner@example.com", "owner": True}
-    cookie = cookies[0]
-    for part in ("HttpOnly", "SameSite=Lax", "Max-Age=43200", "Path=/"):
-        assert part in cookie
-    assert "owner-cred" not in cookie
-    for _ in range(6):  # over both the daily cap (1) and the burst guard (2/60)
-        status, payload, _ = _call(server, "POST", "/api/agent", {"Cookie": session}, ASK)
-        assert status == 200 and payload["owner"] is True and "quota" not in payload
-    assert len(calls) == 6
-    _, payload, _ = _call(server, "GET", "/api/agent/status", {"Cookie": session})
-    assert payload["owner"] is True and payload["quota"] is None and payload["auth"] == "google"
-
-
-def test_valid_non_owner_is_capped_like_a_visitor(live_agent, google, monkeypatch):
-    server, calls = live_agent
-    monkeypatch.setenv("DIA_AGENT_DAILY_LIMIT", "2")
-    status, payload, session, _ = _sign_in(server, "visitor-cred")
-    assert status == 200 and payload["owner"] is False and payload["signed_in"] is True
-    jar = {"Cookie": f"{session}; dia_vid=visitor-cookie-abcdef123456"}
-    statuses = [_call(server, "POST", "/api/agent", jar, ASK)[0] for _ in range(3)]
-    assert statuses == [200, 200, 429]
-    _, payload, _ = _call(server, "GET", "/api/agent/status", jar)
-    assert payload["signed_in"] is True and payload["owner"] is False
-    assert payload["quota"]["remaining"] == 0
-
-
-@pytest.mark.parametrize("credential", ["bad-aud", "bad-iss", "tok-old", "unverified", "forged"])
-def test_rejected_tokens_get_401_and_no_session(live_agent, google, credential):
-    server, _ = live_agent
-    status, payload, session, _ = _sign_in(server, credential)
-    assert status == 401 and session is None
-    assert credential not in json.dumps(payload)
-
-
-def test_tampered_session_cookie_is_just_a_visitor(live_agent, google, monkeypatch):
-    server, calls = live_agent
-    monkeypatch.setenv("DIA_AGENT_DAILY_LIMIT", "1")
-    _, _, session, _ = _sign_in(server, "visitor-cred")
-    name, value = session.split("=", 1)
-    version, body, mac = value.split(".")
-    import base64
-
-    data = json.loads(base64.urlsafe_b64decode(body + "=" * (-len(body) % 4)))
-    data["e"] = "owner@example.com"
-    forged = base64.urlsafe_b64encode(json.dumps(data).encode()).rstrip(b"=").decode()
-    jar = {"Cookie": f"{name}={version}.{forged}.{mac}"}
-    _, payload, _ = _call(server, "GET", "/api/agent/status", jar)
-    assert payload["signed_in"] is False and payload["owner"] is False
-    assert _call(server, "POST", "/api/agent", jar, ASK)[0] == 200
-    assert _call(server, "POST", "/api/agent", jar, ASK)[0] == 429
-
-
-def test_sign_out_clears_cookie(live_agent, google):
-    server, _ = live_agent
-    _, _, session, _ = _sign_in(server, "owner-cred")
-    status, payload, headers = _call(server, "POST", "/api/auth/logout", {"Cookie": session})
-    assert status == 200 and payload["signed_in"] is False
-    cleared = [c for c in headers["set-cookie-all"] if c.startswith("dia_session=")]
-    assert cleared and cleared[0].startswith("dia_session=;") and "Max-Age=0" in cleared[0]
-    # A browser drops the cookie; without it the next status is anonymous.
-    _, payload, _ = _call(server, "GET", "/api/agent/status")
-    assert payload["signed_in"] is False and payload["owner"] is False
-
-
-def test_session_endpoint_requires_json_and_is_burst_limited(live_agent, google, monkeypatch):
-    server, _ = live_agent
-    conn = http.client.HTTPConnection("127.0.0.1", server.server_port)
-    conn.request(
-        "POST",
-        "/api/auth/session",
-        body="credential=owner-cred",
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
-    )
-    resp = conn.getresponse()
-    resp.read()
-    conn.close()
-    assert resp.status == 415  # cross-site form posts can't log you in
-    monkeypatch.setenv("DIA_AGENT_RATE_LIMIT", "2/60")
-    statuses = [_sign_in(server, "forged")[0] for _ in range(3)]
-    assert statuses == [401, 401, 429]
-
-
-def test_status_reports_quota_and_sign_in(live_agent, google):
-    server, _ = live_agent
-    status, payload, headers = _call(server, "GET", "/api/agent/status")
-    assert status == 200
-    assert payload["auth"] == "google" and payload["owner"] is False
-    assert payload["signed_in"] is False and payload["email"] is None
-    assert payload["quota"]["limit"] == 10 and payload["quota"]["remaining"] == 10
-    assert "set-cookie" in headers
-
-
-# --- ASK_DIA_ENABLED kill switch ----------------------------------------------
-
-
-@pytest.mark.parametrize(
-    "raw, expected",
-    [
-        (None, True),
-        ("", True),
-        ("  ", True),
-        ("true", True),
-        ("TRUE", True),
-        ("1", True),
-        ("on", True),
-        ("false", False),
-        ("0", False),
-        ("off", False),
-        ("No", False),
-        ("flase", False),  # a typo fails closed
-    ],
-)
-def test_ask_dia_enabled_parsing(monkeypatch, raw, expected):
-    if raw is None:
-        monkeypatch.delenv("ASK_DIA_ENABLED", raising=False)
-    else:
-        monkeypatch.setenv("ASK_DIA_ENABLED", raw)
-    assert agent_auth.ask_dia_enabled() is expected
-
-
-def test_kill_switch_returns_calm_503_and_never_reaches_agent_or_quota(live_agent, monkeypatch):
-    server, calls = live_agent
-    store = agent_quota.get_quota().store
-    monkeypatch.setenv("ASK_DIA_ENABLED", "false")
-    status, payload, headers = _call(server, "POST", "/api/agent", {}, ASK)
-    assert status == 503
-    assert payload == {"enabled": False, "error": agent_auth.ASK_DIA_UNAVAILABLE_MESSAGE}
-    assert "temporarily unavailable" in payload["error"]
-    assert headers["retry-after"] == str(agent_auth.ASK_DIA_RETRY_AFTER_SECONDS)
-    assert calls == []
-    assert not [c for c in store.calls if c[0] == "incr"]  # nothing charged
-    # Status tells the UI to degrade.
-    _, payload, _ = _call(server, "GET", "/api/agent/status")
-    assert payload["enabled"] is False
-    # Flipping it back restores service without a restart.
-    monkeypatch.setenv("ASK_DIA_ENABLED", "true")
-    status, payload, _ = _call(server, "POST", "/api/agent", {}, ASK)
-    assert status == 200 and calls == ["hi"]
-    _, payload, _ = _call(server, "GET", "/api/agent/status")
-    assert payload["enabled"] is True
-
-
-def test_kill_switch_also_stops_owners(live_agent, google, monkeypatch):
-    server, calls = live_agent
-    _, _, session, _ = _sign_in(server, "owner-cred")
-    monkeypatch.setenv("ASK_DIA_ENABLED", "off")
-    status, payload, _ = _call(server, "POST", "/api/agent", {"Cookie": session}, ASK)
-    assert status == 503 and payload["enabled"] is False
-    assert calls == []
-
-
-def test_kill_switch_leaves_the_deterministic_intake_working(live_agent, monkeypatch):
-    # The deterministic intake keeps working while Ask DIA is off.
-    server, _ = live_agent
-    monkeypatch.setenv("ASK_DIA_ENABLED", "false")
-    body = json.dumps({"questionnaire": app.read_sample_questionnaire()})
-    status, payload, _ = _call(server, "POST", "/api/process", {}, body)
-    assert status == 200 and "score" in payload
-
-
-def test_signed_out_visitor_is_burst_limited_per_ip(live_agent, monkeypatch):
-    # Signed out: a per-IP burst guard and the 10/day cap both apply.
-    server, calls = live_agent
-    monkeypatch.setenv("DIA_AGENT_RATE_LIMIT", "3/60")
-    statuses = [_call(server, "POST", "/api/agent", {}, ASK)[0] for _ in range(4)]
+def test_burst_limit_three_per_ten_seconds(server, monkeypatch):
+    monkeypatch.setenv("DIA_BURST_LIMIT", "3/10")
+    agent_auth.reset_limiters()
+    cookie, _ = server.sign_in()
+    statuses = [server.request("POST", "/api/agent", {"message": "hi"}, cookie=cookie)[0] for _ in range(4)]
     assert statuses == [200, 200, 200, 429]
-    assert len(calls) == 3
+    status, _, payload = server.request("POST", "/api/agent", {"message": "hi"}, cookie=cookie)
+    assert payload["error"] == "burst_limited"
+    # Burst refusals don't spend quota; another user is unaffected.
+    assert usage_of(server, cookie)["ask"]["used"] == 3
+    other, _ = server.sign_in("other-cred")
+    assert server.request("POST", "/api/agent", {"message": "hi"}, cookie=other)[0] == 200
+    owner, _ = server.sign_in("owner-cred")
+    assert all(
+        server.request("POST", "/api/agent", {"message": "hi"}, cookie=owner)[0] == 200 for _ in range(6)
+    )
 
 
-def test_owner_bypass_comes_only_from_the_env_allowlist(live_agent, google, monkeypatch):
-    server, calls = live_agent
-    monkeypatch.setenv("DIA_AGENT_DAILY_LIMIT", "1")
-    _, _, session, _ = _sign_in(server, "owner-cred")
-    assert _call(server, "POST", "/api/agent", {"Cookie": session}, ASK)[0] == 200
-    assert _call(server, "POST", "/api/agent", {"Cookie": session}, ASK)[0] == 200
-    # Removing the address from OWNER_EMAILS caps the same session immediately.
-    monkeypatch.setenv("OWNER_EMAILS", "someone-else@example.com")
-    assert _call(server, "POST", "/api/agent", {"Cookie": session}, ASK)[0] == 200  # first of 1
-    assert _call(server, "POST", "/api/agent", {"Cookie": session}, ASK)[0] == 429
+def test_ask_store_outage_fails_closed_over_http(server):
+    class Down:
+        def try_consume(self, *a):
+            raise ConnectionError("down")
+
+        refund = get = try_consume
+
+    agent_quota.set_quota(DailyQuota(Down(), store_name="firestore"))
+    cookie, _ = server.sign_in()
+    status, hdrs, payload = server.request("POST", "/api/agent", {"message": "hi"}, cookie=cookie)
+    assert status == 503 and payload["error"] == "quota_unavailable"
+    assert server.request("POST", "/api/process", QUESTIONNAIRE, cookie=cookie)[0] == 200
+
+
+def test_kill_switch_off_blocks_owner_and_spends_nothing(server, monkeypatch, gate_env):
+    owner, _ = server.sign_in("owner-cred")
+    visitor, _ = server.sign_in()
+    monkeypatch.setenv("ASK_DIA_ENABLED", "off")
+    for cookie in (owner, visitor, None):
+        status, _, payload = server.request("POST", "/api/agent", {"message": "hi"}, cookie=cookie)
+        assert status == 503 and payload["enabled"] is False
+    assert gate_env == []
+    assert usage_of(server, visitor)["ask"]["used"] == 0
