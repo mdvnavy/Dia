@@ -313,3 +313,85 @@ def test_kill_switch_degrades_ask_dia_calmly(browser, live, monkeypatch):
     page.wait_for_function("document.querySelector('#agentStatus').textContent === 'Temporarily unavailable'")
     assert page.evaluate("document.querySelector('#runChat').disabled") is True
     page.context.close()
+
+
+def test_desktop_counter_layout_at_1280(browser, live):
+    page = open_page(browser, live.url, width=1280, height=800)
+    sign_in(page)
+    box = page.evaluate("""(() => { const r = s => document.querySelector(s).getBoundingClientRect();
+        return {clock: r('#lhClock').right, meter: [r('#usageMeter').left, r('#usageMeter').right, r('#usageMeter').top + r('#usageMeter').height / 2],
+                div: [r('#usageDivider').left, r('#usageDivider').right, r('#usageDivider').height],
+                search: [r('.lh-search-label').left, r('.lh-search-label').top + r('.lh-search-label').height / 2]}; })()""")
+    assert box["meter"][0] > box["clock"], "counter must not overlap the centred clock"
+    assert round(box["div"][0] - box["meter"][1]) == 16
+    assert round(box["search"][0] - box["div"][1]) == 16
+    assert box["div"][2] == 12
+    assert abs(box["meter"][2] - box["search"][1]) <= 1  # same line
+    font = page.evaluate("""(() => { const s = getComputedStyle(document.querySelector('#usageMeter'));
+        return [s.fontSize, s.letterSpacing, s.textTransform]; })()""")
+    assert font[0] == "11px" and font[2] == "uppercase"
+    assert font[1] in ("0.66px", "0.06em")
+    page.context.close()
+
+
+def test_between_breakpoints_counter_uses_status_line(browser, live):
+    page = open_page(browser, live.url, width=1024, height=800)
+    sign_in(page)
+    assert not page.is_visible("#usageMeter") and page.is_visible("#usageInline")
+    page.context.close()
+
+
+def _assert_locked(page):
+    assert page.evaluate("document.body.dataset.auth") == "signed-out"
+    assert page.is_visible("#signInGate") and page.is_visible("#signInGateButton .gisButton")
+    for sel in ("#questionnaire", "#usageMeter"):
+        assert not page.is_visible(sel), sel
+
+
+def _assert_unlocked(page):
+    assert page.evaluate("document.body.dataset.auth") == "signed-in"
+    assert not page.is_visible("#signInGate")
+    assert page.is_visible("#questionnaire") and page.is_visible("#usageMeter")
+
+
+def test_full_flow_unlock_reload_lock(browser, live):
+    page = open_page(browser, live.url)
+    sent = []
+    page.on("request", lambda r: sent.append((r.url, r.headers.get("authorization"))) if "/api/auth/session" in r.url else None)
+    _assert_locked(page)
+    sign_in(page)
+    _assert_unlocked(page)
+    # Tia's wiring: the credential travels as "Authorization: Bearer", once.
+    assert sent and sent[-1][1] == "Bearer visitor-cred"
+    stored = page.evaluate("JSON.stringify([Object.entries(localStorage), Object.entries(sessionStorage), document.cookie])")
+    assert "visitor-cred" not in stored and "dia_session" not in stored  # HttpOnly, not in storage
+    page.reload()
+    page.wait_for_function("document.body.dataset.auth !== 'pending'")
+    page.wait_for_function("!document.querySelector('#usageMeter').hidden")
+    _assert_unlocked(page)  # the session cookie survived the reload
+    page.click("#diaSignOut")
+    page.wait_for_function("document.body.dataset.auth === 'signed-out'")
+    _assert_locked(page)
+    page.reload()
+    page.wait_for_function("document.body.dataset.auth !== 'pending'")
+    _assert_locked(page)  # and sign-out survives it too
+    page.context.close()
+
+
+def test_browser_sign_in_with_real_signed_token(browser, live, monkeypatch):
+    """The GIS stub hands over a token signed by a local RSA key; google-auth verifies it for real."""
+    import agent_auth
+    from test_sign_in_flow import StubGoogleCerts, mint
+
+    monkeypatch.setattr(agent_auth, "google_verifier", agent_auth._google_verify)
+    monkeypatch.setattr(agent_auth, "google_request_adapter", StubGoogleCerts("x509"))
+    page = open_page(browser, live.url)
+    sign_in(page, mint(sub="4000001", email="browser@example.com"))
+    _assert_unlocked(page)
+    page.context.close()
+    page = open_page(browser, live.url)
+    page.evaluate("window.__TEST_CRED = 'forged.' + 'a.b'")
+    page.click("#signInGateButton .gisButton")
+    page.wait_for_function("document.querySelector('#signInGateText').textContent.includes('failed') || document.querySelector('#status').textContent.includes('failed')", timeout=5000)
+    _assert_locked(page)
+    page.context.close()

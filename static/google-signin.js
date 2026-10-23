@@ -85,6 +85,7 @@
   function renderAccount() {
     const signedIn = Boolean(state && state.signed_in);
     usage.setSignedOut(!signedIn, { configured: Boolean(config && config.enabled) });
+    if (gateSlot) gateSlot.hidden = !(config && config.enabled);
     if (!config || !config.enabled) {
       show(account, false);
       if (settingsSection) settingsSection.hidden = true;
@@ -120,8 +121,13 @@
       const reply = await fetch("/api/auth/session", {
         method: "POST",
         credentials: "same-origin",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ credential: response && response.credential }),
+        // As in Tia: the GIS credential goes in "Authorization: Bearer". It is
+        // exchanged once for an HttpOnly session cookie and not kept here.
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer " + ((response && response.credential) || ""),
+        },
+        body: "{}",
       });
       if (!reply.ok && statusText) {
         const payload = await reply.json().catch(() => ({}));
@@ -153,9 +159,20 @@
       const gis = window.google && window.google.accounts && window.google.accounts.id;
       if (!gis) return;
       gis.initialize({ client_id: clientId, callback: onCredential, auto_select: false });
-      const options = { type: "standard", theme: "outline", size: "small", text: "signin", shape: "rectangular" };
-      gis.renderButton(gisSlot, options);
-      if (gateSlot) gis.renderButton(gateSlot, { ...options, size: "large", text: "signin_with" });
+      gis.renderButton(gisSlot, { type: "standard", theme: "outline", size: "small", text: "signin", shape: "rectangular" });
+      if (gateSlot) {
+        // Tia's sign-in card button: outline, large, "Sign in with", pill, fitted width.
+        let renderedWidth = 0;
+        const fit = () => {
+          const width = Math.min(400, Math.floor(gateSlot.getBoundingClientRect().width));
+          if (width <= 0 || width === renderedWidth) return;
+          renderedWidth = width;
+          gateSlot.replaceChildren();
+          gis.renderButton(gateSlot, { theme: "outline", size: "large", text: "signin_with", shape: "pill", width: String(width) });
+        };
+        fit();
+        if (typeof ResizeObserver !== "undefined") new ResizeObserver(fit).observe(gateSlot);
+      }
     };
     document.head.append(script);
   }

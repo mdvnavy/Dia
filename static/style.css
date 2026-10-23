@@ -1293,18 +1293,24 @@ html:not([data-theme="light"]) .action-btn {
 [data-level="low"] > .lh-usage-num, [data-level="zero"] > .lh-usage-num,
 .usage-num[data-level="low"], .usage-num[data-level="zero"] { font-weight: 600; }
 /* 1px --border divider, 12px tall, 16px either side, between the counter and Search actions. */
-.lh-usage-divider { display: inline-block; width: 1px; height: 12px; margin: 0 16px; background: var(--border); flex: none; }
+/* The corner already spaces items by --lh-gap, so the margin only tops it up to 16px. */
+.lh-usage-divider { display: inline-block; width: 1px; height: 12px; margin: 0 calc(16px - var(--lh-gap)); background: var(--border); flex: none; }
 /* Mobile status-line copy of the counter; hidden on desktop. */
 .usage-inline { display: none; }
 .usage-inline .usage-label { color: var(--muted); }
 #status.is-limit { color: var(--text); }
 /* Run stays visible when today's allowance is used: aria-disabled, never removed. */
-.cmp-enter[aria-disabled="true"] { opacity: 0.45; cursor: default; }
+/* Same disabled language as the composer (composer-icons.css): dashed ring, dimmed icon. */
+.cmp-enter[aria-disabled="true"] .icon > * { opacity: 0.4; }
 .lh-menu-usage { display: none; }
 
-@media (max-width: 600px) {
+/* Glyph specifies 1280 (header) and <=600 (status line). Between them the
+   header has no room beside the centred clock, so the status-line form is used. */
+@media (max-width: 1279px) {
   .lh-usage, .lh-usage-divider { display: none; }
   .usage-inline:not([hidden]) { display: inline; }
+  /* On a 429 the status line carries the calm message alone (the counts are already 0). */
+  #status.is-limit + .usage-inline { display: none; }
   .lh-menu-usage:not([hidden]) { display: flex; flex-direction: column; margin-top: 6px; }
 }
 
@@ -1322,7 +1328,8 @@ html:not([data-theme="light"]) .action-btn {
 }
 .signin-gate-text { margin: 0; color: var(--muted); font: 400 14px/1.5 var(--sans); }
 .signin-gate-ask { margin: 8px 0 0; text-align: center; }
-.signin-gate-button:empty { display: none; }
+.signin-gate-button { display: flex; justify-content: center; width: 100%; max-width: 400px; min-height: 40px; }
+.signin-gate-button[hidden] { display: none; }
 body[data-auth="signed-out"] .intake-stage .dock-row,
 body[data-auth="signed-out"] #intakeBody,
 body[data-auth="signed-out"] #fileChips,
