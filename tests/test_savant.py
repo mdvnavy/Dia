@@ -688,15 +688,16 @@ def test_pdf_ignores_client_supplied_documents_and_scores():
     assert "Score 15 of 20" in normalise(text)
 
 
-# --- §8.1 No AI text in any export, with or without GEMINI_API_KEY ---------------------------------
+# --- §8.1 No AI text in any export, with or without Vertex AI configured ---------------------------------
 # (Persona v1.2 follow-up 2 covers tainted results on every export path: tests/test_strategic_analysis_exports.py.)
 
 AI_FAKE = "FAKE-GEMINI-SAVANT-9Z: a strategic read written by a model."
 
 
-@pytest.mark.parametrize("key", [None, "fake-key"], ids=["without-key", "with-key"])
+# Since fix/enforce-vertex the agent runs only when Vertex AI is configured; an API key never enables it.
+@pytest.mark.parametrize("vertex", [False, True], ids=["without-vertex", "with-vertex"])
 @pytest.mark.parametrize("name", ["sample", "legacy"])
-def test_no_ai_text_or_agent_error_in_any_export(key, name, monkeypatch):  # §8.1
+def test_no_ai_text_or_agent_error_in_any_export(vertex, name, monkeypatch):  # §8.1
     pytest.importorskip("weasyprint")
     try:
         from client_discovery import service
@@ -704,15 +705,22 @@ def test_no_ai_text_or_agent_error_in_any_export(key, name, monkeypatch):  # §8
         pytest.skip(f"service path unavailable: {exc}")
     from client_discovery.report import render_pdf
 
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    from vertex_config import VERTEX_ENV_HINT
+
     monkeypatch.delenv("JULES_API_KEY", raising=False)
-    if key:
-        monkeypatch.setenv("GEMINI_API_KEY", key)
+    monkeypatch.setenv("GEMINI_API_KEY", "fake-key")  # ignored either way
+    if vertex:
+        monkeypatch.setenv("GOOGLE_GENAI_USE_VERTEXAI", "TRUE")
+        monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "demo-project")
+        monkeypatch.setenv("GOOGLE_CLOUD_LOCATION", "global")
+    else:
+        for var in ("GOOGLE_GENAI_USE_VERTEXAI", "GOOGLE_CLOUD_PROJECT", "GOOGLE_CLOUD_LOCATION"):
+            monkeypatch.delenv(var, raising=False)
     with patch.object(service, "root_agent", SimpleNamespace(run=lambda prompt: SimpleNamespace(text=AI_FAKE))), \
             patch.object(service, "trigger_obs_screenshot", lambda *a, **k: ""), \
             patch.object(service, "save_obs_replay_buffer", lambda *a, **k: ""):
         result = service.build_intake_response(VARIANTS[name])
-    expected = AI_FAKE if key else "DIA Agent Error: GEMINI_API_KEY is missing or invalid."
+    expected = AI_FAKE if vertex else f"DIA Agent Error: Vertex AI is not configured. {VERTEX_ENV_HINT}"
     assert result["strategic_analysis"] == expected  # the path really produced AI text / the error
     safe = scrub_for_export(result)
     md = "\n\n---\n\n".join(safe["documents"][n] for n in report_model.MD_EXPORT_ORDER)
