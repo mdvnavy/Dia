@@ -72,6 +72,160 @@ function setBusy(button, busy) {
   button.classList.toggle("busy", busy);
 }
 
+// --- Daily usage counter + sign-in gate (lockdown v2) -----------------------
+// Display only. The numbers always come from the server (/api/usage or the
+// "usage" field of a run's response); nothing here is stored or trusted.
+const usageMeter = document.querySelector("#usageMeter");
+const usageReset = document.querySelector("#usageReset");
+const usageDivider = document.querySelector("#usageDivider");
+const usageInline = document.querySelector("#usageInline");
+const menuUsage = document.querySelector("#menuUsage");
+const signInGate = document.querySelector("#signInGate");
+const signInGateAsk = document.querySelector("#signInGateAsk");
+const RESET_NOTE = "Resets at midnight ET.";
+const LIMIT_TEXT = {
+  generations: (limit) => `You've used today's ${limit} generation${limit === 1 ? "" : "s"}. More at midnight ET.`,
+  ask: (limit) => `You've used today's ${limit} Ask DIA question${limit === 1 ? "" : "s"}. More at midnight ET.`,
+};
+let lastUsage = null;
+
+function usageLevel(bucket) {
+  if (!bucket || bucket.remaining <= 0) return "zero";
+  return bucket.remaining === 1 ? "low" : "ok";
+}
+
+function usageSentence(usage) {
+  const g = usage.generations.remaining;
+  const a = usage.ask.remaining;
+  return `${g} generation${g === 1 ? "" : "s"} and ${a} Ask DIA question${a === 1 ? "" : "s"} left today. ${RESET_NOTE}`;
+}
+
+function setRunLimited(button, bucketName, usage) {
+  if (!button) return;
+  const bucket = usage && !usage.unlimited ? usage[bucketName] : null;
+  if (bucket && bucket.remaining <= 0) {
+    button.setAttribute("aria-disabled", "true");
+    button.title = LIMIT_TEXT[bucketName](bucket.limit);
+  } else if (button.getAttribute("aria-disabled") === "true") {
+    button.removeAttribute("aria-disabled");
+    button.removeAttribute("title");
+  }
+}
+
+function renderUsage(usage) {
+  if (!usageMeter) return;
+  const signedIn = Boolean(usage && usage.signed_in);
+  usageMeter.hidden = !signedIn;
+  usageDivider.hidden = !signedIn;
+  if (!signedIn) {
+    lastUsage = null;
+    usageInline.hidden = true;
+    menuUsage.hidden = true;
+    usageReset.textContent = "";
+    return;
+  }
+  lastUsage = usage;
+  const items = usageMeter.querySelectorAll(".lh-usage-item");
+  const sep = usageMeter.querySelector(".lh-usage-sep");
+  const owner = usageMeter.querySelector(".lh-usage-owner");
+  if (usage.unlimited) {
+    items.forEach((item) => { item.hidden = true; });
+    sep.hidden = true;
+    owner.hidden = false;
+    usageMeter.removeAttribute("title");
+    usageMeter.removeAttribute("aria-describedby");
+    usageReset.textContent = "";
+    usageInline.hidden = true;
+    menuUsage.hidden = true;
+  } else {
+    owner.hidden = true;
+    sep.hidden = false;
+    items.forEach((item) => {
+      const bucket = usage[item.dataset.bucket];
+      item.hidden = false;
+      item.dataset.level = usageLevel(bucket);
+      item.querySelector(".lh-usage-num").textContent = `${bucket.remaining}/${bucket.limit}`;
+    });
+    const sentence = usageSentence(usage);
+    usageMeter.title = sentence;
+    usageMeter.setAttribute("aria-describedby", "usageReset");
+    usageReset.textContent = sentence;
+    // <=600px: the counter joins the status line ("Ready · 7/10 generations · 3/5 Ask DIA").
+    usageInline.replaceChildren();
+    for (const [name, label] of [["generations", "generations"], ["ask", "Ask DIA"]]) {
+      const bucket = usage[name];
+      const num = document.createElement("span");
+      num.className = "usage-num";
+      num.dataset.level = usageLevel(bucket);
+      num.textContent = `${bucket.remaining}/${bucket.limit}`;
+      const text = document.createElement("span");
+      text.className = "usage-label";
+      text.textContent = ` ${label}`;
+      usageInline.append(" · ", num, text);
+    }
+    usageInline.hidden = false;
+    menuUsage.hidden = false;
+  }
+  setRunLimited(runAgent, "generations", usage);
+  setRunLimited(runChat, "ask", usage);
+}
+
+function setSignedOut(signedOut, { configured = true } = {}) {
+  document.body.dataset.auth = signedOut ? "signed-out" : "signed-in";
+  if (signInGate) signInGate.hidden = !signedOut;
+  if (signInGateAsk) signInGateAsk.hidden = !signedOut;
+  const text = document.querySelector("#signInGateText");
+  if (text) {
+    text.textContent = configured
+      ? "Sign in with Google to run an intake and ask DIA."
+      : "Sign-in isn't available right now. You can still read about DIA.";
+  }
+  if (signedOut) renderUsage(null);
+}
+
+async function refreshUsage() {
+  try {
+    const response = await fetch("/api/usage", { credentials: "same-origin" });
+    if (response.status === 401) {
+      setSignedOut(true);
+      return null;
+    }
+    const usage = await response.json();
+    if (!response.ok) return lastUsage;
+    renderUsage(usage);
+    return usage;
+  } catch (error) {
+    return lastUsage;
+  }
+}
+
+// Shared handling for any gated call's response. Returns true when handled
+// (signed out or today's allowance used), so the caller just stops.
+function handleGateResponse(response, payload) {
+  if (response.status === 401 && payload && payload.error === "sign_in_required") {
+    setSignedOut(true);
+    statusText.classList.remove("is-limit");
+    statusText.textContent = "Sign in with Google to use DIA.";
+    return true;
+  }
+  if (payload && payload.usage) renderUsage(payload.usage);
+  if (response.status === 429 && payload && payload.error === "daily_limit") {
+    statusText.textContent = payload.message;
+    statusText.classList.add("is-limit");
+    return true;
+  }
+  return false;
+}
+
+function limitedClick(button) {
+  if (button.getAttribute("aria-disabled") !== "true") return false;
+  statusText.textContent = button.title;
+  statusText.classList.add("is-limit");
+  return true;
+}
+
+window.DIA_USAGE = { render: renderUsage, refresh: refreshUsage, setSignedOut };
+
 // Intake collapse: after a successful run the questionnaire folds away so the
 // post-intake workflow (Ask DIA, results, draft editor) takes the stage. The
 // Run button and status stay visible for quick re-runs.
@@ -102,6 +256,7 @@ loadSample.addEventListener("click", async () => {
   statusText.textContent = "Loading sample...";
   const response = await fetch("/api/sample");
   const payload = await response.json();
+  if (handleGateResponse(response, payload)) return;
   questionnaire.value = payload.questionnaire;
   if (intakeBody.hidden) setIntakeCollapsed(false);
   autosizeComposer(questionnaire);
@@ -109,6 +264,8 @@ loadSample.addEventListener("click", async () => {
 });
 
 runAgent.addEventListener("click", async () => {
+  if (limitedClick(runAgent)) return;
+  statusText.classList.remove("is-limit");
   statusText.textContent = "Processing...";
   setBusy(runAgent, true);
   setExportAvailability(false);
@@ -119,8 +276,12 @@ runAgent.addEventListener("click", async () => {
       body: JSON.stringify({ questionnaire: questionnaire.value }),
     });
     const payload = await response.json();
+    if (handleGateResponse(response, payload)) {
+      setExportAvailability(latestPayload !== null);
+      return;
+    }
     if (!response.ok) {
-      throw new Error(payload.error || "Processing failed");
+      throw new Error(payload.message || payload.error || "Processing failed");
     }
     showResults(payload, questionnaire.value);
     statusText.textContent = "Complete - intake collapsed, ready to work";
@@ -249,6 +410,10 @@ async function sendAgentMessage() {
     agentOutput.textContent = "Type a question for the agent first.";
     return null;
   }
+  if (limitedClick(runChat)) {
+    agentOutput.textContent = runChat.title;
+    return null;
+  }
   const context = buildAgentContext();
   agentOutput.textContent = "Thinking...";
   setBusy(runChat, true);
@@ -263,8 +428,12 @@ async function sendAgentMessage() {
       setAskDiaUnavailable(payload.error);
       return null;
     }
+    if (handleGateResponse(response, payload)) {
+      agentOutput.textContent = payload.message || statusText.textContent;
+      return null;
+    }
     if (!response.ok) {
-      throw new Error(payload.error || "Agent run failed");
+      throw new Error(payload.message || payload.error || "Agent run failed");
     }
     agentOutput.textContent = payload.reply || "(empty response)";
     return payload.reply || "";
@@ -2144,7 +2313,8 @@ async function extractOne(file, signal) {
   try { payload = await response.json(); } catch (error) { payload = null; }
   if (!response.ok) {
     if (!payload || !payload.error) throw Object.assign(new Error(NETWORK_MESSAGE), { network: true });
-    throw new Error(payload.error);
+    if (handleGateResponse(response, payload)) throw new Error(payload.message || statusText.textContent);
+    throw new Error(payload.message || payload.error);
   }
   return payload;
 }
@@ -2823,16 +2993,18 @@ async function fetchPdf(item, signal) {
   const response = await fetch("/api/pdf", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    // Re-render the saved run ({result}); sending the questionnaire instead
+    // would re-run the pipeline and cost a generation.
     body: JSON.stringify({
-      questionnaire: item.questionnaire,
-      result: item.result,
+      ...(item.result ? { result: item.result } : { questionnaire: item.questionnaire }),
       date: new Date(item.savedAt).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" }),
     }),
     signal,
   });
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
-    throw new Error(payload.error || "PDF rendering failed on the server.");
+    if (handleGateResponse(response, payload)) throw new Error(payload.message || statusText.textContent);
+    throw new Error(payload.message || payload.error || "PDF rendering failed on the server.");
   }
   return response.blob();
 }

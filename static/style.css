@@ -564,8 +564,13 @@ body[data-stage="results"] .subtitle { font-size: 15px; margin-bottom: 1.75rem; 
 .text-link:hover { border-bottom-color: var(--accent); color: var(--accent-ink); }
 .dot-sep { color: var(--muted); }
 
-#status {
+.status-line {
   flex-basis: 100%;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+#status {
   color: var(--muted);
   font-family: var(--mono);
   font-size: 12px;
@@ -1258,3 +1263,69 @@ html:not([data-theme="light"]) .action-btn {
 .action-btn .icon { --accent: currentColor; }
 .action-btn .icon .px { width: 32px; height: 32px; }
 .action-btn.busy .icon { display: none; }
+
+
+/* ---- Daily usage counter + sign-in gate (Glyph lockdown v2) ----
+   Existing tokens only (--muted, --text, --border): no new colours, no red, no mustard. */
+.lh-usage {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font: 500 11px/1 var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--muted);
+  border-radius: 6px;
+}
+.lh-usage:focus-visible { outline: 2px solid var(--lh-ring); outline-offset: 2px; }
+.lh-usage[hidden], .lh-usage-divider[hidden], .lh-usage-owner[hidden], .lh-usage-item[hidden],
+.lh-usage-sep[hidden], .usage-inline[hidden], .lh-menu-usage[hidden],
+.signin-gate[hidden], .signin-gate-text[hidden] { display: none; }
+.lh-usage-item { display: inline-flex; align-items: center; gap: 6px; }
+.lh-usage-label { color: var(--muted); }
+.lh-usage-num, .usage-inline .usage-num { color: var(--text); font-variant-numeric: tabular-nums; }
+.lh-usage-sep { color: var(--muted); }
+.lh-usage-owner { color: var(--muted); }
+.lh-usage-dot { display: none; width: 6px; height: 6px; border-radius: 50%; box-sizing: border-box; flex: none; }
+[data-level="low"] > .lh-usage-dot { display: inline-block; border: 1px solid var(--text); background: transparent; }
+[data-level="zero"] > .lh-usage-dot { display: inline-block; border: 1px solid var(--text); background: var(--text); }
+[data-level="low"] > .lh-usage-num, [data-level="zero"] > .lh-usage-num,
+.usage-num[data-level="low"], .usage-num[data-level="zero"] { font-weight: 600; }
+/* 1px --border divider, 12px tall, 16px either side, between the counter and Search actions. */
+.lh-usage-divider { display: inline-block; width: 1px; height: 12px; margin: 0 16px; background: var(--border); flex: none; }
+/* Mobile status-line copy of the counter; hidden on desktop. */
+.usage-inline { display: none; }
+.usage-inline .usage-label { color: var(--muted); }
+#status.is-limit { color: var(--text); }
+/* Run stays visible when today's allowance is used: aria-disabled, never removed. */
+.cmp-enter[aria-disabled="true"] { opacity: 0.45; cursor: default; }
+.lh-menu-usage { display: none; }
+
+@media (max-width: 600px) {
+  .lh-usage, .lh-usage-divider { display: none; }
+  .usage-inline:not([hidden]) { display: inline; }
+  .lh-menu-usage:not([hidden]) { display: flex; flex-direction: column; margin-top: 6px; }
+}
+
+/* Signed-out visitors read; they don't run. The composer area becomes a quiet prompt. */
+.signin-gate {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 20px 16px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+  text-align: center;
+}
+.signin-gate-text { margin: 0; color: var(--muted); font: 400 14px/1.5 var(--sans); }
+.signin-gate-ask { margin: 8px 0 0; text-align: center; }
+.signin-gate-button:empty { display: none; }
+body[data-auth="signed-out"] .intake-stage .dock-row,
+body[data-auth="signed-out"] #intakeBody,
+body[data-auth="signed-out"] #fileChips,
+body[data-auth="signed-out"] [data-needs-auth],
+body[data-auth="signed-out"] #agentComposer,
+body[data-auth="signed-out"] #agentStage .under-prompt { display: none; }
