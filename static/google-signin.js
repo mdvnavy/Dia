@@ -24,6 +24,7 @@
 
   function describe(status) {
     if (!status) return "";
+    if (status.enabled === false) return ""; // kill switch: app.js shows the notice
     if (status.owner) return "Owner: unlimited";
     const quota = status.quota;
     if (!quota) return "";

@@ -173,11 +173,29 @@ document.querySelector(".tabs").addEventListener("keydown", (event) => {
   }
 });
 
+// Kill switch (ASK_DIA_ENABLED=false on the server): Ask DIA shows a calm
+// notice and its composer is disabled; the intake tools keep working.
+const ASK_DIA_UNAVAILABLE =
+  "Ask DIA is temporarily unavailable. The intake tools still work, so you can keep going and try Ask DIA again later.";
+let askDiaDisabled = false;
+
+function setAskDiaUnavailable(message) {
+  askDiaDisabled = true;
+  agentStatus.textContent = "Temporarily unavailable";
+  agentStatus.classList.remove("ok");
+  agentMessage.disabled = true;
+  agentMessage.setAttribute("aria-disabled", "true");
+  runChat.disabled = true;
+  agentOutput.textContent = message || ASK_DIA_UNAVAILABLE;
+}
+
 async function refreshAgentStatus() {
   try {
     const response = await fetch("/api/agent/status");
     const payload = await response.json();
-    if (payload.configured) {
+    if (payload.enabled === false) {
+      setAskDiaUnavailable();
+    } else if (payload.configured) {
       agentStatus.textContent = "Gemini connected";
       agentStatus.classList.add("ok");
     } else {
@@ -222,6 +240,10 @@ function buildAgentContext() {
 }
 
 async function sendAgentMessage() {
+  if (askDiaDisabled) {
+    agentOutput.textContent = ASK_DIA_UNAVAILABLE;
+    return null;
+  }
   const message = agentMessage.value.trim();
   if (!message) {
     agentOutput.textContent = "Type a question for the agent first.";
@@ -237,6 +259,10 @@ async function sendAgentMessage() {
       body: JSON.stringify({ message: message + context }),
     });
     const payload = await response.json();
+    if (response.status === 503 && payload.enabled === false) {
+      setAskDiaUnavailable(payload.error);
+      return null;
+    }
     if (!response.ok) {
       throw new Error(payload.error || "Agent run failed");
     }
@@ -247,6 +273,7 @@ async function sendAgentMessage() {
     return null;
   } finally {
     setBusy(runChat, false);
+    if (askDiaDisabled) runChat.disabled = true;
   }
 }
 
