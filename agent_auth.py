@@ -47,6 +47,35 @@ MIN_SESSION_SECRET_LENGTH = 32
 CLOCK_SKEW_SECONDS = 60
 
 
+# --- kill switch ---------------------------------------------------------------
+
+ASK_DIA_UNAVAILABLE_MESSAGE = (
+    "Ask DIA is temporarily unavailable. The intake tools still work, "
+    "so you can keep going and try Ask DIA again later."
+)
+ASK_DIA_RETRY_AFTER_SECONDS = 300
+_ENABLED_VALUES = frozenset({"1", "true", "yes", "on"})
+_DISABLED_VALUES = frozenset({"0", "false", "no", "off"})
+
+
+def ask_dia_enabled() -> bool:
+    """``ASK_DIA_ENABLED`` kill switch for ``/api/agent`` (unset = enabled).
+
+    Explicit falsy values switch Ask DIA off for everyone, owners included.
+    An unrecognised value (a typo such as ``flase``) also switches it off, so
+    a mistyped kill switch fails closed rather than leaving the endpoint open.
+    """
+    raw = os.environ.get("ASK_DIA_ENABLED")
+    if raw is None or not raw.strip():
+        return True
+    value = raw.strip().lower()
+    if value in _ENABLED_VALUES:
+        return True
+    if value not in _DISABLED_VALUES:
+        logger.warning("unrecognised ASK_DIA_ENABLED value; treating Ask DIA as disabled")
+    return False
+
+
 class SignInError(ValueError):
     """A Google ID token was rejected. The message is safe to show users."""
 

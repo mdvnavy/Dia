@@ -393,11 +393,12 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
         return visitor_keys(ip, visitor_id)
 
     def handle_agent_status(self) -> None:
-        from agent_auth import client_ip, configured_mode
+        from agent_auth import ask_dia_enabled, client_ip, configured_mode
         from agent_quota import get_quota
         from agent_runtime import is_configured
 
         payload: dict[str, object] = {
+            "enabled": ask_dia_enabled(),
             "configured": is_configured(),
             "auth": configured_mode(),
             **self._auth_state(),
@@ -416,9 +417,26 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
         self.send_json(payload)
 
     def handle_agent(self) -> None:
-        from agent_auth import agent_rate_limiter, client_ip, is_owner
+        from agent_auth import (
+            ASK_DIA_RETRY_AFTER_SECONDS,
+            ASK_DIA_UNAVAILABLE_MESSAGE,
+            agent_rate_limiter,
+            ask_dia_enabled,
+            client_ip,
+            is_owner,
+        )
         from agent_quota import get_quota, limit_message
         from agent_runtime import AgentNotConfigured, is_configured, run_agent
+
+        if not ask_dia_enabled():
+            # Kill switch: checked before anything else (body, quota, Gemini),
+            # for owners too, so flipping ASK_DIA_ENABLED stops all spend.
+            self.send_json(
+                {"enabled": False, "error": ASK_DIA_UNAVAILABLE_MESSAGE},
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                extra_headers={"Retry-After": str(ASK_DIA_RETRY_AFTER_SECONDS)},
+            )
+            return
 
         owner = is_owner(self.headers)
         if not owner:
