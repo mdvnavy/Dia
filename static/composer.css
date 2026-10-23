@@ -252,3 +252,55 @@ html:not([data-theme="light"]) .prompt-bar {
 }
 html:not([data-theme="light"]) .prompt-bar:is(:focus-within, :hover) { outline-color: rgba(124, 130, 138, 0.5); }
 html:not([data-theme="light"]) .prompt-bar:focus-within { outline-color: #7C828A; }
+
+/* ==========================================================================
+   Prompt bar v2 (feat/prompt-bar-v2, Ikenna 2026-10-23). Existing tokens only; Glyph to review.
+   - Slimmer bar: 70 -> 57px desktop (6px vertical padding), 54 -> 52px on phones (3px). Every icon button in and around the
+     bar is a real 44x44 box (was 46 desktop / 38 phones), so the 44px tap target holds without hit-area tricks.
+   - The message in an empty bar (placeholder, or "Ask DIA is temporarily unavailable.") is centred.
+   - No pills: the Ask DIA state is plain text with a dot, the voice drawer is icon-only with hints, and the old
+     Conversation / Listen / Auto-speak chips under the Ask DIA bar are gone (they live in the drawer).
+   ========================================================================== */
+:root { --cmp-circle: 44px; --cmp-circle-mobile: 44px; --cmp-bar-radius: 28px; }
+.prompt-bar.has-cmp { min-height: 56px; padding-top: 6px; padding-bottom: 6px; border-radius: 28px; }
+.prompt-bar.has-cmp.multiline { border-radius: 24px; }
+.prompt-bar.has-cmp .action-btn.cmp-circle { width: 44px; height: 44px; }
+.prompt-bar.has-cmp .prompt-input:placeholder-shown { text-align: center; padding-right: 0; margin-right: 6px; }
+@media (max-width: 600px) {
+  :root { --cmp-bar-radius: 26px; }
+  .prompt-bar.has-cmp { min-height: 52px; padding: 3px 4px; border-radius: 26px; --bar-pad: 4px; }
+  .prompt-bar.has-cmp .prompt-input { margin-left: 4px; }
+  .prompt-bar.has-cmp .prompt-input:placeholder-shown { margin-right: 4px; }
+}
+
+/* Ask DIA state: quiet plain text after the heading, a 6px dot in front (green when connected). Not a badge. */
+.agent-state {
+  display: inline-flex; align-items: center; gap: 6px; margin-left: 10px; vertical-align: middle;
+  color: var(--muted); font: 400 12px/1.4 var(--sans); letter-spacing: 0; text-transform: none;
+}
+.agent-state::before { content: ""; width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--muted); opacity: .7; }
+.agent-state.ok { color: var(--good); }
+.agent-state.ok::before { background: var(--good); opacity: 1; }
+
+/* The old chip row's buttons are state holders only now. */
+.voice-sources[hidden] { display: none !important; }
+
+/* Voice options drawer: icon-only on every width, 44x44 items, a soft 14px panel (the plus menu's radius), not a pill.
+   Each item's name shows as a hint (#uiHint) on hover, keyboard focus or a long-press. */
+.has-cmp .voice-fan { padding: 4px; gap: 2px; border-radius: 14px; }
+.has-cmp .voice-item { width: 44px; height: 44px; padding: 0; gap: 0; justify-content: center; border-radius: 50%; }
+.has-cmp .voice-item .icon { width: 36px; height: 36px; }
+.has-cmp .voice-label { display: none; }
+/* The drawer is 12px taller than the old 42px row, so the status line / Ask DIA heading slide a little further. */
+.intake-stage:has(#intakeVoiceNotch[aria-expanded="true"]) #status { translate: 0 -34px; }
+.agent:has(#agentVoiceNotch[aria-expanded="true"]) > h2 { translate: 0 -50px; }
+.agent:has(> h2 + .prompt-bar.has-cmp) { margin-top: 68px; }
+
+/* Shared hint (tooltip) for the composer's icon buttons: same look as .cmp-tip. Fixed, clamped to the viewport by JS. */
+.ui-hint {
+  position: fixed; z-index: 60; width: max-content; max-width: min(280px, calc(100vw - 16px));
+  padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface);
+  color: var(--text); font: 500 12px/1.45 var(--sans); box-shadow: var(--shadow-subtle); pointer-events: none;
+}
+.ui-hint[hidden] { display: none; }
+[data-hint] { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }

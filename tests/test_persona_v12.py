@@ -393,7 +393,7 @@ def test_off_mode_ends_conversation_and_cancels_its_pending_reply(context, base_
     assert page.evaluate("conversationActive") is True
     assert page.evaluate("window.__recs.length") == 1
     page.evaluate("window.__recs[0].onresult({ results: [[{ transcript: 'What tier is this?' }]] })")
-    page.wait_for_function("document.querySelector('#status').textContent === 'Sending to agent...'")
+    page.wait_for_function("document.querySelector('#statusText').textContent === 'Sending to agent...'")
     page.wait_for_timeout(100)
     assert len(held) == 1  # the request is in flight
     assert page.evaluate("chatController !== null")

@@ -196,6 +196,9 @@ function disableAskDia() {
   agentStatus.classList.remove("ok");
   agentMessage.disabled = true;
   agentMessage.placeholder = ASK_DIA_UNAVAILABLE;
+  // The narrow/wide placeholder swap (landing polish) must not bring back "Ask DIA a question…" on a resize.
+  agentMessage.dataset.placeholderShort = ASK_DIA_UNAVAILABLE;
+  agentMessage.dataset.placeholderLong = ASK_DIA_UNAVAILABLE;
   runChat.disabled = true;
   runChat.hidden = true;
   const stage = document.querySelector("#agentStage");
@@ -1489,6 +1492,111 @@ const VoiceFans = {
 };
 voiceReady = true;
 applyVoiceOff();
+
+// --- Hints (prompt bar v2, Ikenna: icons, not pills): one shared tooltip (#uiHint) for the composer's icon buttons.
+// Any [data-hint] element shows it after --dia-delay-intent on pointer hover, at once on keyboard focus, and on a
+// 450ms long-press on touch (that press doesn't also click). The text is data-hint, or the element's aria-label when
+// data-hint is empty, so it always matches the accessible name, plus "on"/"off" for toggles. [data-hint-touch-only]
+// (the mics and notches, which keep their own .cmp-tip on hover and focus) answers the long-press only.
+const Hints = (() => {
+  const tip = document.createElement("div");
+  tip.id = "uiHint";
+  tip.className = "ui-hint";
+  tip.setAttribute("role", "tooltip");
+  tip.hidden = true;
+  document.body.append(tip);
+  const LONG_PRESS = 450;
+  const TOUCH_HOLD = 1600;
+  let owner = null;
+  let showTimer = 0;
+  let hideTimer = 0;
+  let pressTimer = 0;
+  const intent = () => parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--dia-delay-intent")) || 120;
+  const hintFor = (node, { touch = false } = {}) => {
+    const el = node?.closest?.("[data-hint]");
+    if (!el || (!touch && el.hasAttribute("data-hint-touch-only"))) return null;
+    return el;
+  };
+  const text = (el) => {
+    let value = el.dataset.hint || el.getAttribute("aria-label") || "";
+    const checked = el.getAttribute("aria-checked");
+    if (value && checked !== null) value += checked === "true" ? " · on" : " · off";
+    return value;
+  };
+  function place(el) {
+    const rect = el.getBoundingClientRect();
+    const width = tip.offsetWidth;
+    const height = tip.offsetHeight;
+    const left = Math.max(8, Math.min(rect.left + rect.width / 2 - width / 2, window.innerWidth - width - 8));
+    let top = rect.top - height - 8;
+    if (top < 8) top = rect.bottom + 8;
+    tip.style.left = `${Math.round(left)}px`;
+    tip.style.top = `${Math.round(top)}px`;
+  }
+  function show(el) {
+    clearTimeout(showTimer);
+    clearTimeout(hideTimer);
+    const value = text(el);
+    if (!value) { hide(); return; }
+    owner = el;
+    tip.textContent = value;
+    tip.hidden = false;
+    place(el);
+  }
+  function hide() {
+    clearTimeout(showTimer);
+    clearTimeout(hideTimer);
+    owner = null;
+    tip.hidden = true;
+  }
+  document.addEventListener("pointerover", (event) => {
+    if (event.pointerType === "touch") return;
+    const el = hintFor(event.target);
+    if (!el || el === owner) return;
+    clearTimeout(showTimer);
+    showTimer = setTimeout(() => show(el), intent());
+  });
+  document.addEventListener("pointerout", (event) => {
+    const el = hintFor(event.target, { touch: true });
+    if (!el || el.contains(event.relatedTarget)) return;
+    clearTimeout(showTimer);
+    if (owner === el && !el.matches(":focus-visible")) hide();
+  });
+  document.addEventListener("focusin", (event) => {
+    const el = hintFor(event.target);
+    if (el && el.matches(":focus-visible")) show(el);
+    else if (owner) hide();
+  });
+  document.addEventListener("focusout", (event) => { if (owner && owner === hintFor(event.target, { touch: true })) hide(); });
+  document.addEventListener("keydown", (event) => { if (event.key === "Escape" && owner) hide(); }, true);
+  document.addEventListener("pointerdown", (event) => {
+    clearTimeout(pressTimer);
+    if (event.pointerType !== "touch") { if (owner) hide(); return; }
+    const el = hintFor(event.target, { touch: true });
+    if (!el) return;
+    pressTimer = setTimeout(() => {
+      el.dataset.longPress = "true";
+      show(el);
+      hideTimer = setTimeout(hide, TOUCH_HOLD);
+    }, LONG_PRESS);
+  });
+  ["pointerup", "pointercancel"].forEach((type) => document.addEventListener(type, () => clearTimeout(pressTimer)));
+  // A long-press shows the hint instead of pressing the button.
+  document.addEventListener("click", (event) => {
+    const el = hintFor(event.target, { touch: true });
+    if (el?.dataset.longPress) {
+      delete el.dataset.longPress;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      return;
+    }
+    if (owner) setTimeout(() => { if (owner) { tip.textContent = text(owner); place(owner); } }, 0);   // toggles flip on/off
+  }, true);
+  document.addEventListener("contextmenu", (event) => { if (hintFor(event.target, { touch: true })) event.preventDefault(); });
+  window.addEventListener("scroll", () => { if (owner) hide(); }, { passive: true, capture: true });
+  window.addEventListener("resize", () => { if (owner) hide(); });
+  return { show, hide, text, element: tip };
+})();
 
 // Cmd/Ctrl+Shift+Space toggles voice input for the composer that has focus (intake when neither does).
 document.addEventListener("keydown", (event) => {
