@@ -1,61 +1,53 @@
 #!/usr/bin/env bash
-# Deploy DIA to Google Cloud Run with the Gemini key stored in Secret Manager.
+# Deploy DIA to Google Cloud Run. Gemini runs on Vertex AI only.
 #
-# The API key is NEVER passed as a plaintext env var (which would be visible in
-# the Cloud Run config and `gcloud describe` output). It is stored once in
-# Secret Manager and mounted at runtime with --set-secrets.
+# House rule: Google model calls go through Vertex AI with the service's own
+# identity (Application Default Credentials), never the API-key developer
+# endpoint. No Gemini API key is stored, mounted or read: the app refuses an
+# API-key client even if one were present (see vertex_config.py).
 #
 # Prerequisites:
 #   - gcloud CLI installed and authenticated (gcloud auth login)
-#   - A Google Cloud project with billing enabled
-#   - A Gemini API key (https://aistudio.google.com/app/apikey)
+#   - A Google Cloud project with billing enabled and the Vertex AI API on
+#   - The Cloud Run runtime service account can call Vertex AI
+#     (roles/aiplatform.user). This script does NOT grant IAM.
 #
 # Usage:
-#   PROJECT_ID=my-project GEMINI_API_KEY=xxxx ./deploy-cloudrun.sh
-#   PROJECT_ID=my-project GEMINI_API_KEY=xxxx \
+#   PROJECT_ID=my-project ./deploy-cloudrun.sh
+#   PROJECT_ID=my-project VERTEX_LOCATION=global \
 #     GCP_MCP_URL=https://monitoring.googleapis.com/mcp ./deploy-cloudrun.sh
 set -euo pipefail
 
 PROJECT_ID="${PROJECT_ID:?Set PROJECT_ID to your Google Cloud project id}"
 SERVICE="${SERVICE:-dia-discovery-intake}"
 REGION="${REGION:-us-central1}"
-SECRET_NAME="${SECRET_NAME:-gemini-api-key}"
-GEMINI_API_KEY="${GEMINI_API_KEY:?Set GEMINI_API_KEY for live Gemini agent runs}"
+# Vertex AI location for model calls, separate from the Cloud Run region.
+# Current Gemini models (e.g. gemini-3.8-flash) are served from "global" and
+# the us/eu multi-regions only, not from us-central1.
+VERTEX_LOCATION="${VERTEX_LOCATION:-global}"
 
-DEPLOY_ENV_ARGS=()
+# --update-env-vars merges rather than replaces, so env already on the service, e.g.
+# OWNER_EMAILS or ASK_DIA_ENABLED, is kept rather than wiped.
+DEPLOY_ENV_ARGS=(
+  --update-env-vars "GOOGLE_GENAI_USE_VERTEXAI=TRUE,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_LOCATION=${VERTEX_LOCATION}"
+)
 if [[ -n "${GCP_MCP_URL:-}" ]]; then
-  DEPLOY_ENV_ARGS+=(--set-env-vars "GCP_MCP_URL=${GCP_MCP_URL}")
+  DEPLOY_ENV_ARGS+=(--update-env-vars "GCP_MCP_URL=${GCP_MCP_URL}")
 fi
 
 echo "Enabling required Google Cloud services..."
 gcloud services enable run.googleapis.com cloudbuild.googleapis.com \
-  secretmanager.googleapis.com --project "${PROJECT_ID}"
+  aiplatform.googleapis.com --project "${PROJECT_ID}"
 
-echo "Storing the API key in Secret Manager (${SECRET_NAME})..."
-if gcloud secrets describe "${SECRET_NAME}" --project "${PROJECT_ID}" >/dev/null 2>&1; then
-  printf '%s' "${GEMINI_API_KEY}" | gcloud secrets versions add "${SECRET_NAME}" \
-    --project "${PROJECT_ID}" --data-file=-
-else
-  printf '%s' "${GEMINI_API_KEY}" | gcloud secrets create "${SECRET_NAME}" \
-    --project "${PROJECT_ID}" --replication-policy=automatic --data-file=-
-fi
-
-# Grant the Cloud Run runtime service account read access to the secret.
-PROJECT_NUMBER="$(gcloud projects describe "${PROJECT_ID}" --format='value(projectNumber)')"
-RUNTIME_SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
-echo "Granting ${RUNTIME_SA} access to the secret..."
-gcloud secrets add-iam-policy-binding "${SECRET_NAME}" \
-  --project "${PROJECT_ID}" \
-  --member "serviceAccount:${RUNTIME_SA}" \
-  --role roles/secretmanager.secretAccessor >/dev/null
-
-echo "Deploying ${SERVICE} to Cloud Run in ${REGION}..."
+echo "Deploying ${SERVICE} to Cloud Run in ${REGION} (Vertex AI in ${VERTEX_LOCATION})..."
 gcloud run deploy "${SERVICE}" \
   --project "${PROJECT_ID}" \
   --region "${REGION}" \
   --source . \
   --allow-unauthenticated \
-  --set-secrets "GEMINI_API_KEY=${SECRET_NAME}:latest" \
+  # Unbind the old API-key secret if a previous deploy mounted it. The secret
+  # itself is left in Secret Manager; deleting it is a separate, manual step.
+  --remove-secrets GEMINI_API_KEY \
   "${DEPLOY_ENV_ARGS[@]}"
 
 echo "Done. Service URL:"

@@ -15,6 +15,7 @@ from client_discovery.core import (
 )
 from client_discovery import memory
 from client_discovery.agent_instruction import AGENT_INSTRUCTION
+from vertex_config import is_vertex_configured, vertex_gemini
 
 REPO_ROOT = Path(__file__).resolve().parent
 
@@ -143,6 +144,18 @@ def _gcp_mcp_toolset() -> list:
     ]
 
 
+# gemini-2.5-flash was retired on Vertex AI on 2026-10-20; gemini-3.8-flash is the
+# listed replacement (https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/model-versions).
+# On Vertex it is served from the "global" location (and the us / eu multi-regions),
+# not us-central1. DIA_MODEL still overrides it without a code change.
+DEFAULT_MODEL = "gemini-3.8-flash"
+
+
+def agent_model() -> str:
+    """The model id for Ask DIA: DIA_MODEL when set (non-blank), else DEFAULT_MODEL."""
+    return os.environ.get("DIA_MODEL", "").strip() or DEFAULT_MODEL
+
+
 def build_agent(
     *, include_make_mcp: bool = False, include_gcp_mcp: bool = False
 ) -> LlmAgent:
@@ -172,7 +185,8 @@ def build_agent(
     return LlmAgent(
         # Overridable so deploys can pin a model and local testing can dodge
         # per-model free-tier quotas without a code change.
-        model=os.environ.get("DIA_MODEL", "gemini-2.5-flash"),
+        # Always a Vertex AI client (house rule): never the API-key endpoint.
+        model=vertex_gemini(agent_model()),
         name="dia_discovery_intake_agent",
         instruction=AGENT_INSTRUCTION,
         generate_content_config=types.GenerateContentConfig(
@@ -190,7 +204,8 @@ def build_agent(
 # Module-level agent for ADK CLI / single-loop consumers (e.g. `adk run`).
 root_agent = build_agent()
 
-if not (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")):
+if not is_vertex_configured():
     logger.warning(
-        "GEMINI_API_KEY/GOOGLE_API_KEY is not set; ADK chat runs will fail until configured."
+        "Vertex AI is not configured (GOOGLE_GENAI_USE_VERTEXAI, GOOGLE_CLOUD_PROJECT, "
+        "GOOGLE_CLOUD_LOCATION); ADK chat runs will fail until it is. API keys are not used."
     )
