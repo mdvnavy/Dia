@@ -358,3 +358,56 @@ def test_off_mode_leaves_an_already_unsupported_mic_alone(context, base_url):
     assert mic_state(page, "#intakeMic") == before  # unchanged: the browser note stays
     assert page.locator(".voice-off-note").count() == 0
     assert page.errors == []
+
+
+FAKE_SPEECH = """
+window.__recs = [];
+window.__spoken = [];
+class FakeRecognition {
+  start() { window.__recs.push(this); this.onstart && this.onstart(); }
+  stop() { this.onend && this.onend(); }
+  abort() { this.onend && this.onend(); }
+}
+window.SpeechRecognition = FakeRecognition;
+window.webkitSpeechRecognition = FakeRecognition;
+Object.defineProperty(window, "speechSynthesis", { configurable: true, value: {
+  speaking: false, cancel() {}, getVoices() { return []; },
+  speak(u) { window.__spoken.push(u.text); setTimeout(() => u.onend && u.onend(), 0); },
+} });
+"""
+
+
+def test_off_mode_ends_conversation_and_cancels_its_pending_reply(context, base_url):
+    # Codex review (PR #38, P1): switching to Off while Conversation mode awaited a reply left it active, so the
+    # late reply was spoken and the mic restarted. Off must stop the conversation and abort the request.
+    context.add_init_script(FAKE_SPEECH)
+    held = []
+    page = context.new_page()
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.route("**/api/agent/status", lambda r: r.fulfill(json={"configured": True}))
+    page.route("**/api/agent", lambda r: held.append(r))
+    page.goto(base_url + "/")
+    page.wait_for_function("document.querySelector('#agentStatus').textContent !== 'checking...'")
+    page.evaluate("openAgent(); conversationMode.click()")
+    assert page.evaluate("conversationActive") is True
+    assert page.evaluate("window.__recs.length") == 1
+    page.evaluate("window.__recs[0].onresult({ results: [[{ transcript: 'What tier is this?' }]] })")
+    page.wait_for_function("document.querySelector('#status').textContent === 'Sending to agent...'")
+    page.wait_for_timeout(100)
+    assert len(held) == 1  # the request is in flight
+    assert page.evaluate("chatController !== null")
+
+    page.evaluate("setAssistantMode('off')")
+    assert page.evaluate("conversationActive") is False
+    assert page.get_attribute("#conversationMode", "aria-pressed") == "false"
+    assert page.evaluate("chatController") is None  # aborted and released
+    try:
+        held[0].fulfill(json={"reply": "Late reply that must never be spoken."})
+    except Exception:  # noqa: BLE001 - the browser already dropped the aborted request
+        pass
+    page.wait_for_timeout(300)
+    assert page.evaluate("window.__spoken") == []
+    assert page.evaluate("window.__recs.length") == 1  # the mic never restarted
+    assert "Late reply" not in page.inner_text("#agentOutput")
+    assert errors == []

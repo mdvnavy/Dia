@@ -190,3 +190,43 @@ def test_light_focus_ring_uses_dark_silver(page):
     page.keyboard.press("Tab")  # keyboard focus so :focus-visible applies
     colour = page.evaluate("getComputedStyle(document.activeElement).outlineColor")
     assert colour == "rgb(95, 102, 112)"
+
+
+def test_palette_opened_from_dia_menu_returns_focus_to_the_menu_button(page):
+    # Codex review (PR #32, P2 lost focus): the DIA menu hides itself before the palette captured its return
+    # target, so Escape tried to focus a hidden menu item and focus fell to <body>.
+    page.focus("#navBrandMenu")
+    page.keyboard.press("Enter")
+    page.wait_for_selector("#navDropdown.show")
+    page.focus('#navDropdown [data-command="palette"]')
+    page.keyboard.press("Enter")
+    assert page.evaluate("commandPalette.open")
+    assert active_id(page) == "paletteInput"
+    page.keyboard.press("Escape")
+    assert not page.evaluate("commandPalette.open")
+    assert active_id(page) == "navBrandMenu"
+
+
+def test_palette_opened_from_plus_menu_returns_focus_to_the_plus_button(page):
+    page.focus("#intakePlusButton")
+    page.keyboard.press("ArrowUp")  # opens the menu on its first row
+    page.wait_for_selector("#intakePlusMenu .pm-item")
+    page.evaluate("[...document.querySelectorAll('#intakePlusMenu .pm-item')].find(e => e.textContent.includes('All commands')).focus()")
+    page.keyboard.press("Enter")
+    assert page.evaluate("commandPalette.open")
+    page.keyboard.press("Escape")
+    assert not page.evaluate("commandPalette.open")
+    assert active_id(page) == "intakePlusButton"
+
+
+def test_palette_never_returns_focus_to_a_hidden_element(page):
+    page.focus("#navBrandMenu")
+    page.keyboard.press("Enter")
+    page.wait_for_selector("#navDropdown.show")
+    page.focus('#navDropdown [data-command="help"]')
+    # Open via the shortcut while a menu row has focus: the row is hidden as the palette opens.
+    page.keyboard.press("Control+k")
+    assert page.evaluate("commandPalette.open")
+    page.keyboard.press("Escape")
+    assert page.evaluate("document.activeElement !== document.body")
+    assert page.evaluate("document.activeElement.getClientRects().length > 0")
