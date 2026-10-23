@@ -99,7 +99,7 @@
     }
   },
   "missing_pain_points_error_intake.md": {
-    "expected_tier": "Custom AI Agent",
+    "expected_tier": "Quick Win",
     "expected_score_range": [
       7,
       11
@@ -132,7 +132,9 @@
       11,
       15
     ],
-    "expected_issues": [],
+    "expected_issues": [
+      "compliance_review"
+    ],
     "must_parse": {
       "pain_points_count": 4,
       "goals_count": 2,

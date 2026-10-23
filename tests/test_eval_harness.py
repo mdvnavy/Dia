@@ -67,14 +67,13 @@ def test_check_golden_detects_wrong_tier_and_issues():
     assert fraction < 1.0
 
 
-@pytest.mark.baseline_pin
-def test_check_rubric_flags_pain_grounding_at_baseline():
-    # The current proposal template never cites pain points -- this is
-    # intentional headroom for the experiment loop.
+def test_check_rubric_pain_grounding_passes_with_intake_specific_summary():
+    # The proposal's Executive Summary now quotes the client's own first pain
+    # point (deterministically), so the grounding check passes.
     result = run_eval.run_fixture(FIXTURES / "complete_intake.md")
     fraction, failures = run_eval.check_rubric(result)
-    assert "pain_grounding" in failures
-    assert 0.0 < fraction < 1.0
+    assert "pain_grounding" not in failures
+    assert 0.0 < fraction <= 1.0
 
 
 def test_check_rubric_passes_on_grounded_docs():

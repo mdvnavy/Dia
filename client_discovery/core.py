@@ -28,6 +28,38 @@ QUESTION_ALIASES = {
 }
 
 
+# Section headings for the list-style answers. Numbers are optional, so both
+# the template's "## 3. Pain Points" and a hand-written "## Pain points" (or
+# "### 4) Goals & outcomes") are recognised.
+PAIN_POINT_HEADING = r"pain[\s-]*points?|challenges|problems"
+GOAL_HEADING = r"goals?|objectives|desired outcomes"
+
+# Compliance regimes recognised in the compliance answer (and notes).
+COMPLIANCE_PATTERNS: tuple[tuple[str, str], ...] = (
+    ("PHIPA", r"\bphipa\b"),
+    ("HIPAA", r"\bhipaa\b"),
+    ("PIPEDA", r"\bpipeda\b"),
+    ("GDPR", r"\bgdpr\b"),
+    ("SOC 2", r"\bsoc\s*-?\s*(?:2|ii|two)\b"),
+    ("PCI DSS", r"\bpci(?:[\s-]*dss)?\b"),
+    ("ISO 27001", r"\biso[\s/-]*27001\b"),
+)
+
+# Start-date phrases that mean "now". Matched as whole words/phrases.
+URGENT_START_PATTERN = re.compile(
+    r"\b(asap|a\.s\.a\.p|urgent(?:ly)?|immediately|right away|right now|"
+    r"as soon as possible|this week|next week|this month)\b",
+    re.IGNORECASE,
+)
+
+TIER_PRICE_BOUNDS = {
+    "Quick Win": (500, 2500),
+    "Custom AI Agent": (2500, 10000),
+    "Full Integration": (10000, 25000),
+}
+TOP_TIER = "Full Integration"
+
+
 def parse_questionnaire_markdown(content: str) -> ClientIntake:
     rows = _extract_table_rows(content)
     values: dict[str, str] = {}
@@ -46,8 +78,8 @@ def parse_questionnaire_markdown(content: str) -> ClientIntake:
         years_in_business=values.get("years_in_business", ""),
         location=values.get("location", ""),
         tools=values.get("tools", ""),
-        pain_points=_extract_section_answers(content, "3. Pain Points", "4. Goals"),
-        goals=_extract_section_answers(content, "4. Goals", "5."),
+        pain_points=_extract_topic_answers(content, PAIN_POINT_HEADING),
+        goals=_extract_topic_answers(content, GOAL_HEADING),
         budget=values.get("budget", ""),
         decision_maker=values.get("decision_maker", ""),
         start_date=values.get("start_date", ""),
@@ -84,7 +116,33 @@ def validate_intake(intake: ClientIntake) -> list[ValidationIssue]:
                 message="At least one goal is required to generate a useful proposal.",
             )
         )
+    regimes = detect_compliance(intake)
+    if regimes:
+        issues.append(
+            ValidationIssue(
+                code="compliance_review",
+                message=(
+                    f"{', '.join(regimes)} requirements noted: confirm data handling, "
+                    "hosting region and any vendor review before quoting."
+                ),
+            )
+        )
     return issues
+
+
+def blocking_issues(issues: list[ValidationIssue]) -> list[ValidationIssue]:
+    """Issues that must be resolved before a proposal can be sent."""
+    return [issue for issue in issues if issue.severity == "error"]
+
+
+def detect_compliance(intake: ClientIntake) -> list[str]:
+    """Named compliance regimes found in the compliance answer or notes."""
+    text = f"{intake.compliance} {intake.notes}".lower()
+    return [name for name, pattern in COMPLIANCE_PATTERNS if re.search(pattern, text)]
+
+
+def is_urgent_start(start_date: str) -> bool:
+    return bool(URGENT_START_PATTERN.search(start_date or ""))
 
 
 def score_opportunity(intake: ClientIntake) -> OpportunityScore:
@@ -92,7 +150,9 @@ def score_opportunity(intake: ClientIntake) -> OpportunityScore:
     goal_count = len(intake.goals)
     has_tools = bool(intake.tools.strip())
 
-    if pain_count == 1 and not has_tools:
+    # No parsed pain point is an error-level gap: never recommend more than
+    # the smallest, cheapest tier on that basis.
+    if pain_count == 0 or (pain_count == 1 and not has_tools):
         tier = "Quick Win"
         scope = "One targeted automation with a narrow handoff."
         price_range = "$500-$2,500"
@@ -108,17 +168,39 @@ def score_opportunity(intake: ClientIntake) -> OpportunityScore:
         price_range = "$10,000-$25,000"
         timeline = "4-8 weeks"
 
-    urgency = min(5, max(1, pain_count))
-    budget_fit = _score_budget_fit(intake.budget, tier)
+    urgent = is_urgent_start(intake.start_date)
+    urgency = min(5, max(1, pain_count) + (2 if urgent else 0))
+    budget_fit, budget_note = _assess_budget(intake.budget, tier)
     tech_readiness = _score_tech_readiness(intake.tech_person, intake.tools)
     strategic_value = 3
     total_score = urgency + budget_fit + tech_readiness + strategic_value
-    reasons = [
-        f"{pain_count} pain point(s) and {goal_count} goal(s) mapped to {tier}.",
-        f"Budget fit scored {budget_fit}/5 from stated range: {intake.budget or 'not provided'}.",
-        f"Technical readiness scored {tech_readiness}/5 from tools and in-house tech signal.",
-        "Strategic value defaults to 3/5 until a human reviews portfolio fit.",
-    ]
+
+    if pain_count == 0:
+        tier_reason = (
+            "No pain points parsed, so the tier is provisional: Quick Win until "
+            "the core problem is confirmed."
+        )
+    else:
+        tier_reason = f"{pain_count} pain point(s) and {goal_count} goal(s) mapped to {tier}."
+    reasons = [tier_reason]
+    if urgent:
+        reasons.append(
+            f"Urgency raised for an immediate start ({intake.start_date.strip()})."
+        )
+    reasons.append(
+        f"Budget fit scored {budget_fit}/5 from stated range: "
+        f"{intake.budget or 'not provided'}{budget_note}."
+    )
+    reasons.append(
+        f"Technical readiness scored {tech_readiness}/5 from tools and in-house tech signal."
+    )
+    regimes = detect_compliance(intake)
+    if regimes:
+        reasons.append(
+            f"Compliance ({', '.join(regimes)}) adds a data-handling review to "
+            "discovery; confirm before quoting."
+        )
+    reasons.append("Strategic value defaults to 3/5 until a human reviews portfolio fit.")
 
     return OpportunityScore(
         tier=tier,
@@ -182,26 +264,7 @@ def generate_documents(intake: ClientIntake, score: OpportunityScore, strategic_
 {intake.notes or 'None provided.'}
 """,
         "opportunity-analysis.md": opportunity_analysis,
-        "proposal-draft.md": f"""# Proposal Draft: {intake.company_name or 'Your Company'}
-
-## Executive Summary
-{intake.company_name or 'The client'} needs a reliable way to turn discovery intake into a qualified opportunity package. The recommended path is a {score.tier} that converts questionnaire responses into a client profile, scored opportunity analysis, and proposal draft.
-
-## Recommended Solution
-**{score.tier}** - {score.scope}
-
-## Delivery Plan
-- **Phase 1:** Confirm intake fields, missing information, and success criteria.
-- **Phase 2:** Configure the agent workflow and generated document templates.
-- **Phase 3:** Run sample intakes, review outputs, and hand off operating notes.
-
-## Investment
-- **Estimated Range:** {score.price_range}
-- **Timeline:** {score.timeline}
-
-## Next Step
-Review the generated opportunity analysis and confirm the missing fields before kickoff.
-""",
+        "proposal-draft.md": _proposal_draft(intake, score),
     }
 
 
@@ -221,52 +284,130 @@ def _extract_table_rows(content: str) -> list[tuple[str, str]]:
 
 
 def _extract_section_answers(content: str, start_heading: str, end_heading_prefix: str) -> list[str]:
-    def get_pattern(heading: str) -> str:
-        m = re.match(r"^(\d+)\.(.*)$", heading)
-        if m:
-            return rf"{m.group(1)}\.?{re.escape(m.group(2))}"
-        return re.escape(heading)
+    """Backward-compatible wrapper: answers under the heading named ``start_heading``.
 
-    start_pat = get_pattern(start_heading)
-    end_pat = get_pattern(end_heading_prefix)
+    The end marker is ignored; a section now ends at the next heading of the
+    same or higher level, which is what every template uses.
+    """
+    del end_heading_prefix
+    topic = re.sub(r"^\d+\s*[.)]?\s*", "", start_heading.strip())
+    return _extract_topic_answers(content, re.escape(topic))
 
-    start = re.search(rf"##\s*{start_pat}.*", content, re.IGNORECASE)
-    if not start:
+
+_HEADING_RE = re.compile(r"^(#{1,6})\s*(.*?)\s*#*\s*$")
+
+
+def _extract_topic_answers(content: str, topic_pattern: str) -> list[str]:
+    """Table answers under the first heading whose title matches ``topic_pattern``.
+
+    Accepts optional numbering ("3.", "3)", "3 -") and any heading level from
+    ``##`` down; the section runs until the next heading at the same or a
+    higher level (deeper sub-headings stay inside the section).
+    """
+    title_re = re.compile(
+        rf"^(?:\d+\s*[.):-]?\s*)?(?:{topic_pattern})\b", re.IGNORECASE
+    )
+    lines = content.splitlines()
+    start_index = None
+    level = 0
+    for index, line in enumerate(lines):
+        match = _HEADING_RE.match(line.strip())
+        if match and len(match.group(1)) >= 2 and title_re.match(match.group(2)):
+            start_index, level = index + 1, len(match.group(1))
+            break
+    if start_index is None:
         return []
-    section = content[start.start() :]
-    end = re.search(rf"\n##\s*{end_pat}", section, re.IGNORECASE)
-    if end:
-        section = section[: end.start()]
+
+    section: list[str] = []
+    for line in lines[start_index:]:
+        match = _HEADING_RE.match(line.strip())
+        if match and len(match.group(1)) <= level:
+            break
+        section.append(line)
+
     answers = []
-    for _, answer in _extract_table_rows(section):
+    for _, answer in _extract_table_rows("\n".join(section)):
         if answer and answer.lower() not in {"your answer", "n/a", "none"}:
             answers.append(answer)
     return answers
 
 
+_AMOUNT_RE = re.compile(
+    r"(?P<num>\d+(?:\.\d+)?)\s*(?P<suffix>k|m|mm|thousand|million)?\b(?P<plus>\s*\+)?",
+    re.IGNORECASE,
+)
+_OPEN_ABOVE_RE = re.compile(r"\b(over|above|more than|at least|min(?:imum)?|from|upwards of|\d\s*\+)", re.IGNORECASE)
+_OPEN_BELOW_RE = re.compile(r"\b(under|below|less than|up to|max(?:imum)?|no more than|at most|<)", re.IGNORECASE)
+
+
+def parse_budget(budget: str) -> tuple[float, float] | None:
+    """Parse a free-text budget into a (low, high) dollar range.
+
+    Handles "$5,000", "about 5k", "5-10k" (the suffix applies to both ends),
+    "$5k-$10k", "1.5k", "$1M", "$50,000+" / "over 50k" (open-ended high) and
+    "under 5k" / "up to $10,000" (open-ended low). Returns None when no
+    amount is present. High is ``inf`` for open-ended budgets.
+    """
+    text = (budget or "").replace("\u2013", "-").replace("\u2014", "-").replace(",", "")
+    if not text.strip():
+        return None
+    amounts: list[float] = []
+    suffixes: list[str | None] = []
+    plus = False
+    for match in _AMOUNT_RE.finditer(text):
+        value = float(match.group("num"))
+        suffix = (match.group("suffix") or "").lower() or None
+        amounts.append(value)
+        suffixes.append(suffix)
+        plus = plus or bool(match.group("plus"))
+    if not amounts:
+        return None
+
+    # "5-10k": a trailing suffix applies to bare numbers before it.
+    trailing = next((sfx for sfx in reversed(suffixes) if sfx), None)
+    multipliers = {"k": 1e3, "thousand": 1e3, "m": 1e6, "mm": 1e6, "million": 1e6}
+    values = []
+    for value, suffix in zip(amounts, suffixes):
+        effective = suffix or (trailing if trailing and value < 1000 else None)
+        values.append(value * multipliers.get(effective or "", 1))
+
+    low, high = min(values), max(values)
+    if plus or _OPEN_ABOVE_RE.search(text):
+        return low, float("inf")
+    if _OPEN_BELOW_RE.search(text) and len(values) == 1:
+        return 0.0, high
+    return low, high
+
+
 def _score_budget_fit(budget: str, tier: str) -> int:
-    normalized = budget.replace("–", "-").lower()
-    if not normalized.strip():
-        return 2
+    return _assess_budget(budget, tier)[0]
 
-    # Remove commas to avoid splitting them or misparsing
-    normalized_no_commas = normalized.replace(",", "")
-    numbers = [int(x) for x in re.findall(r"\d+", normalized_no_commas)]
 
-    if not numbers:
-        return 2
+def _assess_budget(budget: str, tier: str) -> tuple[int, str]:
+    """Score (1-5 scale, as before) how a stated budget fits the tier.
 
-    if tier == "Quick Win":
-        if any(500 <= n <= 2500 for n in numbers):
-            return 4
-    elif tier == "Custom AI Agent":
-        if any(2500 <= n <= 10000 for n in numbers):
-            return 3
-    elif tier == "Full Integration":
-        if any(10000 <= n <= 25000 for n in numbers):
-            return 3
-
-    return 2
+    - unknown / unparseable: 2
+    - overlaps the tier's price band: 4 for Quick Win, 3 otherwise (unchanged)
+    - above the band: the top tier scores 4 (more budget than the largest
+      package); lower tiers score 3 when within 2x the band's top, else 2
+      because the scope is probably under-specified
+    - entirely below the band: 2
+    Returns (score, note) where note is appended to the score reason.
+    """
+    parsed = parse_budget(budget)
+    if parsed is None or tier not in TIER_PRICE_BOUNDS:
+        return 2, ""
+    low, high = parsed
+    tier_low, tier_high = TIER_PRICE_BOUNDS[tier]
+    if high < tier_low:
+        return 2, " (below the tier's range)"
+    if low <= tier_high:
+        return (4 if tier == "Quick Win" else 3), ""
+    if tier == TOP_TIER:
+        return 4, " (above the tier's range; scope and price can grow)"
+    if low <= 2 * tier_high:
+        return 3, " (above the tier's range; room for added scope)"
+    return 2, " (far above the tier's range; re-check scope)"
 
 
 def _score_tech_readiness(tech_person: str, tools: str) -> int:
@@ -299,6 +440,149 @@ def _bullet_lines(items: list[str]) -> str:
     if not items:
         return "- None."
     return "\n".join(f"- {item}" for item in items)
+
+
+def _as_text_list(items: object) -> list[str]:
+    """Tolerate malformed list fields (None, scalars) the way _numbered_lines does."""
+    if isinstance(items, (list, tuple)):
+        return [str(item) for item in items if str(item).strip()]
+    if items is None or isinstance(items, bool) or not str(items).strip():
+        return []
+    return [str(items)]
+
+
+def _quote(text: str, limit: int = 220) -> str:
+    text = re.sub(r"\s+", " ", text.strip()).rstrip(".")
+    if len(text) > limit:
+        text = text[: limit - 1].rstrip() + "\u2026"
+    return text
+
+
+def _company_line(intake: ClientIntake) -> str:
+    name = intake.company_name.strip() or "The client"
+    details = []
+    if intake.industry.strip():
+        details.append(intake.industry.strip())
+    if intake.size.strip():
+        size = intake.size.strip()
+        details.append(f"{size} people" if size.isdigit() else size)
+    if intake.location.strip():
+        details.append(intake.location.strip())
+    return f"**{name}**" + (f" ({'; '.join(details)})" if details else "")
+
+
+def _proposal_draft(intake: ClientIntake, score: OpportunityScore) -> str:
+    """Deterministic, intake-specific proposal draft (no AI).
+
+    Every sentence is assembled from the parsed intake fields and the score,
+    so two different clients never get the same summary. When the intake has
+    an error-level issue the draft is replaced by a hold notice instead.
+    """
+    company = intake.company_name.strip() or "Your Company"
+    issues = validate_intake(intake)
+    blocking = blocking_issues(issues)
+    if blocking:
+        # Same section layout as a normal draft (the UI and eval rely on it),
+        # but every section says the draft is on hold and why.
+        return f"""# Proposal Draft: {company}
+
+## Executive Summary
+**On hold - not ready to send.** {_company_line(intake)} has blocking intake issue(s) that must be resolved first:
+{_bullet_lines([issue.message for issue in blocking])}
+
+## Recommended Solution
+**{score.tier}** (provisional) - {score.scope}
+
+## Delivery Plan
+- Confirm the core problem with the client, then re-run the intake.
+
+## Investment
+- **Estimated Range:** {score.price_range} (provisional)
+- **Timeline:** {score.timeline} (provisional)
+
+## Next Step
+Ask the client to describe the main problem they want solved, then re-run the intake.
+"""
+
+    regimes = detect_compliance(intake)
+    pains = _as_text_list(intake.pain_points)
+    goals = _as_text_list(intake.goals)
+    summary = [f"Prepared for {_company_line(intake)}."]
+    if pains:
+        summary.append(f"Main problem: \u201c{_quote(pains[0])}.\u201d")
+    if len(pains) > 1:
+        extra = len(pains) - 1
+        summary.append(
+            f"Also noted: {extra} more pain point{'s' if extra > 1 else ''}, listed in the analysis."
+        )
+    if goals:
+        summary.append(f"Success looks like: \u201c{_quote(goals[0])}.\u201d")
+    tools = intake.tools.strip()
+    summary.append(
+        f"We recommend a **{score.tier}**: {score.scope[0].lower() + score.scope[1:]}"
+        + (f" It works alongside their current tools ({tools})." if tools else "")
+    )
+    constraints = []
+    if regimes:
+        constraints.append(f"compliance ({_quote(intake.compliance or ', '.join(regimes), 120)})")
+    if intake.start_date.strip():
+        constraints.append(f"requested start: {intake.start_date.strip()}")
+    if intake.budget.strip():
+        constraints.append(f"stated budget: {intake.budget.strip()}")
+    if constraints:
+        summary.append("Constraints: " + "; ".join(constraints) + ".")
+
+    phase1 = "Confirm success metrics"
+    if goals:
+        phase1 += f" for \u201c{_quote(goals[0], 120)}\u201d"
+    if regimes:
+        phase1 += (
+            f", close any open intake questions, and complete the "
+            f"{', '.join(regimes)} data-handling review."
+        )
+    else:
+        phase1 += " and close any open intake questions."
+    phase2 = "Build the workflow"
+    if pains:
+        phase2 += f" that removes \u201c{_quote(pains[0], 120)}\u201d"
+    if tools:
+        phase2 += f", integrated with {tools}"
+    phase2 += "."
+    phase3 = (
+        "Pilot with the team, measure against the success metric, and hand off "
+        "operating notes"
+        + (f" to {intake.decision_maker.strip()}" if intake.decision_maker.strip() else "")
+        + "."
+    )
+
+    open_items = [issue.message for issue in issues if issue.code != "compliance_review"]
+    if open_items:
+        next_step = "Before kickoff, confirm:\n" + _bullet_lines(open_items)
+    elif intake.decision_maker.strip():
+        next_step = f"Review this draft with {intake.decision_maker.strip()} and agree a kickoff date."
+    else:
+        next_step = "Review this draft with the client and agree a kickoff date."
+
+    return f"""# Proposal Draft: {company}
+
+## Executive Summary
+{" ".join(summary)}
+
+## Recommended Solution
+**{score.tier}** - {score.scope}
+
+## Delivery Plan
+- **Phase 1:** {phase1}
+- **Phase 2:** {phase2}
+- **Phase 3:** {phase3}
+
+## Investment
+- **Estimated Range:** {score.price_range}
+- **Timeline:** {score.timeline}
+
+## Next Step
+{next_step}
+"""
 
 
 def _normalize(value: str) -> str:
