@@ -11,7 +11,28 @@ from .models import ClientIntake, OpportunityScore, ValidationIssue
 logger = logging.getLogger(__name__)
 
 
+# Section 6 aliases come first; none of them is a substring of a section 1-5 question, and vice versa.
+SECTION6_ALIASES = {
+    "workflow_tasks": ("manual tasks",),
+    "hourly_cost": ("hourly cost", "salary band", "loaded rate"),
+    "success_metric": ("the one number", "success metric"),
+    "process_owner": ("owns the process", "process owner"),
+    "systems_access": ("systems involved", "login or api access"),
+    "data_readiness": ("where does the data live", "data live", "how clean"),
+    "exceptions": ("what goes wrong today", "exceptions and hand-offs"),
+    "sensitive_data": ("regulated or sensitive",),
+    "past_attempts": ("previous ai", "automation attempts"),
+    "maintenance": ("who maintains",),
+    "finance_signals": ("finance only", "days overdue"),
+}
+
+# The one questionnaire map for "(question N)" references: section 6 question numbers, in questionnaire order
+# (SECTION6_ALIASES is listed in that order; tests pin it to the sample's rows). Older questionnaires without
+# section 6 have no numbered questions, so references to them carry no number.
+QUESTION_NUMBERS = {field: number for number, field in enumerate(SECTION6_ALIASES, 1)}
+
 QUESTION_ALIASES = {
+    **SECTION6_ALIASES,
     "company_name": ("company name",),
     "website": ("website",),
     "industry": ("industry / niche", "industry", "niche"),
@@ -54,6 +75,8 @@ def parse_questionnaire_markdown(content: str) -> ClientIntake:
         tech_person=values.get("tech_person", ""),
         compliance=values.get("compliance", ""),
         notes=values.get("notes", ""),
+        **{field: values.get(field, "") for field in SECTION6_ALIASES},
+        workflows_section=bool(re.search(r"^##\s*6\.?\s", content, re.M)) or any(values.get(f) for f in SECTION6_ALIASES),
     )
 
 
@@ -77,6 +100,16 @@ def validate_intake(intake: ClientIntake) -> list[ValidationIssue]:
                 severity="error",
             )
         )
+    # Section 6 Q1-Q3 are required, but only on questionnaires that carry section 6: older intakes without it
+    # keep their issue list, and the scorer flags the gaps instead (VALUE_AT_STAKE_MISSING, NO_SUCCESS_METRIC).
+    if intake.workflows_section:
+        for field, code, message in (
+            ("workflow_tasks", "missing_workflow_tasks", "Top manual tasks with weekly hours are needed for the value at stake."),
+            ("hourly_cost", "missing_hourly_cost", "An hourly cost or salary band is needed for the value at stake."),
+            ("success_metric", "missing_success_metric", "A success metric is needed to show the project worked."),
+        ):
+            if not getattr(intake, field).strip():
+                issues.append(ValidationIssue(code=code, message=message))
     if not intake.goals:
         issues.append(
             ValidationIssue(
@@ -85,6 +118,269 @@ def validate_intake(intake: ClientIntake) -> list[ValidationIssue]:
             )
         )
     return issues
+
+
+# --- Scorer v2 (dia-savant v1.0 §2.3). Every threshold is a tunable starting point, not a research finding. ---
+SCORING_RULES_VERSION = "2"
+
+
+def _env_number(name: str, default: float) -> float:
+    try:
+        return float(os.environ.get(name, "") or default)
+    except ValueError:
+        return default
+
+
+def value_weeks() -> float:
+    """Working weeks a year in the value-at-stake formula (default 48; DIA_VALUE_WEEKS overrides)."""
+    return _env_number("DIA_VALUE_WEEKS", 48)
+
+
+def value_bands() -> tuple[int, int, int]:
+    """$/yr cut-offs for strategic value 3, 4 and 5 (default $5K/$20K/$50K; DIA_VALUE_BANDS="5000,20000,50000")."""
+    raw = os.environ.get("DIA_VALUE_BANDS", "")
+    try:
+        low, mid, high = (int(float(x)) for x in raw.split(","))
+        return (low, mid, high)
+    except ValueError:
+        return (5000, 20000, 50000)
+
+
+def strategic_value_for(value: int | None) -> int:
+    """Value at stake -> strategic value: >= high -> 5; >= mid -> 4; >= low -> 3; below -> 2; missing -> 3."""
+    if value is None:
+        return 3
+    low, mid, high = value_bands()
+    if value >= high:
+        return 5
+    if value >= mid:
+        return 4
+    if value >= low:
+        return 3
+    return 2
+
+
+_NUMBER = r"\d[\d,]*(?:\.\d+)?"
+
+
+def _to_number(text: str) -> float:
+    return float(text.replace(",", ""))
+
+
+def parse_hourly_rate(text: str) -> float | None:
+    """Q2: '$55 an hour', '$40/hr', or a salary band ('$60,000-$80,000 a year', '$60K') -> $/hour.
+    A salary (or band midpoint) is divided by 2,080 hours; no loading multiplier is added."""
+    t = (text or "").lower().replace("–", "-")
+    found = [(_to_number(m.group(1)) * (1000 if m.group(2) else 1)) for m in re.finditer(rf"({_NUMBER})\s*(k\b)?", t)]
+    if not found:
+        return None
+    if re.search(r"/\s*h|\bhour|\bhr\b|\bhrs?\b|hourly|per hour", t) and found[0] < 1000:
+        return found[0]
+    annual = [n for n in found if n >= 1000]
+    if annual:
+        return (sum(annual[:2]) / len(annual[:2])) / 2080
+    return found[0] if found[0] > 0 else None
+
+
+def _workflow_parts(text: str) -> list[str]:
+    """Q1 split into its task entries (semicolons or new lines), blanks and placeholders dropped, at most three."""
+    parts = []
+    for part in re.split(r";|<br\s*/?>|\n", text or ""):
+        part = part.strip()
+        if part and part.lower() not in {"n/a", "none", "your answer"}:
+            parts.append(part)
+    return parts[:3]
+
+
+def parse_workflows(text: str) -> list[dict]:
+    """Q1: up to three tasks separated by semicolons or new lines: 'Task - who, 6 hours a week, 2 people'.
+    The hours are the task's total hours a week (the people count is informational)."""
+    rows = []
+    for part in _workflow_parts(text):
+        task = re.split(r"\s+[-–—]\s+|:|\(|,", part, maxsplit=1)[0].strip() or part
+        hours = re.search(rf"({_NUMBER})\s*(?:h\b|hrs?\b|hours?\b)", part.lower())
+        people = re.search(r"(\d+)\s*(?:people|persons?|staff)\b", part.lower())
+        rows.append({
+            "task": task,
+            "hours": _to_number(hours.group(1)) if hours else None,
+            "people": int(people.group(1)) if people else None,
+        })
+    return rows
+
+
+TIME_SINK_KEYWORDS = {  # §2.1 categories; lead intake and follow-up (Low confidence) is left out on purpose
+    "finance admin": ("invoice", "invoicing", "bookkeeping", "accounting", "reconcil", "payroll", "billing", "expense"),
+    "coordination": ("coordinat", "status update", "meeting", "scheduling", "hand-off", "handoff", "chasing"),
+    "owner admin": ("admin", "firefight", "context switch", "paperwork"),
+    "compliance paperwork": ("compliance", "regulatory filing", "audit prep", "reporting to the regulator"),
+}
+
+
+def time_sink_matches(text: str) -> list[str]:
+    lowered = (text or "").lower()
+    return [name for name, words in TIME_SINK_KEYWORDS.items() if any(word in lowered for word in words)]
+
+
+def top_time_sink(text: str, values: list[float | None]) -> str | None:
+    """The time sink to name in the urgency reason: the category of the highest-value Q1 task that matches one.
+    `values` is the per-task value at stake, in Q1 order (as parse_workflows returns the tasks). Only the task text
+    before " - " is matched, so the person named after it never picks the category. A task that matches
+    more than one category is named by the first in keyword order, and tied values fall back to keyword order.
+    When no matching task has a value, this is the first category matched anywhere in Q1 (the keyword-order rule)."""
+    sinks = time_sink_matches(text)
+    if not sinks:
+        return None
+    order = list(TIME_SINK_KEYWORDS)
+    candidates = []
+    for part, value in zip(_workflow_parts(text), values):
+        # Match the task itself, not the "who" after " - ": a "sales coordinator" doing lead triage is not coordination.
+        matched = time_sink_matches(re.split(r"\s+[-–—]\s+", part, maxsplit=1)[0])
+        if matched and value is not None:
+            candidates.append((-value, order.index(matched[0]), matched[0]))
+    return min(candidates)[2] if candidates else sinks[0]
+
+
+def _cap(text: str) -> str:
+    return text[:1].upper() + text[1:] if text else text
+
+
+def top_uncategorised_task(text: str, workflows: list[dict]) -> dict | None:
+    """The highest-value Q1 task (first in Q1 order on a tie) when it matches no time-sink category, else None.
+    `workflows` is parse_workflows order with a "value" each. The category is matched as in top_time_sink (the
+    task text before " - "). None also when no task has a value, since then no task is known to carry the most."""
+    parts = _workflow_parts(text)
+    valued = [(i, row) for i, row in enumerate(workflows) if row.get("value") is not None]
+    if not valued:
+        return None
+    index, top = min(valued, key=lambda item: (-item[1]["value"], item[0]))
+    task_text = re.split(r"\s+[-–—]\s+", parts[index], maxsplit=1)[0] if index < len(parts) else top["task"]
+    return None if time_sink_matches(task_text) else top
+
+
+def _has_number(text: str) -> bool:
+    return bool(re.search(r"\d", text or ""))
+
+
+def _blank(text: str) -> bool:
+    return (text or "").strip().lower() in {"", "n/a", "none", "tbd", "your answer", "-"}
+
+
+def _data_not_ready(text: str) -> bool:
+    t = (text or "").lower()
+    explicit = re.search(r"(?<![\d.])([1-5])\s*(?:/|of|out of)\s*5\b", t)
+    lone = re.findall(r"(?<![\d.,$%])\b([1-5])\b(?![\d.,%])", t)
+    rating = int(explicit.group(1)) if explicit else (int(lone[-1]) if lone else None)
+    return (rating is not None and rating <= 2) or bool(re.search(r"spreadsheet|excel|google sheets|free[- ]text", t))
+
+
+def _systems_risk(text: str) -> bool:
+    return bool(re.search(r"\bno (?:login|api|access)\b|no access|cannot grant|can't grant|can not grant|"
+                          r"not able to grant|never used|not sure|unknown", (text or "").lower()))
+
+
+def _failed_attempt(text: str) -> bool:
+    t = (text or "").lower()
+    return not _blank(t) and bool(re.search(r"fail|did not work|didn't work|abandon|scrapp|stopped using|gave up|"
+                                            r"cancel|went nowhere|no result|never launched|shut down", t))
+
+
+def _exception_count(text: str) -> int:
+    if _blank(text):
+        return 0
+    return len([item for item in re.split(r"[;,\n]", text) if item.strip()])
+
+
+def _overdue_share(text: str) -> float | None:
+    m = re.search(rf"({_NUMBER})\s*%", text or "")
+    return _to_number(m.group(1)) if m else None
+
+
+def _widen_timeline(timeline: str) -> str:
+    m = re.match(r"(\d+)-(\d+) weeks", timeline)
+    return f"{m.group(1)}-{int(m.group(2)) + 2} weeks" if m else timeline
+
+
+def _budget_top(budget: str) -> int | None:
+    """Top of a budget answer in dollars: '$5k-$10k' -> 10000, '$2.5K' -> 2500, '$1.2M' -> 1200000, '$5,000' -> 5000.
+    Decimals stay whole and k/M suffixes are applied before the maximum is taken (Codex review on PR #39)."""
+    t = (budget or "").lower().replace("–", "-").replace("—", "-")
+    scale = {"k": 1_000, "m": 1_000_000}
+    numbers = [_to_number(m.group(1)) * scale.get(m.group(2) or "", 1)
+               for m in re.finditer(rf"({_NUMBER})\s*(k|m)?(?![a-z])", t)]
+    return round(max(numbers)) if numbers else None
+
+
+def _plural(n: int, word: str) -> str:
+    return f"{n} {word}" if n == 1 else f"{n} {word}s"
+
+
+def _band_label(value: int) -> str:
+    """The value-at-stake threshold a figure sits at, without a dollar range (client output shows no $X-$Y)."""
+    low, mid, high = value_bands()
+    for threshold in (high, mid, low):
+        if value >= threshold:
+            return f"at or above the ${threshold:,} threshold"
+    return f"below the ${low:,} threshold"
+
+
+def _signal_evidence(*, pain_count, sink, top_task=None, urgency_base, urgency, budget, budget_base, budget_fit,
+                     readiness_base, readiness_minus, tech_readiness, value_at_stake, value_partial,
+                     strategic_value) -> dict:
+    """'Why this tier': one sentence per sub-score naming the evidence that sets it (Proto, on #39), so the
+    section cites the scoring inputs instead of restating the summary bullets."""
+    bump = urgency - urgency_base
+    other = "another listed task matching a known time sink" if top_task else "a known time sink"
+    urgency_text = (f"A count of {_plural(pain_count, 'pain point')}"
+                    + (f", plus 1 for {other} ({sink})," if bump else "")
+                    + (f", with {other} ({sink}) and the 5-point cap," if sink and not bump else "")
+                    + f" places urgency at {urgency} of 5.")
+    if top_task:
+        urgency_text += (f" {_cap(top_task['task'])} carries the largest value at stake "
+                         f"(${top_task['value']:,}/yr) and has no time-sink category.")
+    value_text = None
+    if value_at_stake is not None:
+        value_text = f"{'at least ' if value_partial else ''}${value_at_stake:,}/yr"
+    if not budget:
+        budget_text = f"No stated budget places budget fit at {budget_fit} of 5."
+    else:
+        inside = budget_base >= 3
+        # The client's own budget may be echoed; the tier's price band never is (Ikenna: match the site).
+        budget_text = (f"A stated budget of {budget} that {'fits' if inside else 'does not fit'} this tier"
+                       + (f", plus 1 because the value at stake of {value_text} exceeds its top,"
+                          if budget_fit > budget_base else "")
+                       + f" places budget fit at {budget_fit} of 5.")
+    base = {4: "Having an in-house technical person and current tools",
+            3: "Having either an in-house technical person or current tools, not both",
+            2: "Having no in-house technical person or current tools"}.get(readiness_base, "The readiness answers")
+    parts = [base] + [f"minus 1 for {item}" for item in readiness_minus]
+    readiness_text = (", ".join(parts) + ("," if len(parts) > 1 or readiness_base == 3 else "")
+                      + f" places readiness at {tech_readiness} of 5.")
+    if value_at_stake is None:
+        strategic_text = (f"No computed value at stake leaves strategic value at the default {strategic_value} of 5 "
+                          "until weekly hours and an hourly cost are provided.")
+    else:
+        strategic_text = (f"Value at stake of {value_text}, {_band_label(value_at_stake)}, places strategic value "
+                          f"at {strategic_value} of 5" + (" as a floor; tasks without weekly hours are excluded."
+                                                          if value_partial else "."))
+    return {"urgency": urgency_text, "budget_fit": budget_text, "tech_readiness": readiness_text,
+            "strategic_value": strategic_text}
+
+
+# Ikenna: 'Yes, remove it to match the site' (the site says "Contact for pricing"). Tier price bands stay
+# internal: budget fit is still scored against them, and the owner workspace cross-checks them, but no
+# client-facing text, export or API response may show a band. Clients see this line instead.
+CLIENT_PRICING_TEXT = "Contact for pricing"
+CLIENT_HIDDEN_SCORE_FIELDS = ("price_range",)
+
+
+def client_score_dict(score: OpportunityScore) -> dict:
+    """The score as clients and the chat agent see it: every field except the internal tier price band."""
+    from dataclasses import asdict
+
+    data = asdict(score)
+    for name in CLIENT_HIDDEN_SCORE_FIELDS:
+        data.pop(name, None)
+    return data
 
 
 def score_opportunity(intake: ClientIntake) -> OpportunityScore:
@@ -108,16 +404,123 @@ def score_opportunity(intake: ClientIntake) -> OpportunityScore:
         price_range = "$10,000-$25,000"
         timeline = "4-8 weeks"
 
+    flags: list[str] = []
+    scope_notes: list[str] = []
+    quick_wins: list[str] = []
+
+    # Urgency: pain points, +1 when the manual work matches a known time sink (capped at 5).
+    # The named sink is the highest-value matching task's category (see top_time_sink), set once values are known.
     urgency = min(5, max(1, pain_count))
+    urgency_reason = f"{_plural(pain_count, 'pain point')} listed"
+
     budget_fit = _score_budget_fit(intake.budget, tier)
     tech_readiness = _score_tech_readiness(intake.tech_person, intake.tools)
-    strategic_value = 3
+    urgency_base, budget_base, readiness_base = urgency, budget_fit, tech_readiness
+    readiness_minus: list[str] = []  # "Why this tier" evidence: what took readiness down
+    readiness_bits = [
+        "an in-house technical person and current tools" if tech_readiness == 4
+        else "either an in-house technical person or current tools, not both" if tech_readiness == 3
+        else "no in-house technical person or current tools"
+    ]
+
+    # Value at stake = sum over tasks of hours a week x loaded hourly rate x weeks.
+    weeks = value_weeks()
+    rate = parse_hourly_rate(intake.hourly_cost)
+    workflows = []
+    for row in parse_workflows(intake.workflow_tasks):
+        value = round(row["hours"] * rate * weeks) if (row["hours"] is not None and rate) else None
+        gaps = [gap for gap, missing in (("Weekly hours missing", row["hours"] is None), ("Hourly cost missing", not rate)) if missing]
+        workflows.append({**row, "value": value, "gaps": gaps})
+    sink = top_time_sink(intake.workflow_tasks, [row["value"] for row in workflows])
+    # Proto (#39 follow-up): wording only. When the highest-value task has no time-sink category (lead intake is
+    # left out on purpose, §2.1), the reason names that task instead of the category of a smaller one.
+    top_task = top_uncategorised_task(intake.workflow_tasks, workflows) if sink else None
+    if sink:
+        urgency = min(5, urgency + 1)
+        if top_task:
+            urgency_reason += (f"; {_cap(top_task['task'])} carries the largest value at stake "
+                               f"(${top_task['value']:,}/yr), and another listed task matches a known time sink")
+        else:
+            urgency_reason += f", and the manual work matches a known time sink ({sink})"
+    workflows.sort(key=lambda row: (-(row["value"] or 0), len(row["gaps"])))
+    # Ikenna (via Bash): 'show partial value as "at least $X"'. When some listed tasks have a value and others do
+    # not, the subtotal of the valued tasks is a lower bound: it is shown as "at least $X", flagged
+    # VALUE_AT_STAKE_PARTIAL (Inputs "thin"), and banded as a floor. Only when no task has a value is it missing.
+    # Each valued row still shows its own figure in Top workflows.
+    valued = [row["value"] for row in workflows if row["value"] is not None]
+    value_partial = bool(valued) and len(valued) < len(workflows)
+    value_at_stake = sum(valued) if valued else None
+    strategic_value = strategic_value_for(value_at_stake)
+    strategic_default = value_at_stake is None
+    if strategic_default:
+        flags.append("VALUE_AT_STAKE_MISSING")
+        strategic_reason = "default until weekly hours and an hourly cost are provided"
+    elif value_partial:
+        flags.append("VALUE_AT_STAKE_PARTIAL")
+        strategic_reason = (f"value at stake of at least ${value_at_stake:,} a year "
+                            "(tasks without weekly hours are excluded)")
+    else:
+        strategic_reason = f"value at stake of about ${value_at_stake:,} a year"
+
+    # Flags. A missing success metric is a flag only: it never caps or changes the tier.
+    if not _has_number(intake.success_metric):
+        flags.append("NO_SUCCESS_METRIC")
+    if intake.workflows_section:  # Q4-Q11 checks apply only when the client was asked them
+        if _blank(intake.process_owner):
+            flags.append("NO_OWNER")
+            tech_readiness -= 1
+            readiness_bits.append("no process owner is named")
+            readiness_minus.append("no named process owner")
+        if _data_not_ready(intake.data_readiness):
+            flags.append("DATA_CLEANUP_FIRST")
+            tech_readiness -= 1
+            readiness_bits.append("the data needs clean-up first")
+            readiness_minus.append("data that needs clean-up first")
+            scope_notes.append("Data preparation: clean and consolidate the source data before the build.")
+        if _systems_risk(intake.systems_access):
+            flags.append("SCOPE_RISK_SYSTEMS")
+            timeline = _widen_timeline(timeline)
+        if intake.sensitive_data.strip().lower().startswith("yes"):
+            flags.append("COMPLIANCE_REVIEW")
+        if _failed_attempt(intake.past_attempts):
+            flags.append("TRUST_REPAIR")
+            scope_notes.append("Pilot: a paid pilot on a single workflow, measured against one agreed metric.")
+        if _exception_count(intake.exceptions) >= 3:
+            flags.append("HUMAN_IN_LOOP")
+            scope_notes.append("Hand-off rules: route each listed exception to a named person.")
+        if _blank(intake.maintenance):
+            flags.append("SUPPORT_TERMS_NEEDED")
+        overdue = _overdue_share(intake.finance_signals)
+        if overdue is not None and overdue >= 30:
+            quick_wins.append("Accounts-receivable follow-up: automated reminders for invoices more than 30 days overdue.")
+    tech_readiness = max(1, tech_readiness)
+
+    # Budget against value: top of the budget range / value at stake.
+    budget_reason = (f"stated budget of {intake.budget} {'fits' if budget_fit >= 3 else 'does not fit'} this tier"
+                     if intake.budget.strip()
+                     else "no budget range was provided")
+    top = _budget_top(intake.budget)
+    if value_at_stake and top:
+        ratio = top / value_at_stake
+        if ratio < 1:
+            budget_fit = min(5, budget_fit + 1)
+            budget_reason += "; the yearly value at stake exceeds the top of the budget"
+        elif ratio > 2 and not value_partial:  # a lower bound cannot show the budget outruns the value
+            flags.append("ROI_WEAK")
+
     total_score = urgency + budget_fit + tech_readiness + strategic_value
+    signal_reasons = {
+        "urgency": urgency_reason,
+        "budget_fit": budget_reason,
+        "tech_readiness": "; ".join(readiness_bits),
+        "strategic_value": strategic_reason,
+    }
     reasons = [
-        f"{pain_count} pain point(s) and {goal_count} goal(s) mapped to {tier}.",
-        f"Budget fit scored {budget_fit}/5 from stated range: {intake.budget or 'not provided'}.",
-        f"Technical readiness scored {tech_readiness}/5 from tools and in-house tech signal.",
-        "Strategic value defaults to 3/5 until a human reviews portfolio fit.",
+        f"{_plural(pain_count, 'pain point')} and {_plural(goal_count, 'goal')} map to the {tier} tier.",
+        f"Urgency {urgency}/5: {urgency_reason}.",
+        f"Budget fit {budget_fit}/5: {budget_reason}.",
+        f"Readiness {tech_readiness}/5: {signal_reasons['tech_readiness']}.",
+        f"Strategic value {strategic_value}/5: {strategic_reason}.",
     ]
 
     return OpportunityScore(
@@ -132,77 +535,82 @@ def score_opportunity(intake: ClientIntake) -> OpportunityScore:
         total_score=total_score,
         max_score=20,
         reasons=reasons,
+        value_at_stake=value_at_stake,
+        value_at_stake_partial=value_partial,
+        strategic_value_default=strategic_default,
+        flags=flags,
+        workflows=workflows,
+        scope_notes=scope_notes,
+        quick_wins=quick_wins,
+        signal_reasons=signal_reasons,
+        signal_evidence=_signal_evidence(
+            pain_count=pain_count, sink=sink, top_task=top_task, urgency_base=urgency_base, urgency=urgency,
+            budget=intake.budget.strip(), budget_base=budget_base, budget_fit=budget_fit,
+            readiness_base=readiness_base, readiness_minus=readiness_minus, tech_readiness=tech_readiness,
+            value_at_stake=value_at_stake, value_partial=value_partial, strategic_value=strategic_value),
+        rules_version=SCORING_RULES_VERSION,
     )
 
 
-def generate_documents(intake: ClientIntake, score: OpportunityScore, strategic_analysis: str | None = None) -> dict[str, str]:
-    pain_lines = _numbered_lines(intake.pain_points)
-    goal_lines = _numbered_lines(intake.goals)
+# Persona v1.2 rule 1: no AI text in client exports. Gemini output (strategic_analysis, with or without
+# Jules refinement) and its "DIA Agent Error" fallback are unreviewed drafts: never part of the documents.
+# A future "add to export after review" step would append reviewed text explicitly; it doesn't exist yet.
+UNREVIEWED_AI_KEYS = frozenset({"strategic_analysis"})
+AI_ERROR_MARKER = "dia agent error"
+_SCORE_REASONS = "\n## Score Reasons\n"  # pre-savant documents (stored cabinet results)
+_TOP_WORKFLOWS = "\n## Top workflows by value at stake\n"  # dia-savant v1.0: the analysis document's last section
 
-    opportunity_analysis = f"""# Opportunity Analysis: {intake.company_name or 'Unknown'}
 
-## Pain Points
-{pain_lines}
+def _deterministic_analysis(text: str) -> str:
+    """Cut opportunity-analysis.md after its last deterministic section, dropping anything appended to it.
+    Savant documents end with "Top workflows by value at stake": its action title, then one block (the
+    table rows or one sentence). Older documents end with the Score Reasons bullets."""
+    head, sep, tail = text.partition(_TOP_WORKFLOWS)
+    if sep:
+        kept, seen_title, in_block = [], False, False
+        for line in tail.split("\n"):
+            if not seen_title:
+                kept.append(line)
+                seen_title = line.startswith("### ")
+                continue
+            if line.strip():
+                in_block = True
+                kept.append(line)
+            elif in_block:
+                break
+            else:
+                kept.append(line)
+        return f"{head}{sep}" + "\n".join(kept).rstrip("\n") + "\n"
+    head, sep, tail = text.partition(_SCORE_REASONS)
+    if not sep:
+        return text
+    bullets = []
+    for line in tail.split("\n"):
+        if not line.startswith("- "):
+            break
+        bullets.append(line)
+    return f"{head}{sep}" + "\n".join(bullets) + "\n"
 
-## Goals
-{goal_lines}
 
-## Recommendation
-- **Tier:** {score.tier}
-- **Scope:** {score.scope}
-- **Price Range:** {score.price_range}
-- **Timeline:** {score.timeline}
-- **Total Score:** {score.total_score}/{score.max_score}
+def scrub_for_export(value, key: str | None = None):
+    """Deep-copy a result (or documents) for export: drop unreviewed AI keys, cut appended text from
+    opportunity-analysis.md, and remove any line carrying a DIA Agent Error, whatever produced it."""
+    if isinstance(value, dict):
+        return {k: scrub_for_export(v, k) for k, v in value.items() if k not in UNREVIEWED_AI_KEYS}
+    if isinstance(value, list):
+        return [scrub_for_export(v) for v in value]
+    if isinstance(value, str):
+        text = _deterministic_analysis(value) if key == "opportunity-analysis.md" else value
+        return "\n".join(line for line in text.split("\n") if AI_ERROR_MARKER not in line.lower())
+    return value
 
-## Score Reasons
-{_bullet_lines(score.reasons)}
-"""
-    if strategic_analysis:
-        opportunity_analysis += f"\n\n{strategic_analysis}"
 
-    return {
-        "client-profile.md": f"""# Client Profile: {intake.company_name or 'Unknown'}
+def generate_documents(intake: ClientIntake, score: OpportunityScore, *, report_date: str | None = None) -> dict[str, str]:
+    """The three Markdown documents, rendered from the same answer-first report model as the PDF (§3, §6).
+    Together, in the export order analysis, profile, proposal, they follow the PDF's section order."""
+    from .report_model import build_report, render_documents
 
-## Overview
-- **Industry:** {intake.industry or 'TBD'}
-- **Size:** {intake.size or 'TBD'}
-- **Location:** {intake.location or 'TBD'}
-- **Website:** {intake.website or 'TBD'}
-- **Years in Business:** {intake.years_in_business or 'TBD'}
-
-## Current Tools
-{intake.tools or 'None listed.'}
-
-## Decision Context
-- **Decision Maker:** {intake.decision_maker or 'TBD'}
-- **Preferred Start:** {intake.start_date or 'TBD'}
-- **Compliance:** {intake.compliance or 'None listed'}
-
-## Notes
-{intake.notes or 'None provided.'}
-""",
-        "opportunity-analysis.md": opportunity_analysis,
-        "proposal-draft.md": f"""# Proposal Draft: {intake.company_name or 'Your Company'}
-
-## Executive Summary
-{intake.company_name or 'The client'} needs a reliable way to turn discovery intake into a qualified opportunity package. The recommended path is a {score.tier} that converts questionnaire responses into a client profile, scored opportunity analysis, and proposal draft.
-
-## Recommended Solution
-**{score.tier}** - {score.scope}
-
-## Delivery Plan
-- **Phase 1:** Confirm intake fields, missing information, and success criteria.
-- **Phase 2:** Configure the agent workflow and generated document templates.
-- **Phase 3:** Run sample intakes, review outputs, and hand off operating notes.
-
-## Investment
-- **Estimated Range:** {score.price_range}
-- **Timeline:** {score.timeline}
-
-## Next Step
-Review the generated opportunity analysis and confirm the missing fields before kickoff.
-""",
-    }
+    return render_documents(build_report(intake, score, validate_intake(intake), report_date))
 
 
 def _extract_table_rows(content: str) -> list[tuple[str, str]]:
