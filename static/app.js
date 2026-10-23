@@ -711,33 +711,49 @@ function setExportAvailability(isAvailable) {
 }
 
 // Persona v1.2 rule 1: no AI text in client exports. Mirrors scrub_for_export in client_discovery/core.py:
-// drop unreviewed AI keys (strategic_analysis), cut anything appended after opportunity-analysis.md's
-// Score Reasons, and remove every line carrying a "DIA Agent Error", whatever produced it.
+// drop unreviewed AI keys (strategic_analysis), cut anything appended after opportunity-analysis.md's last
+// deterministic section, and remove every line carrying a "DIA Agent Error", whatever produced it.
+// dia-savant documents end with "Top workflows by value at stake" (its ### title, then one block of rows or
+// one sentence); older stored documents end with the Score Reasons bullets.
 const UNREVIEWED_AI_KEYS = new Set(["strategic_analysis"]);
+const TOP_WORKFLOWS = "\n## Top workflows by value at stake\n";
+const SCORE_REASONS = "\n## Score Reasons\n";
+function deterministicAnalysis(text) {
+  let at = text.indexOf(TOP_WORKFLOWS);
+  if (at !== -1) {
+    const head = text.slice(0, at + TOP_WORKFLOWS.length);
+    const kept = [];
+    let seenTitle = false;
+    let inBlock = false;
+    for (const line of text.slice(head.length).split("\n")) {
+      if (!seenTitle) { kept.push(line); seenTitle = line.startsWith("### "); continue; }
+      if (line.trim()) { inBlock = true; kept.push(line); } else if (inBlock) break; else kept.push(line);
+    }
+    return `${head}${kept.join("\n").replace(/\n+$/, "")}\n`;
+  }
+  at = text.indexOf(SCORE_REASONS);
+  if (at === -1) return text;
+  const head = text.slice(0, at + SCORE_REASONS.length);
+  const bullets = [];
+  for (const line of text.slice(head.length).split("\n")) { if (!line.startsWith("- ")) break; bullets.push(line); }
+  return `${head}${bullets.join("\n")}\n`;
+}
 function scrubForExport(value, key = null) {
   if (Array.isArray(value)) return value.map((item) => scrubForExport(item));
   if (value && typeof value === "object") {
     return Object.fromEntries(Object.entries(value).filter(([k]) => !UNREVIEWED_AI_KEYS.has(k)).map(([k, v]) => [k, scrubForExport(v, k)]));
   }
   if (typeof value !== "string") return value;
-  let text = value;
-  if (key === "opportunity-analysis.md") {
-    const at = text.indexOf("\n## Score Reasons\n");
-    if (at !== -1) {
-      const head = text.slice(0, at + "\n## Score Reasons\n".length);
-      const bullets = [];
-      for (const line of text.slice(head.length).split("\n")) { if (!line.startsWith("- ")) break; bullets.push(line); }
-      text = `${head}${bullets.join("\n")}\n`;
-    }
-  }
+  const text = key === "opportunity-analysis.md" ? deterministicAnalysis(value) : value;
   return text.split("\n").filter((line) => !line.toLowerCase().includes("dia agent error")).join("\n");
 }
+const MD_EXPORT_ORDER = ["opportunity-analysis.md", "client-profile.md", "proposal-draft.md"];
 const exportJson = (result) => JSON.stringify(scrubForExport(result), null, 2);
 
 function buildMarkdownExport(docs = documents) {
   const safe = scrubForExport(docs || {});
-  return tabs
-    .map((tab) => tab.dataset.doc)
+  // dia-savant §6: the Markdown export follows the PDF's answer-first order (the on-screen tabs keep theirs).
+  return MD_EXPORT_ORDER
     .map((name) => safe[name])
     .filter(Boolean)
     .join("\n\n---\n\n");

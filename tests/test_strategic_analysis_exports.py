@@ -110,7 +110,7 @@ def test_pdf_text_from_a_tainted_result_is_clean():
     from client_discovery.report import render_pdf
 
     text = pdf_text(render_pdf(tainted(app_build(MISSING)), report_date="October 23, 2026"))
-    assert "Score Reasons" in text
+    assert "Why this tier" in text
     assert_clean(text, "pdf")
 
 

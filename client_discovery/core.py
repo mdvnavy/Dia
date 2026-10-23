@@ -407,11 +407,30 @@ def score_opportunity(intake: ClientIntake) -> OpportunityScore:
 # A future "add to export after review" step would append reviewed text explicitly; it doesn't exist yet.
 UNREVIEWED_AI_KEYS = frozenset({"strategic_analysis"})
 AI_ERROR_MARKER = "dia agent error"
-_SCORE_REASONS = "\n## Score Reasons\n"
+_SCORE_REASONS = "\n## Score Reasons\n"  # pre-savant documents (stored cabinet results)
+_TOP_WORKFLOWS = "\n## Top workflows by value at stake\n"  # dia-savant v1.0: the analysis document's last section
 
 
 def _deterministic_analysis(text: str) -> str:
-    """Cut opportunity-analysis.md after its last deterministic section (the Score Reasons bullets)."""
+    """Cut opportunity-analysis.md after its last deterministic section, dropping anything appended to it.
+    Savant documents end with "Top workflows by value at stake": its action title, then one block (the
+    table rows or one sentence). Older documents end with the Score Reasons bullets."""
+    head, sep, tail = text.partition(_TOP_WORKFLOWS)
+    if sep:
+        kept, seen_title, in_block = [], False, False
+        for line in tail.split("\n"):
+            if not seen_title:
+                kept.append(line)
+                seen_title = line.startswith("### ")
+                continue
+            if line.strip():
+                in_block = True
+                kept.append(line)
+            elif in_block:
+                break
+            else:
+                kept.append(line)
+        return f"{head}{sep}" + "\n".join(kept).rstrip("\n") + "\n"
     head, sep, tail = text.partition(_SCORE_REASONS)
     if not sep:
         return text
@@ -436,71 +455,12 @@ def scrub_for_export(value, key: str | None = None):
     return value
 
 
-def generate_documents(intake: ClientIntake, score: OpportunityScore) -> dict[str, str]:
-    pain_lines = _numbered_lines(intake.pain_points)
-    goal_lines = _numbered_lines(intake.goals)
+def generate_documents(intake: ClientIntake, score: OpportunityScore, *, report_date: str | None = None) -> dict[str, str]:
+    """The three Markdown documents, rendered from the same answer-first report model as the PDF (§3, §6).
+    Together, in the export order analysis, profile, proposal, they follow the PDF's section order."""
+    from .report_model import build_report, render_documents
 
-    opportunity_analysis = f"""# Opportunity Analysis: {intake.company_name or 'Unknown'}
-
-## Pain Points
-{pain_lines}
-
-## Goals
-{goal_lines}
-
-## Recommendation
-- **Tier:** {score.tier}
-- **Scope:** {score.scope}
-- **Price Range:** {score.price_range}
-- **Timeline:** {score.timeline}
-- **Total Score:** {score.total_score}/{score.max_score}
-
-## Score Reasons
-{_bullet_lines(score.reasons)}
-"""
-    return {
-        "client-profile.md": f"""# Client Profile: {intake.company_name or 'Unknown'}
-
-## Overview
-- **Industry:** {intake.industry or 'TBD'}
-- **Size:** {intake.size or 'TBD'}
-- **Location:** {intake.location or 'TBD'}
-- **Website:** {intake.website or 'TBD'}
-- **Years in Business:** {intake.years_in_business or 'TBD'}
-
-## Current Tools
-{intake.tools or 'None listed.'}
-
-## Decision Context
-- **Decision Maker:** {intake.decision_maker or 'TBD'}
-- **Preferred Start:** {intake.start_date or 'TBD'}
-- **Compliance:** {intake.compliance or 'None listed'}
-
-## Notes
-{intake.notes or 'None provided.'}
-""",
-        "opportunity-analysis.md": opportunity_analysis,
-        "proposal-draft.md": f"""# Proposal Draft: {intake.company_name or 'Your Company'}
-
-## Executive Summary
-{intake.company_name or 'The client'} needs a reliable way to turn discovery intake into a qualified opportunity package. The recommended path is a {score.tier} that converts questionnaire responses into a client profile, scored opportunity analysis, and proposal draft.
-
-## Recommended Solution
-**{score.tier}** - {score.scope}
-
-## Delivery Plan
-- **Phase 1:** Confirm intake fields, missing information, and success criteria.
-- **Phase 2:** Configure the agent workflow and generated document templates.
-- **Phase 3:** Run sample intakes, review outputs, and hand off operating notes.
-
-## Investment
-- **Estimated Range:** {score.price_range}
-- **Timeline:** {score.timeline}
-
-## Next Step
-Review the generated opportunity analysis and confirm the missing fields before kickoff.
-""",
-    }
+    return render_documents(build_report(intake, score, validate_intake(intake), report_date))
 
 
 def _extract_table_rows(content: str) -> list[tuple[str, str]]:
