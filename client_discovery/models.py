@@ -62,4 +62,5 @@ class OpportunityScore:
     scope_notes: list[str] = field(default_factory=list)  # lines the flags add to scope
     quick_wins: list[str] = field(default_factory=list)
     signal_reasons: dict = field(default_factory=dict)    # urgency, budget_fit, tech_readiness, strategic_value
+    signal_evidence: dict = field(default_factory=dict)   # same keys: the evidence sentence for "Why this tier"
     rules_version: str = "2"

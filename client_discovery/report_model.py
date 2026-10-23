@@ -135,6 +135,22 @@ def value_at_stake_text(score: OpportunityScore) -> str | None:
     return f"{'at least' if score.value_at_stake_partial else 'about'} {_money(score.value_at_stake)}"
 
 
+TITLE_MAX_WORDS = 15  # §8.7 action titles; the client name counts as one token (Proto, on #39)
+
+
+def title_word_count(title: str, client: str = "") -> int:
+    """Words in an action title, with the client name counted as ONE token however long it is."""
+    name = client.strip()
+    if name and name in title:
+        return len(title.replace(name, "", 1).split()) + 1
+    return len(title.split())
+
+
+def _fit_title(full: str, short: str, client: str) -> str:
+    """The named title when it fits the limit (name = one token); otherwise the template's short form without it."""
+    return full if title_word_count(full, client) <= TITLE_MAX_WORDS else short
+
+
 def _plural(n: int, one: str, many: str | None = None) -> str:
     return f"{n} {one if n == 1 else (many or one + 's')}"
 
@@ -269,7 +285,8 @@ def build_report(intake: ClientIntake, score: OpportunityScore, issues: list[Val
         missing_body += "\n\n**Flags to clear first**\n\n" + "\n".join(f"- {action}" for action in actions)
 
     # 03 Recommendation
-    rec_title = f"{client} fits a {score.tier} at {score.price_range} over {score.timeline}"
+    rec_title = _fit_title(f"{client} fits a {score.tier} at {score.price_range} over {score.timeline}",
+                           f"A {score.tier} fits at {score.price_range} over {score.timeline}", client)
     rec_lines = [
         f"- **Tier:** {score.tier}",
         f"- **Scope:** {score.scope}",
@@ -308,16 +325,22 @@ def build_report(intake: ClientIntake, score: OpportunityScore, issues: list[Val
         f"| {exhibit['unit']} | Points |", "|---|---|",
         *[f"| {bar['label']}{' (weakest)' if bar['highlight'] else ''} | {bar['text']} |" for bar in bars],
     ]) + f"\n\n{exhibit['total']}\n\n{exhibit['source']}"
-    why_body = "\n".join(f"- {reason}" for reason in score.reasons)
+    # Each line cites the evidence that sets the sub-score (Proto, on #39), not the summary's "Why this tier" bullets.
+    evidence = score.signal_evidence or {}
+    if evidence:
+        why_lines = score.reasons[:1] + [evidence[key] for key, _ in SIGNALS if evidence.get(key)]
+    else:  # a score object built before the evidence field existed
+        why_lines = list(score.reasons)
+    why_body = "\n".join(f"- {line}" for line in why_lines)
 
     # 05 Top workflows by value at stake (§2.4)
     if score.value_at_stake is not None:
         n = len([w for w in score.workflows if w.get("value") is not None])
         if score.value_at_stake_partial:
-            wf_title = (f"{client} loses {value_at_stake_text(score)} a year to {n} of "
-                        f"{_plural(len(score.workflows), 'manual workflow')}")
+            tail = f"{value_at_stake_text(score)} a year to {n} of {_plural(len(score.workflows), 'manual workflow')}"
         else:
-            wf_title = f"{client} loses {value_at_stake_text(score)} a year to {_plural(n, 'manual workflow')}"
+            tail = f"{value_at_stake_text(score)} a year to {_plural(n, 'manual workflow')}"
+        wf_title = _fit_title(f"{client} loses {tail}", f"Manual work loses {tail}", client)
     else:
         wf_title = "Strategic value stays at 3 of 5 until hours and an hourly cost are provided"
     if score.workflows:

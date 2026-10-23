@@ -396,7 +396,7 @@ def test_action_titles_have_at_most_15_words_a_digit_and_no_full_stop(name):  # 
     titles = report["action_titles"] + [report["exhibit"]["title"]]
     assert len(report["action_titles"]) == 4
     for title in titles:
-        assert len(title.split()) <= 15, title
+        assert report_model.title_word_count(title, report["client"]) <= 15, title  # the name is one token
         assert not title.endswith("."), title
         assert re.search(r"\d", title), title
         assert not re.search(r"\bwe\b", title, re.I), title
@@ -884,3 +884,78 @@ def score_rate(text: str) -> float:
     from client_discovery.core import parse_hourly_rate
 
     return parse_hourly_rate(parse_questionnaire_markdown(text).hourly_cost)
+
+
+# --- Proto spec decisions on #39 -------------------------------------------------------------------------------
+
+def test_urgency_names_the_category_of_the_highest_value_task():
+    # Item 1: by value, not the fixed order. Sample tasks plus 8 h of scheduling ($21,120 > invoice chasing $7,920).
+    q1 = ("Lead triage across three forms - sales coordinator, 6 hours a week, 1 person; Invoice chasing and "
+          "reconciliation - founder, 3 hours a week, 1 person; Scheduling - office manager, 8 hours a week, 1 person")
+    assert score_of(questionnaire(q1=q1)).signal_reasons["urgency"].endswith("(coordination)")
+    # The sample itself: its two top tasks (lead triage, CRM updates) match no category, so finance admin stays.
+    assert score_of(SAMPLE).signal_reasons["urgency"].endswith("(finance admin)")
+
+
+def test_why_this_tier_cites_sub_score_evidence_not_the_summary_bullets():
+    report, _, score = report_for(SAMPLE)
+    why = report["sections"][3]["body"]
+    assert why.splitlines() == [
+        "- 2 pain points and 2 goals map to the Custom AI Agent tier.",
+        "- A count of 2 pain points, plus 1 for a known time sink (finance admin), places urgency at 3 of 5.",
+        "- A stated budget of $2,500-$10,000 inside the $2,500-$10,000 band, plus 1 because the value at stake of "
+        "$36,960/yr exceeds its top, places budget fit at 4 of 5.",
+        "- Having an in-house technical person and current tools places readiness at 4 of 5.",
+        "- Value at stake of $36,960/yr, in the $20,000-$49,999 band, places strategic value at 4 of 5.",
+    ]
+    summary_bullets = [line for line in report["sections"][0]["body"].splitlines() if line.startswith("- ")]
+    assert summary_bullets and not set(summary_bullets) & set(why.splitlines())
+    assert "places strategic value at 4 of 5" in markdown_export(SAMPLE)
+
+
+def test_why_this_tier_evidence_for_partial_missing_and_deductions():
+    partial, _, _ = report_for(questionnaire(q1=PARTIAL_Q1, q2="$50 an hour"))
+    assert ("- Value at stake of at least $14,400/yr, in the $5,000-$19,999 band, places strategic value at 3 of 5 "
+            "as a floor; tasks without weekly hours are excluded.") in partial["sections"][3]["body"]
+    thin, _, _ = report_for(VARIANTS["thin"])
+    body = thin["sections"][3]["body"]
+    assert "- No stated budget places budget fit at 2 of 5." in body
+    assert "- No computed value at stake leaves strategic value at the default 3 of 5" in body
+    flags, _, _ = report_for(VARIANTS["flags"])
+    assert ("- Having an in-house technical person and current tools, minus 1 for no named process owner, minus 1 "
+            "for data that needs clean-up first, places readiness at 2 of 5.") in flags["sections"][3]["body"]
+
+
+LONG_NAME = "The Northern Ontario Community Health and Wellness Cooperative Association of Thunder Bay"  # 12 words
+
+
+def test_client_name_counts_as_one_token_in_titles():
+    report, _, _ = report_for(SAMPLE.replace("Northstar Studio", LONG_NAME))
+    rec, wf = report["sections"][2]["title"], report["sections"][4]["title"]
+    assert rec == f"{LONG_NAME} fits a Custom AI Agent at $2,500-$10,000 over 2-4 weeks"
+    assert wf == f"{LONG_NAME} loses about $36,960 a year to 3 manual workflows"
+    assert len(rec.split()) > 15 and report_model.title_word_count(rec, LONG_NAME) == 11
+
+
+def test_title_over_the_limit_uses_the_short_form_without_the_name(monkeypatch):
+    # Named forms are 11 and 10 tokens (the name is one); a 9-token limit forces both to the short form.
+    monkeypatch.setattr(report_model, "TITLE_MAX_WORDS", 9)
+    report, _, _ = report_for(SAMPLE.replace("Northstar Studio", LONG_NAME))
+    assert report["sections"][2]["title"] == "A Custom AI Agent fits at $2,500-$10,000 over 2-4 weeks"
+    assert report["sections"][4]["title"] == "Manual work loses about $36,960 a year to 3 manual workflows"
+    assert not any(LONG_NAME in title for title in report["action_titles"])
+
+
+def test_reopened_intake_scored_before_value_at_stake_keeps_its_score_and_shows_a_hint(context, base_url):
+    page = open_page(context, base_url)
+    run_intake(page, SAMPLE)
+    assert page.is_hidden("#legacyScoreHint")  # fresh runs carry value_at_stake
+    page.evaluate("""() => { const p = JSON.parse(JSON.stringify(latestPayload));
+        delete p.score.value_at_stake; delete p.score.rules_version; p.score.total_score = 12;
+        reopenIntake({ id: 'old', title: 'Old intake', questionnaire: '', result: p }); }""")
+    assert page.is_visible("#legacyScoreHint")
+    assert page.inner_text("#legacyScoreHint") == "Scored before value at stake"
+    assert page.inner_text("#score").startswith("12/20")  # the old score is shown as saved, not re-scored
+    run_intake(page, SAMPLE)
+    assert page.is_hidden("#legacyScoreHint")
+    assert page.errors == []

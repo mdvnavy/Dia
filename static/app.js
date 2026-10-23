@@ -689,6 +689,7 @@ function showResults(payload, questionnaireText) {
   score.textContent = `${payload.score.total_score}/${payload.score.max_score} · ${payload.score.timeline}`;
   renderIssues(payload.issues);
   renderInputs(payload);
+  renderLegacyScoreHint(payload);
   refreshFollowupButton();
   renderDocument(activeDoc);
   setExportAvailability(true);
@@ -709,6 +710,13 @@ function renderIssues(items) {
     item.textContent = `${issue.severity.toUpperCase()}: ${issue.message}`;
     issues.appendChild(item);
   }
+}
+
+// Proto, on #39: intakes saved before dia-savant have no value_at_stake in their score. They keep their old
+// score (nothing is re-scored on reopen) and show a small hint instead. Fresh runs always carry the field.
+function renderLegacyScoreHint(payload) {
+  const hint = document.querySelector("#legacyScoreHint");
+  if (hint) hint.hidden = !(payload.score && !Object.prototype.hasOwnProperty.call(payload.score, "value_at_stake"));
 }
 
 // dia-savant §3.5: the Inputs label (complete, partial or thin) and one sentence on what to do. Screen only.

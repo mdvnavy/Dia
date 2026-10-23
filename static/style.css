@@ -696,6 +696,10 @@ pre.response-text {
   text-transform: uppercase;
 }
 
+.score-card small[hidden] { display: none; }
+/* Proto, on #39: reopened intakes scored before value at stake. */
+.score-card .legacy-score-hint { margin-top: 6px; letter-spacing: .02em; text-transform: none; }
+
 .score-card strong {
   display: block;
   margin: 9px 0;

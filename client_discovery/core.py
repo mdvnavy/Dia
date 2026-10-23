@@ -292,6 +292,55 @@ def _plural(n: int, word: str) -> str:
     return f"{n} {word}" if n == 1 else f"{n} {word}s"
 
 
+def _band_label(value: int) -> str:
+    low, mid, high = value_bands()
+    if value >= high:
+        return f"the ${high:,}-and-over band"
+    if value >= mid:
+        return f"the ${mid:,}-${high - 1:,} band"
+    if value >= low:
+        return f"the ${low:,}-${mid - 1:,} band"
+    return f"the under-${low:,} band"
+
+
+def _signal_evidence(*, pain_count, sink, urgency_base, urgency, budget, price_range, budget_base, budget_fit,
+                     readiness_base, readiness_minus, tech_readiness, value_at_stake, value_partial,
+                     strategic_value) -> dict:
+    """'Why this tier': one sentence per sub-score naming the evidence that sets it (Proto, on #39), so the
+    section cites the scoring inputs instead of restating the summary bullets."""
+    bump = urgency - urgency_base
+    urgency_text = (f"A count of {_plural(pain_count, 'pain point')}"
+                    + (f", plus 1 for a known time sink ({sink})," if bump else "")
+                    + (f", with a known time sink ({sink}) and the 5-point cap," if sink and not bump else "")
+                    + f" places urgency at {urgency} of 5.")
+    value_text = None
+    if value_at_stake is not None:
+        value_text = f"{'at least ' if value_partial else ''}${value_at_stake:,}/yr"
+    if not budget:
+        budget_text = f"No stated budget places budget fit at {budget_fit} of 5."
+    else:
+        inside = budget_base >= 3
+        budget_text = (f"A stated budget of {budget} {'inside' if inside else 'outside'} the {price_range} band"
+                       + (f", plus 1 because the value at stake of {value_text} exceeds its top,"
+                          if budget_fit > budget_base else "")
+                       + f" places budget fit at {budget_fit} of 5.")
+    base = {4: "Having an in-house technical person and current tools",
+            3: "Having either an in-house technical person or current tools, not both",
+            2: "Having no in-house technical person or current tools"}.get(readiness_base, "The readiness answers")
+    parts = [base] + [f"minus 1 for {item}" for item in readiness_minus]
+    readiness_text = (", ".join(parts) + ("," if len(parts) > 1 or readiness_base == 3 else "")
+                      + f" places readiness at {tech_readiness} of 5.")
+    if value_at_stake is None:
+        strategic_text = (f"No computed value at stake leaves strategic value at the default {strategic_value} of 5 "
+                          "until weekly hours and an hourly cost are provided.")
+    else:
+        strategic_text = (f"Value at stake of {value_text}, in {_band_label(value_at_stake)}, places strategic value "
+                          f"at {strategic_value} of 5" + (" as a floor; tasks without weekly hours are excluded."
+                                                          if value_partial else "."))
+    return {"urgency": urgency_text, "budget_fit": budget_text, "tech_readiness": readiness_text,
+            "strategic_value": strategic_text}
+
+
 def score_opportunity(intake: ClientIntake) -> OpportunityScore:
     pain_count = len(intake.pain_points)
     goal_count = len(intake.goals)
@@ -324,6 +373,8 @@ def score_opportunity(intake: ClientIntake) -> OpportunityScore:
 
     budget_fit = _score_budget_fit(intake.budget, tier)
     tech_readiness = _score_tech_readiness(intake.tech_person, intake.tools)
+    urgency_base, budget_base, readiness_base = urgency, budget_fit, tech_readiness
+    readiness_minus: list[str] = []  # "Why this tier" evidence: what took readiness down
     readiness_bits = [
         "an in-house technical person and current tools" if tech_readiness == 4
         else "either an in-house technical person or current tools, not both" if tech_readiness == 3
@@ -370,10 +421,12 @@ def score_opportunity(intake: ClientIntake) -> OpportunityScore:
             flags.append("NO_OWNER")
             tech_readiness -= 1
             readiness_bits.append("no process owner is named")
+            readiness_minus.append("no named process owner")
         if _data_not_ready(intake.data_readiness):
             flags.append("DATA_CLEANUP_FIRST")
             tech_readiness -= 1
             readiness_bits.append("the data needs clean-up first")
+            readiness_minus.append("data that needs clean-up first")
             scope_notes.append("Data preparation: clean and consolidate the source data before the build.")
         if _systems_risk(intake.systems_access):
             flags.append("SCOPE_RISK_SYSTEMS")
@@ -440,6 +493,11 @@ def score_opportunity(intake: ClientIntake) -> OpportunityScore:
         scope_notes=scope_notes,
         quick_wins=quick_wins,
         signal_reasons=signal_reasons,
+        signal_evidence=_signal_evidence(
+            pain_count=pain_count, sink=sink, urgency_base=urgency_base, urgency=urgency,
+            budget=intake.budget.strip(), price_range=price_range, budget_base=budget_base, budget_fit=budget_fit,
+            readiness_base=readiness_base, readiness_minus=readiness_minus, tech_readiness=tech_readiness,
+            value_at_stake=value_at_stake, value_partial=value_partial, strategic_value=strategic_value),
         rules_version=SCORING_RULES_VERSION,
     )
 
