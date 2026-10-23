@@ -11,7 +11,23 @@ from .models import ClientIntake, OpportunityScore, ValidationIssue
 logger = logging.getLogger(__name__)
 
 
+# Section 6 aliases come first; none of them is a substring of a section 1-5 question, and vice versa.
+SECTION6_ALIASES = {
+    "workflow_tasks": ("manual tasks",),
+    "hourly_cost": ("hourly cost", "salary band", "loaded rate"),
+    "success_metric": ("the one number", "success metric"),
+    "process_owner": ("owns the process", "process owner"),
+    "systems_access": ("systems involved", "login or api access"),
+    "data_readiness": ("where does the data live", "data live", "how clean"),
+    "exceptions": ("what goes wrong today", "exceptions and hand-offs"),
+    "sensitive_data": ("regulated or sensitive",),
+    "past_attempts": ("previous ai", "automation attempts"),
+    "maintenance": ("who maintains",),
+    "finance_signals": ("finance only", "days overdue"),
+}
+
 QUESTION_ALIASES = {
+    **SECTION6_ALIASES,
     "company_name": ("company name",),
     "website": ("website",),
     "industry": ("industry / niche", "industry", "niche"),
@@ -54,6 +70,8 @@ def parse_questionnaire_markdown(content: str) -> ClientIntake:
         tech_person=values.get("tech_person", ""),
         compliance=values.get("compliance", ""),
         notes=values.get("notes", ""),
+        **{field: values.get(field, "") for field in SECTION6_ALIASES},
+        workflows_section=bool(re.search(r"^##\s*6\.?\s", content, re.M)) or any(values.get(f) for f in SECTION6_ALIASES),
     )
 
 
@@ -77,6 +95,16 @@ def validate_intake(intake: ClientIntake) -> list[ValidationIssue]:
                 severity="error",
             )
         )
+    # Section 6 Q1-Q3 are required, but only on questionnaires that carry section 6: older intakes without it
+    # keep their issue list, and the scorer flags the gaps instead (VALUE_AT_STAKE_MISSING, NO_SUCCESS_METRIC).
+    if intake.workflows_section:
+        for field, code, message in (
+            ("workflow_tasks", "missing_workflow_tasks", "Top manual tasks with weekly hours are needed for the value at stake."),
+            ("hourly_cost", "missing_hourly_cost", "An hourly cost or salary band is needed for the value at stake."),
+            ("success_metric", "missing_success_metric", "A success metric is needed to show the project worked."),
+        ):
+            if not getattr(intake, field).strip():
+                issues.append(ValidationIssue(code=code, message=message))
     if not intake.goals:
         issues.append(
             ValidationIssue(
