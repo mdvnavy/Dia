@@ -143,6 +143,18 @@ def _gcp_mcp_toolset() -> list:
     ]
 
 
+# gemini-2.5-flash was retired on Vertex AI on 2026-10-20; gemini-3.8-flash is the
+# listed replacement (https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/model-versions).
+# On Vertex it is served from the "global" location (and the us / eu multi-regions),
+# not us-central1. DIA_MODEL still overrides it without a code change.
+DEFAULT_MODEL = "gemini-3.8-flash"
+
+
+def agent_model() -> str:
+    """The model id for Ask DIA: DIA_MODEL when set (non-blank), else DEFAULT_MODEL."""
+    return os.environ.get("DIA_MODEL", "").strip() or DEFAULT_MODEL
+
+
 def build_agent(
     *, include_make_mcp: bool = False, include_gcp_mcp: bool = False
 ) -> LlmAgent:
@@ -172,7 +184,7 @@ def build_agent(
     return LlmAgent(
         # Overridable so deploys can pin a model and local testing can dodge
         # per-model free-tier quotas without a code change.
-        model=os.environ.get("DIA_MODEL", "gemini-2.5-flash"),
+        model=agent_model(),
         name="dia_discovery_intake_agent",
         instruction=AGENT_INSTRUCTION,
         generate_content_config=types.GenerateContentConfig(
