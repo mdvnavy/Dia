@@ -6,6 +6,7 @@ from __future__ import annotations
 import ast
 import json
 import re
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -51,8 +52,15 @@ def all_documents(text: str) -> str:
     return "\n".join(build_intake_response(text)["documents"].values())
 
 
+def _need(tool: str) -> None:
+    if not shutil.which(tool):
+        pytest.skip(f"{tool} not installed")
+
+
 def pdf_text(result: dict) -> str:
     from client_discovery.report import render_pdf
+
+    _need("pdftotext")
 
     with tempfile.NamedTemporaryFile(suffix=".pdf") as handle:
         handle.write(render_pdf(result))
@@ -63,6 +71,8 @@ def pdf_text(result: dict) -> str:
 
 def pdf_links(result: dict) -> list[str]:
     from client_discovery.report import render_pdf
+
+    _need("pdfinfo")
 
     with tempfile.NamedTemporaryFile(suffix=".pdf") as handle:
         handle.write(render_pdf(result))
