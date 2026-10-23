@@ -105,7 +105,7 @@ def test_score_opportunity_full_integration_tier():
 
 def test_refine_with_jules_success():
     env = {"JULES_API_KEY": "valid_key"}
-    with patch.dict(os.environ, env), patch("requests.post") as mock_post:
+    with patch.dict(os.environ, env, clear=True), patch("requests.post") as mock_post:
         mock_response = mock_post.return_value
         mock_response.status_code = 200
         mock_response.json.return_value = {"refined_content": "Refined Draft"}
@@ -123,7 +123,7 @@ def test_refine_with_jules_success():
 
 def test_refine_with_jules_missing_key():
     env = {"JULES_API_KEY": ""}
-    with patch.dict(os.environ, env), patch("requests.post") as mock_post:
+    with patch.dict(os.environ, env, clear=True), patch("requests.post") as mock_post:
         result = refine_with_jules("Original Draft", "CEO")
         assert result == "Original Draft"
         mock_post.assert_not_called()
@@ -131,7 +131,7 @@ def test_refine_with_jules_missing_key():
 
 def test_refine_with_jules_status_error():
     env = {"JULES_API_KEY": "valid_key"}
-    with patch.dict(os.environ, env), patch("requests.post") as mock_post:
+    with patch.dict(os.environ, env, clear=True), patch("requests.post") as mock_post:
         mock_response = mock_post.return_value
         mock_response.status_code = 500
         
@@ -141,7 +141,7 @@ def test_refine_with_jules_status_error():
 
 def test_refine_with_jules_timeout():
     env = {"JULES_API_KEY": "valid_key"}
-    with patch.dict(os.environ, env), patch("requests.post") as mock_post:
+    with patch.dict(os.environ, env, clear=True), patch("requests.post") as mock_post:
         mock_post.side_effect = requests.exceptions.Timeout("Connection timed out")
         
         result = refine_with_jules("Original Draft", "CEO")
@@ -150,7 +150,7 @@ def test_refine_with_jules_timeout():
 
 def test_refine_with_jules_request_exception():
     env = {"JULES_API_KEY": "valid_key"}
-    with patch.dict(os.environ, env), patch("requests.post") as mock_post:
+    with patch.dict(os.environ, env, clear=True), patch("requests.post") as mock_post:
         mock_post.side_effect = requests.exceptions.RequestException("Request error")
         
         result = refine_with_jules("Original Draft", "CEO")
@@ -159,7 +159,7 @@ def test_refine_with_jules_request_exception():
 
 def test_refine_with_jules_malformed_json():
     env = {"JULES_API_KEY": "valid_key"}
-    with patch.dict(os.environ, env), patch("requests.post") as mock_post:
+    with patch.dict(os.environ, env, clear=True), patch("requests.post") as mock_post:
         mock_response = mock_post.return_value
         mock_response.status_code = 200
         mock_response.json.side_effect = ValueError("Malformed JSON")
@@ -170,7 +170,7 @@ def test_refine_with_jules_malformed_json():
 
 def test_refine_with_jules_missing_refined_content_key():
     env = {"JULES_API_KEY": "valid_key"}
-    with patch.dict(os.environ, env), patch("requests.post") as mock_post:
+    with patch.dict(os.environ, env, clear=True), patch("requests.post") as mock_post:
         mock_response = mock_post.return_value
         mock_response.status_code = 200
         mock_response.json.return_value = {"something_else": "here"}
@@ -181,14 +181,14 @@ def test_refine_with_jules_missing_refined_content_key():
 
 def test_trigger_obs_screenshot_missing_credentials():
     env = {"OBS_HOST": "", "OBS_PORT": "", "OBS_PASSWORD": ""}
-    with patch.dict(os.environ, env):
+    with patch.dict(os.environ, env, clear=True):
         res = trigger_obs_screenshot()
         assert "skipped" in res.lower() or "missing" in res.lower()
 
 
 def test_save_obs_replay_buffer_missing_credentials():
     env = {"OBS_HOST": "", "OBS_PORT": "", "OBS_PASSWORD": ""}
-    with patch.dict(os.environ, env):
+    with patch.dict(os.environ, env, clear=True):
         res = save_obs_replay_buffer()
         assert "skipped" in res.lower() or "missing" in res.lower()
 

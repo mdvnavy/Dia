@@ -9,7 +9,7 @@ if os.path.exists(venv_site_packages):
 from unittest.mock import patch
 import pytest
 
-from client_discovery.config import load_and_validate_config
+from client_discovery.config import load_and_validate_config, require_gemini_api_key
 
 @pytest.fixture(autouse=True)
 def reset_dotenv_loaded():
@@ -41,9 +41,8 @@ def test_load_config_missing_gemini_key_in_production():
         "TESTING": "false",
     }
     with patch.dict(os.environ, env, clear=True), patch("client_discovery.config.load_dotenv"):
-        with pytest.raises(ValueError) as excinfo:
-            load_and_validate_config()
-        assert "GEMINI_API_KEY is required" in str(excinfo.value)
+        config = load_and_validate_config()
+        assert config["GEMINI_API_KEY"] is None
 
 def test_load_config_missing_gemini_key_in_testing():
     env = {
@@ -52,7 +51,18 @@ def test_load_config_missing_gemini_key_in_testing():
     with patch.dict(os.environ, env, clear=True), patch("client_discovery.config.load_dotenv"), patch("client_discovery.config.logger") as mock_logger:
         config = load_and_validate_config()
         assert config["GEMINI_API_KEY"] is None
-        mock_logger.warning.assert_any_call("GEMINI_API_KEY is not set.")
+        mock_logger.warning.assert_any_call(
+            "JULES_API_KEY is not set. Jules refinement will fall back to returning original drafts."
+        )
+
+
+def test_require_gemini_api_key_raises_when_missing():
+    env = {"TESTING": "false"}
+    with patch.dict(os.environ, env, clear=True), patch("client_discovery.config.load_dotenv"):
+        config = load_and_validate_config()
+        with pytest.raises(ValueError) as excinfo:
+            require_gemini_api_key(config)
+        assert "GEMINI_API_KEY is required" in str(excinfo.value)
 
 def test_load_config_missing_optional_keys():
     env = {

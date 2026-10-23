@@ -36,7 +36,7 @@ def test_obs_empty_password_auth_disabled():
         "OBS_PORT": "4455",
         "OBS_PASSWORD": "",  # Empty password when auth is disabled
     }
-    with patch.dict(os.environ, env):
+    with patch.dict(os.environ, env, clear=True):
         creds = _resolve_obs_credentials()
         assert creds is not None
         assert creds[2] == ""
@@ -53,7 +53,7 @@ def test_obs_out_of_range_port():
         "OBS_PORT": "-100",
         "OBS_PASSWORD": "secretpassword",
     }
-    with patch.dict(os.environ, env):
+    with patch.dict(os.environ, env, clear=True):
         creds = _resolve_obs_credentials()
         assert creds is None
 
@@ -67,7 +67,7 @@ def test_jules_whitespace_api_key():
     env = {
         "JULES_API_KEY": "   ",
     }
-    with patch.dict(os.environ, env):
+    with patch.dict(os.environ, env, clear=True):
         # The API call will run because JULES_API_KEY is not empty, but it's invalid.
         # It should fail and return the original draft content.
         draft = "Original Draft content"
@@ -115,7 +115,7 @@ def test_obs_screenshot_connection_failure_graceful_handling():
         "OBS_PORT": "4455",
         "OBS_PASSWORD": "wrong_password",
     }
-    with patch.dict(os.environ, env), patch("obsws_python.ReqClient") as mock_req:
+    with patch.dict(os.environ, env, clear=True), patch("obsws_python.ReqClient") as mock_req:
         mock_req.side_effect = Exception("Connection refused")
         res = trigger_obs_screenshot()
         assert "failed" in res.lower()
@@ -131,7 +131,7 @@ def test_obs_replay_buffer_connection_failure_graceful_handling():
         "OBS_PORT": "4455",
         "OBS_PASSWORD": "wrong_password",
     }
-    with patch.dict(os.environ, env), patch("obsws_python.ReqClient") as mock_req:
+    with patch.dict(os.environ, env, clear=True), patch("obsws_python.ReqClient") as mock_req:
         mock_req.side_effect = Exception("Auth failure")
         res = save_obs_replay_buffer()
         assert "failed" in res.lower()
