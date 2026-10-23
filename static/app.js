@@ -236,7 +236,7 @@ async function sendAgentMessage() {
   try {
     const response = await fetch("/api/agent", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...(window.DIA_OWNER ? window.DIA_OWNER.authHeaders() : {}) },
       body: JSON.stringify({ message: message + context }),
     });
     const payload = await response.json();
