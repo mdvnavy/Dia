@@ -24,6 +24,34 @@ load_dotenv(override=False)
 
 logger = logging.getLogger(__name__)
 
+# Model IDs verified 2026-10-23 against https://ai.google.dev/gemini-api/docs/models
+# (gemini-3.8-flash: stable, "most intelligent Flash model ... autonomous
+# agents"; gemini-3.5-flash-lite: stable, fastest/cheapest current Flash-Lite).
+# gemini-2.5-* is now limited to projects that used it before, so it is no
+# longer a safe default for new keys.
+DEFAULT_PRIMARY_MODEL = "gemini-3.8-flash"
+DEFAULT_FALLBACK_MODEL = "gemini-3.5-flash-lite"
+
+
+def primary_model() -> str:
+    """Primary Gemini model; override with DIA_MODEL."""
+    return os.environ.get("DIA_MODEL", "").strip() or DEFAULT_PRIMARY_MODEL
+
+
+def fallback_model() -> str | None:
+    """Fallback model used when the primary errors or times out.
+
+    Override with DIA_FALLBACK_MODEL; set it to ``none`` (or ``off``) to
+    disable fallback. Returns None when disabled or identical to the primary.
+    """
+    raw = os.environ.get("DIA_FALLBACK_MODEL")
+    value = DEFAULT_FALLBACK_MODEL if raw is None or not raw.strip() else raw.strip()
+    if value.lower() in {"none", "off", "0", "false"}:
+        return None
+    if value == primary_model():
+        return None
+    return value
+
 
 def parse_intake(questionnaire_markdown: str) -> dict:
     """Parse a discovery intake questionnaire into structured fields."""
@@ -142,7 +170,10 @@ def _gcp_mcp_toolset() -> list:
 
 
 def build_agent(
-    *, include_make_mcp: bool = False, include_gcp_mcp: bool = False
+    *,
+    include_make_mcp: bool = False,
+    include_gcp_mcp: bool = False,
+    model: str | None = None,
 ) -> LlmAgent:
     """Construct a fresh DIA agent.
 
@@ -168,9 +199,10 @@ def build_agent(
         tools.extend(_gcp_mcp_toolset())
 
     return LlmAgent(
-        # Overridable so deploys can pin a model and local testing can dodge
-        # per-model free-tier quotas without a code change.
-        model=os.environ.get("DIA_MODEL", "gemini-2.5-flash"),
+        # Overridable (DIA_MODEL) so deploys can pin a model and local testing
+        # can dodge per-model free-tier quotas without a code change; the
+        # runtime passes the fallback model explicitly when the primary fails.
+        model=model or primary_model(),
         name="dia_discovery_intake_agent",
         instruction="""
         You are DIA, the discovery intake agent for a startup services team.

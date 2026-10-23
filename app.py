@@ -157,7 +157,12 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
             logger.warning("OBS capture skipped: %s", error)
 
     def handle_agent(self) -> None:
-        from agent_runtime import AgentNotConfigured, is_configured, run_agent
+        from agent_runtime import (
+            AgentNotConfigured,
+            AgentTimeout,
+            is_configured,
+            run_agent,
+        )
 
         try:
             payload = self.read_json()
@@ -190,6 +195,12 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
             reply = run_agent(message)
         except AgentNotConfigured as error:
             self.send_json({"configured": False, "reply": str(error)})
+            return
+        except AgentTimeout as error:
+            self.send_json(
+                {"error": f"agent timed out: {error}"},
+                HTTPStatus.GATEWAY_TIMEOUT,
+            )
             return
         except Exception as error:  # noqa: BLE001 - surface agent errors to the demo UI
             self.send_json(
