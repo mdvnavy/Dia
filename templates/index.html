@@ -32,6 +32,15 @@
       } catch (error) {
         document.documentElement.dataset.iconStyle = "line";
       }
+      try {
+        // Assistant mode (persona-ux.md v1.2 §3): guided | expert | off, per device. Invalid -> guided.
+        var mode = localStorage.getItem("dia-assistant");
+        var known = /^(guided|expert|off)$/.test(mode || "");
+        if (mode !== null && !known) localStorage.setItem("dia-assistant", "guided");
+        document.documentElement.dataset.assistant = known ? mode : "guided";
+      } catch (error) {
+        document.documentElement.dataset.assistant = "guided";
+      }
     })();
   </script>
 </head>
@@ -107,7 +116,7 @@
 
       <div class="prompt-wrapper intake-stage">
         <div class="intake-bar">
-          <p class="prompt-callout" id="intakeNote">Intake scoring is deterministic and needs no API key. Only Ask DIA sends your text to Gemini.</p>
+          <p class="prompt-callout" id="intakeNote"><span class="trust-on">Scoring is deterministic. Only Ask DIA and its suggestions send text to Gemini.</span><span class="trust-off">Nothing leaves this browser except the deterministic run.</span></p>
           <button id="intakeToggle" class="text-link" type="button" aria-expanded="true" aria-controls="intakeBody" hidden>Collapse intake</button>
         </div>
         <!-- Intake tray (upload) and filing cabinet (this session's intakes). Icons by Glyph. -->
@@ -239,8 +248,13 @@
           <button id="autoSpeak" class="chip-button speech-only" type="button" aria-pressed="false">Auto-speak: off</button>
         </div>
         <div class="response-area">
-          <div class="response-header">DIA agent reply</div>
-          <pre id="agentOutput" class="response-text" aria-live="polite" aria-label="Agent reply">The live agent uses the Gemini API via Google ADK. Run an intake first, then ask a question.</pre>
+          <div class="response-header"><span class="ai-speaker">DIA</span> <span id="agentAiLabel" class="ai-label" hidden>AI draft · review before sending</span></div>
+          <pre id="agentOutput" class="response-text ai-text" aria-live="polite" aria-label="Agent reply">Run an intake and I'll flag gaps and draft follow-ups.</pre>
+          <div class="ai-actions">
+            <button id="agentCancel" class="text-link" type="button" hidden>Cancel</button>
+            <button id="copyQuestions" class="text-link" type="button" hidden>Copy questions</button>
+            <span id="aiStatus" class="inline-status" role="status"></span>
+          </div>
         </div>
       </div>
 
@@ -255,6 +269,11 @@
           <div class="issues">
             <h2 id="issuesHeading">Validation Issues</h2>
             <ul id="issues" aria-live="polite" aria-labelledby="issuesHeading"></ul>
+            <!-- Follow-up drafter (persona-ux.md v1.2 §3): Guided mode, Gemini connected, and only when there are issues. -->
+            <div class="followup" id="followupRow" hidden>
+              <button id="draftFollowups" class="text-link" type="button" aria-describedby="followupLabel">Draft follow-up questions</button>
+              <span id="followupLabel" class="ai-label">AI draft · review before sending</span>
+            </div>
           </div>
         </div>
 
@@ -397,6 +416,15 @@
         <button type="button" role="radio" class="icon-style-option" data-icon-style="dia-pixel" aria-checked="false" tabindex="-1"><span class="icon" data-icon="cabinet" data-icon-set="dia-pixel" aria-hidden="true"></span>Dia pixel</button>
       </div>
       <p id="iconStyleHelp" class="setting-note">Changes the tray and cabinet icons. Saved on this device.</p>
+    </section>
+    <section class="help-settings" aria-labelledby="assistantTitle">
+      <h3 id="assistantTitle">Assistant</h3>
+      <div class="icon-style-control assistant-control" role="radiogroup" aria-labelledby="assistantTitle" aria-describedby="assistantHelp">
+        <button type="button" role="radio" class="icon-style-option assistant-option" data-assistant-mode="guided" aria-checked="true" tabindex="0">Guided</button>
+        <button type="button" role="radio" class="icon-style-option assistant-option" data-assistant-mode="expert" aria-checked="false" tabindex="-1">Expert</button>
+        <button type="button" role="radio" class="icon-style-option assistant-option" data-assistant-mode="off" aria-checked="false" tabindex="-1">Off</button>
+      </div>
+      <p id="assistantHelp" class="setting-note">Guided shows suggestions. Expert hides them and keeps Ask DIA in the DIA menu and the palette. Off turns off Ask DIA and every Gemini call. Saved on this device.</p>
     </section>
     <form method="dialog"><button class="help-close" autofocus>Close</button></form>
   </dialog>

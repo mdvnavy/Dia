@@ -177,6 +177,7 @@ async function refreshAgentStatus() {
   try {
     const response = await fetch("/api/agent/status");
     const payload = await response.json();
+    geminiConnected = Boolean(payload.configured);
     if (payload.configured) {
       agentStatus.textContent = "Gemini connected";
       agentStatus.classList.add("ok");
@@ -187,7 +188,106 @@ async function refreshAgentStatus() {
   } catch (error) {
     agentStatus.textContent = "status unavailable";
   }
+  refreshFollowupButton();
 }
+
+// --- Assistant mode (persona-ux.md v1.2 §3): Guided / Expert / Off, per device ---
+// Guided: suggestion buttons and Ask DIA. Expert: no suggestions; Ask DIA only from the DIA menu and the palette.
+// Off: no Ask DIA and no Gemini call at all. The <head> script applies the saved value before first paint.
+const ASSISTANT_KEY = "dia-assistant";
+const ASSISTANT_MODES = ["guided", "expert", "off"];
+let assistantMode = ASSISTANT_MODES.includes(document.documentElement.dataset.assistant) ? document.documentElement.dataset.assistant : "guided";
+let geminiConnected = false;
+const agentAiLabel = document.querySelector("#agentAiLabel");
+const agentCancel = document.querySelector("#agentCancel");
+const copyQuestions = document.querySelector("#copyQuestions");
+const followupRow = document.querySelector("#followupRow");
+const draftFollowups = document.querySelector("#draftFollowups");
+const assistantOptions = [...document.querySelectorAll(".assistant-option")];
+let agentController = null;
+
+function applyAssistantMode() {
+  document.documentElement.dataset.assistant = assistantMode;
+  assistantOptions.forEach((option) => {
+    const on = option.dataset.assistantMode === assistantMode;
+    option.setAttribute("aria-checked", String(on));
+    option.tabIndex = on ? 0 : -1;
+  });
+  if (assistantMode === "off") {
+    agentController?.abort();
+    if (document.body.dataset.agent === "open") delete document.body.dataset.agent;
+  }
+  refreshFollowupButton();
+}
+
+function setAssistantMode(mode) {
+  if (!ASSISTANT_MODES.includes(mode)) return;
+  assistantMode = mode;
+  try { localStorage.setItem(ASSISTANT_KEY, mode); } catch (error) { /* session only */ }
+  applyAssistantMode(); // aria-checked announces the change
+}
+
+assistantOptions.forEach((option, index) => {
+  option.addEventListener("click", () => setAssistantMode(option.dataset.assistantMode));
+  option.addEventListener("keydown", (event) => {
+    const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[event.key];
+    if (!step) return;
+    event.preventDefault();
+    const next = assistantOptions[(index + step + assistantOptions.length) % assistantOptions.length];
+    setAssistantMode(next.dataset.assistantMode);
+    next.focus();
+  });
+});
+
+// One centred button under Validation Issues: Guided only, Gemini connected, and only when there are issues.
+function refreshFollowupButton() {
+  if (!followupRow) return;
+  followupRow.hidden = !(assistantMode === "guided" && geminiConnected && latestPayload?.issues?.length);
+}
+
+function showAiReply(text, { questions = false } = {}) {
+  agentOutput.textContent = text;
+  agentAiLabel.hidden = false;
+  copyQuestions.hidden = !questions;
+}
+
+// On click only: one /api/agent call, `Drafting…` with Cancel (AbortController), result in Ask DIA.
+async function draftFollowUpQuestions() {
+  if (assistantMode === "off" || !latestPayload?.issues?.length) return;
+  openAgent();
+  agentController?.abort();
+  agentController = new AbortController();
+  agentAiLabel.hidden = true;
+  copyQuestions.hidden = true;
+  agentCancel.hidden = false;
+  agentOutput.textContent = "Drafting…";
+  draftFollowups.disabled = true;
+  const prompt =
+    "Draft follow-up questions for the client, one per validation issue below. " +
+    "Return only a short numbered list of client-ready questions, with no preamble. " +
+    "Make no promises about price, dates or outcomes." + buildAgentContext();
+  try {
+    const response = await fetch("/api/agent", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: prompt }),
+      signal: agentController.signal,
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "Agent run failed");
+    showAiReply((payload.reply || "").trim() || "(empty response)", { questions: Boolean(payload.reply) });
+  } catch (error) {
+    agentOutput.textContent = error.name === "AbortError" ? "Drafting cancelled" : error.message;
+  } finally {
+    agentCancel.hidden = true;
+    draftFollowups.disabled = false;
+    agentController = null;
+  }
+}
+
+draftFollowups.addEventListener("click", draftFollowUpQuestions);
+agentCancel.addEventListener("click", () => agentController?.abort());
+copyQuestions.addEventListener("click", () => copyText(agentOutput.textContent, "Questions copied", document.querySelector("#aiStatus")));
 
 // Ground the agent in the deterministic run so its answers (scores, missing
 // fields, tier) agree with the tier card instead of re-scoring a lossy
@@ -222,13 +322,16 @@ function buildAgentContext() {
 }
 
 async function sendAgentMessage() {
+  if (assistantMode === "off") return null; // Off: no Gemini call, ever
   const message = agentMessage.value.trim();
   if (!message) {
     agentOutput.textContent = "Type a question for the agent first.";
     return null;
   }
   const context = buildAgentContext();
-  agentOutput.textContent = "Thinking...";
+  agentOutput.textContent = "Thinking…";
+  agentAiLabel.hidden = true;
+  copyQuestions.hidden = true;
   setBusy(runChat, true);
   try {
     const response = await fetch("/api/agent", {
@@ -240,7 +343,7 @@ async function sendAgentMessage() {
     if (!response.ok) {
       throw new Error(payload.error || "Agent run failed");
     }
-    agentOutput.textContent = payload.reply || "(empty response)";
+    showAiReply(payload.reply || "(empty response)");
     return payload.reply || "";
   } catch (error) {
     agentOutput.textContent = error.message;
@@ -257,6 +360,7 @@ runChat.addEventListener("click", async () => {
   }
 });
 
+applyAssistantMode();
 refreshAgentStatus();
 
 copyAll.addEventListener("click", async () => {
@@ -519,6 +623,7 @@ function showResults(payload, questionnaireText) {
   tier.textContent = payload.score.tier;
   score.textContent = `${payload.score.total_score}/${payload.score.max_score} · ${payload.score.timeline}`;
   renderIssues(payload.issues);
+  refreshFollowupButton();
   renderDocument(activeDoc);
   setExportAvailability(true);
   setIntakeCollapsed(true);
@@ -1210,8 +1315,7 @@ shareX.addEventListener("click", () => {
   const scoreInfo = latestPayload.score;
   const text =
     `DIA scored this discovery intake ${scoreInfo.total_score}/${scoreInfo.max_score} ` +
-    `and recommends the "${scoreInfo.tier}" tier. Profile, analysis, and proposal ` +
-    `drafted in seconds by a Gemini ADK agent.`;
+    `and recommends the "${scoreInfo.tier}" tier.`;
   const url = `https://x.com/intent/tweet?text=${encodeURIComponent(text)}`;
   window.open(url, "_blank", "noopener");
   flashStatus(exportStatus, "Opening X share window");
@@ -1235,6 +1339,7 @@ function setStage(stage) {
 
 // Ask DIA can be opened before any intake has run (the agent works on its own).
 function openAgent() {
+  if (assistantMode === "off") return;
   document.body.dataset.agent = "open";
   autosizeComposer(agentMessage);
   agentMessage.focus();
@@ -1470,9 +1575,9 @@ const commands = [
   { id: "run-intake", label: "Run intake", hint: `${modKey} Enter`, enabled: () => !runAgent.disabled && questionnaire.value.trim() !== "", run: () => runAgent.click() },
   { id: "edit-intake", label: "Edit intake", enabled: () => !intakeToggle.hidden && intakeBody.hidden, run: () => { setIntakeCollapsed(false); questionnaire.focus(); } },
   { id: "focus", label: "Focus the input", hint: "/", run: focusComposer },
-  { id: "ask", label: "Ask DIA", run: openAgent },
-  { id: "dictate", label: "Dictate a message", enabled: clickable("#micButton"), run: () => { openAgent(); micButton.click(); } },
-  { id: "conversation", label: "Toggle conversation mode", enabled: clickable("#conversationMode"), run: () => { openAgent(); conversationMode.click(); } },
+  { id: "ask", label: "Ask DIA", enabled: () => assistantMode !== "off", run: openAgent },
+  { id: "dictate", label: "Dictate a message", enabled: () => assistantMode !== "off" && clickable("#micButton")(), run: () => { openAgent(); micButton.click(); } },
+  { id: "conversation", label: "Toggle conversation mode", enabled: () => assistantMode !== "off" && clickable("#conversationMode")(), run: () => { openAgent(); conversationMode.click(); } },
   { id: "tab-profile", label: "View client profile", enabled: hasResults, run: () => selectTab(document.querySelector("#tab-profile"), { focus: true }) },
   { id: "tab-analysis", label: "View opportunity analysis", enabled: hasResults, run: () => selectTab(document.querySelector("#tab-analysis"), { focus: true }) },
   { id: "tab-proposal", label: "View proposal draft", enabled: hasResults, run: () => selectTab(document.querySelector("#tab-proposal"), { focus: true }) },
@@ -1716,7 +1821,7 @@ function createPlusMenu(prefix) {
     menu.replaceChildren();
     const rows = [];
     PLUS_GROUPS.forEach((group) => {
-      const visible = group.rows.filter((row) => !(row.hideIn === prefix) && !(row.kind === "link" && !donateUrl));
+      const visible = group.rows.filter((row) => !(row.hideIn === prefix) && !(row.kind === "link" && !donateUrl) && !(row.id === "ask" && assistantMode !== "guided"));
       if (!visible.length) return;
       if (menu.childElementCount) {
         const sep = document.createElement("div");
@@ -1891,9 +1996,8 @@ document.addEventListener("keydown", (event) => {
 // What happens when a 16th intake is filed. Ikenna chose "drop-oldest" (with an
 // Undo / Export it toast). "block" would refuse to file until one is removed.
 const CABINET_CAP_POLICY = "drop-oldest";
-// Several files dropped at once: "merge" appends them into one questionnaire
-// (provisional, pending Ikenna). "first" keeps only the first readable file.
-const MULTI_FILE_MODE = "merge";
+// Several files dropped at once merge into one questionnaire (Ikenna, flows.md v8.9 §2.3).
+// The merge lives only in the combineExtracted function.
 const CABINET_MAX = 15;
 const CABINET_PAGE = 5;
 const MAX_FILES_PER_DROP = 10;
@@ -1984,7 +2088,7 @@ function syncStateIcons(slots = document.querySelectorAll("[data-icon-on]")) {
 }
 
 // Help & settings: segmented radiogroup (roving tabindex; arrows move and select).
-const iconStyleOptions = [...document.querySelectorAll(".icon-style-option")];
+const iconStyleOptions = [...document.querySelectorAll(".icon-style-option[data-icon-style]")];
 iconStyleOptions.forEach((option, index) => {
   option.addEventListener("click", () => setIconStyle(option.dataset.iconStyle));
   option.addEventListener("keydown", (event) => {
@@ -2122,7 +2226,8 @@ async function extractOne(file, signal) {
   return payload;
 }
 
-// The merge strategy lives in one function so it can become a queue later.
+// Multi-file merge (decided, flows.md v8.9 §2.3): the only place files are joined, kept in one
+// function as a cheap safeguard so it could become a queue later.
 function combineExtracted(existing, parts) {
   const blocks = parts.map((part) => (parts.length > 1 ? `<!-- file: ${part.filename} -->\n${part.questionnaire.trim()}` : part.questionnaire.trim()));
   const joined = blocks.join("\n\n---\n\n");
@@ -2134,7 +2239,6 @@ async function loadIntakeFiles(fileList) {
   if (!files.length) return;
   clearIntakeError();
   const notes = [];
-  if (MULTI_FILE_MODE === "first") files = files.slice(0, 1);
   if (files.length > MAX_FILES_PER_DROP) {
     notes.push(`Only the first ${MAX_FILES_PER_DROP} files were read.`);
     files = files.slice(0, MAX_FILES_PER_DROP);

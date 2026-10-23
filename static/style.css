@@ -1258,3 +1258,21 @@ html:not([data-theme="light"]) .action-btn {
 .action-btn .icon { --accent: currentColor; }
 .action-btn .icon .px { width: 32px; height: 32px; }
 .action-btn.busy .icon { display: none; }
+
+/* Assistant (persona-ux.md v1.2 §3, Glyph §5): no avatar, a DIA mono speaker label, AI text as plain text
+   with a 1px muted left rule, a muted mono "AI draft" label (not a chip), silver only. */
+.trust-off { display: none; }
+html[data-assistant="off"] .trust-on { display: none; }
+html[data-assistant="off"] .trust-off { display: inline; }
+html[data-assistant="off"] .agent,
+html[data-assistant="off"] [data-command="ask"] { display: none !important; }
+html[data-assistant="expert"] body:not([data-agent="open"]) .agent { display: none; }
+.followup { display: flex; flex-direction: column; align-items: center; gap: 2px; margin-top: 12px; }
+.followup[hidden] { display: none; }
+.ai-label { color: var(--muted); font: 500 11px/1.4 var(--mono); letter-spacing: 0; text-transform: none; }
+.response-header .ai-label { margin-left: 8px; }
+.ai-text { border-left: 1px solid var(--muted); padding-left: 12px; }
+.ai-actions { display: flex; justify-content: center; gap: 12px; margin-top: 10px; }
+.assistant-option { padding: 6px 14px; }
+/* Glyph §5.4: silver only inside Ask DIA, in both themes (same pin as the icon-style control). */
+.agent { --accent: #A3A9B1; --accent-ink: var(--text); }
