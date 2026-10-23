@@ -1085,10 +1085,18 @@ navDropdown.addEventListener("keydown", (event) => {
     event.preventDefault();
     const step = event.key === "ArrowDown" ? 1 : -1;
     navItems[(index + step + navItems.length) % navItems.length].focus();
+  } else if (event.key === "Home" || event.key === "End") {
+    event.preventDefault();
+    navItems[event.key === "Home" ? 0 : navItems.length - 1].focus();
   } else if (event.key === "Escape") {
     setNavMenu(false);
     navBrandMenu.focus();
   }
+});
+
+// Tabbing (or otherwise moving focus) out of the menu closes it.
+document.querySelector(".nav-menu-container").addEventListener("focusout", (event) => {
+  if (!event.currentTarget.contains(event.relatedTarget)) setNavMenu(false);
 });
 
 document.addEventListener("click", (event) => {
