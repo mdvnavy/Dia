@@ -245,7 +245,9 @@ def test_ask_429_flow_is_calm(browser, live, monkeypatch):
     # Clicking the aria-disabled Run just re-shows the message; nothing is sent.
     ask(page)
     message = "You've used today's 1 Ask DIA question. More at midnight ET."
-    page.wait_for_function(f"document.querySelector('#status').textContent === {message!r}")
+    # Landing polish (#40): the message is #status's detail slot; on a limit the state word and dot step aside.
+    page.wait_for_function(f"document.querySelector('#statusText').textContent === {message!r}")
+    assert page.inner_text("#status").strip() == message
     assert page.evaluate("document.querySelector('#status').classList.contains('is-limit')")
     page.fill("#agentMessage", "another")
     assert page.is_visible("#runChat") and page.is_editable("#agentMessage")
@@ -290,7 +292,8 @@ def test_mobile_counter_joins_status_line_and_menu(browser, live):
     render(page, 7, 3)
     assert not page.is_visible("#usageMeter")
     assert page.is_visible("#usageInline")
-    line = page.inner_text(".status-line").replace("\n", " ")
+    # Landing polish (#40) moved #status above the bar; the counter copy sits right after it.
+    line = (page.inner_text("#status") + " " + page.inner_text("#usageInline")).replace("\n", " ")
     assert re.sub(r"\s+", " ", line).strip() == "Ready · 7/10 generations · 3/5 Ask DIA"
     assert page.evaluate("!document.querySelector('#menuUsage').hidden")
     page.context.close()
@@ -310,7 +313,7 @@ def test_kill_switch_degrades_ask_dia_calmly(browser, live, monkeypatch):
     monkeypatch.setenv("ASK_DIA_ENABLED", "false")
     page = open_page(browser, live.url)
     sign_in(page)
-    page.wait_for_function("document.querySelector('#agentStatus').textContent === 'Temporarily unavailable'")
+    page.wait_for_function("document.querySelector('#agentStatus').textContent === 'temporarily unavailable'")  # main's #41 wording
     assert page.evaluate("document.querySelector('#runChat').disabled") is True
     page.context.close()
 

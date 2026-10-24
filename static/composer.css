@@ -140,8 +140,8 @@ a.dropdown-item { text-decoration: none; cursor: pointer; }
 }
 /* Ask DIA: same idea as the landing status line. The heading sits 52px above the bar and, while the panel is open,
    slides up 38px into the stage's 56px top margin, so the panel never covers "Ask DIA" or its badge. */
-.agent:has(> h2 + .prompt-bar.has-cmp) { margin-top: 56px; }   /* was 40px: room for the slide, ~18px air kept above */
-.agent > h2:has(+ .prompt-bar.has-cmp) { transition: translate 120ms linear; }
+.agent:has(> h2 ~ .prompt-bar.has-cmp) { margin-top: 56px; }   /* was 40px: room for the slide, ~18px air kept above */
+.agent > h2:has(~ .prompt-bar.has-cmp) { transition: translate 120ms linear; }
 .agent:has(#agentVoiceNotch[aria-expanded="true"]) > h2 {
   translate: 0 -38px; transition: translate var(--dia-dur-run-in, 180ms) var(--dia-ease-out, cubic-bezier(0.16, 1, 0.3, 1));
 }
@@ -198,7 +198,7 @@ a.dropdown-item { text-decoration: none; cursor: pointer; }
    the circles read larger than in light. Same geometry as light (0 4px 12px), dark-theme ink. Light is untouched. */
 html:not([data-theme="light"]) .action-btn.cmp-circle:not(:hover, :focus-visible, [aria-disabled="true"]) { box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45), inset 0 2px 2px rgba(255, 255, 255, 0.6), inset 0 -2px 3px rgba(0, 0, 0, 0.3); }
 /* Ask DIA: the floating handle needs clear air under the heading's badge. */
-.agent > h2 + .prompt-bar.has-cmp { margin-top: 52px; }
+.agent > h2 ~ .prompt-bar.has-cmp { margin-top: 52px; }
 
 /* Plus menu viewport guard (createPlusMenu placeMenu, Glyph review): flipped below the bar when there's more room
    there; otherwise it opens upward with its top clamped 8px below the 52px letterhead band and its height capped at

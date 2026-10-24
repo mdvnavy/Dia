@@ -22,7 +22,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 # The only routes allowed to work signed out. Adding to this list is a
 # product decision ("read and peruse"), not a refactor.
-PUBLIC_GET = {"/healthz", "/health", "/api/config", "/api/auth/config", "/api/agent/status"}
+# /api/consulting (main, #39 follow-up) is read-only display config, like /api/config.
+PUBLIC_GET = {"/healthz", "/health", "/api/config", "/api/consulting", "/api/auth/config", "/api/agent/status"}
 PUBLIC_POST = {"/api/auth/session", "/api/auth/logout"}
 
 GATED = sorted(
@@ -35,6 +36,8 @@ BODIES = {
     "/api/agent": {"message": "hello"},
     "/api/pdf": {"questionnaire": "Company: Example"},
     "/api/extract": None,
+    # main's rescore of a saved result (deterministic, never charged): a real saved run from the sample.
+    "/api/rescore": {"result": app.build_intake_response(app.read_sample_questionnaire())},
 }
 
 
@@ -47,6 +50,7 @@ def test_audited_route_list_is_exactly_this():
         ("POST", "/api/extract"),
         ("POST", "/api/pdf"),
         ("POST", "/api/process"),
+        ("POST", "/api/rescore"),
     ]
     assert {p for p, (_, g) in app.GET_ROUTES.items() if not g} == PUBLIC_GET
     assert {p for p, (_, g) in app.POST_ROUTES.items() if not g} == PUBLIC_POST
@@ -138,7 +142,7 @@ def test_signed_in_passes_the_gate(server, method, path):
 
 @pytest.mark.parametrize(
     "path",
-    ["/", "/how-it-works", "/healthz", "/health", "/api/config", "/api/auth/config",
+    ["/", "/how-it-works", "/healthz", "/health", "/api/config", "/api/consulting", "/api/auth/config",
      "/api/agent/status", "/static/style.css", "/static/app.js", "/static/google-signin.js"],
 )
 def test_read_only_pages_work_signed_out(server, path):
