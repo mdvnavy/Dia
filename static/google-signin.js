@@ -152,6 +152,15 @@
     await refreshState();
   });
 
+  // Glyph (#48 dark-mode fix): Google's button iframe paints an opaque white
+  // canvas when its container's color-scheme (dark) differs from the iframe's
+  // (light). The containers are pinned to color-scheme: light in style.css, and
+  // the button itself follows the page theme: filled_black on dark, outline on
+  // light. It is re-rendered when the theme toggles or the system scheme changes.
+  function buttonTheme() {
+    return document.documentElement.dataset.theme === "light" ? "outline" : "filled_black";
+  }
+
   function startGis(clientId) {
     const script = document.createElement("script");
     script.src = GIS_SRC;
@@ -161,20 +170,45 @@
       const gis = window.google && window.google.accounts && window.google.accounts.id;
       if (!gis) return;
       gis.initialize({ client_id: clientId, callback: onCredential, auto_select: false });
-      gis.renderButton(gisSlot, { type: "standard", theme: "outline", size: "small", text: "signin", shape: "rectangular" });
+      const renderers = [];
+
+      let headerKey = "";
+      const renderHeader = () => {
+        const theme = buttonTheme();
+        if (theme === headerKey) return;
+        headerKey = theme;
+        gisSlot.replaceChildren();
+        gis.renderButton(gisSlot, { type: "standard", theme, size: "small", text: "signin", shape: "rectangular" });
+      };
+      renderHeader();
+      renderers.push(renderHeader);
+
       gateSlots.forEach((gateSlot) => {
-        // Tia's sign-in card button: outline, large, "Sign in with", pill, fitted width.
-        let renderedWidth = 0;
+        // Tia's sign-in card button: large, "Sign in with", pill, width fitted to
+        // the slot (the composer bar's width, capped at Google's 400px maximum).
+        let renderedKey = "";
         const fit = () => {
           const width = Math.min(400, Math.floor(gateSlot.getBoundingClientRect().width));
-          if (width <= 0 || width === renderedWidth) return;
-          renderedWidth = width;
+          if (width <= 0) return;
+          const theme = buttonTheme();
+          const key = width + "|" + theme;
+          if (key === renderedKey) return;
+          renderedKey = key;
           gateSlot.replaceChildren();
-          gis.renderButton(gateSlot, { theme: "outline", size: "large", text: "signin_with", shape: "pill", width: String(width) });
+          gis.renderButton(gateSlot, { theme, size: "large", text: "signin_with", shape: "pill", width: String(width) });
         };
         fit();
+        renderers.push(fit);
         if (typeof ResizeObserver !== "undefined") new ResizeObserver(fit).observe(gateSlot);
       });
+
+      // Re-render on theme toggle (app.js sets <html data-theme>) and on a system scheme change.
+      const rerender = () => renderers.forEach((render) => render());
+      if (typeof MutationObserver !== "undefined") {
+        new MutationObserver(rerender).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+      }
+      const scheme = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+      if (scheme && scheme.addEventListener) scheme.addEventListener("change", rerender);
     };
     document.head.append(script);
   }
