@@ -9,6 +9,13 @@
       "text": "The bell at the top shows what changed. A dot means something is new. Rest on it or tap it for the latest changes, or choose See all changes for the full list."
     },
     {
+      "key": "pr-50",
+      "pr": 50,
+      "date": "2026-10-23",
+      "title": "A clearer sign-in button in dark mode",
+      "text": "In dark mode, the Google sign-in button no longer sits in a white box."
+    },
+    {
       "key": "pr-48",
       "pr": 48,
       "date": "2026-10-23",
