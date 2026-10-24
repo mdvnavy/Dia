@@ -571,8 +571,13 @@ body[data-stage="results"] .subtitle { font-size: 15px; margin-bottom: 1.75rem; 
 .dot-sep.is-break { flex-basis: 100%; height: 0; margin-top: 8px; overflow: hidden; visibility: hidden; font-size: 0; line-height: 0; }
 .actions.under-prompt:has(> .dot-sep.is-break) { row-gap: 0; }
 
-#status {
+.status-line {
   flex-basis: 100%;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+#status {
   color: var(--muted);
   font-family: var(--mono);
   font-size: 12px;
@@ -1257,6 +1262,7 @@ html:not([data-theme="light"]) .action-btn {
 .action-btn .icon .px { width: 32px; height: 32px; }
 .action-btn.busy .icon { display: none; }
 
+
 /* Assistant (persona-ux.md v1.2 §3, Glyph §5): no avatar, a DIA mono speaker label, AI text as plain text
    with a 1px muted left rule, a muted mono "AI draft" label (not a chip), silver only. */
 .trust-off { display: none; }
@@ -1310,3 +1316,85 @@ html[data-assistant="expert"] body:not([data-agent="open"]) .agent { display: no
 .drawer-card.is-removing { overflow: hidden; opacity: 0; margin-top: -10px; pointer-events: none;
   transition: height 180ms ease, opacity 120ms linear, margin-top 180ms ease; }
 @media (prefers-reduced-motion: reduce) { .drawer-card.is-removing { transition: none; } }
+
+/* ---- Daily usage counter + sign-in gate (Glyph lockdown v2) ----
+   Existing tokens only (--muted, --text, --border): no new colours, no red, no mustard. */
+.lh-usage {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font: 500 11px/1 var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--muted);
+  border-radius: 6px;
+}
+.lh-usage:focus-visible { outline: 2px solid var(--lh-ring); outline-offset: 2px; }
+.lh-usage[hidden], .lh-usage-divider[hidden], .lh-usage-owner[hidden], .lh-usage-item[hidden],
+.lh-usage-sep[hidden], .usage-inline[hidden], .lh-menu-usage[hidden],
+.signin-gate[hidden], .signin-gate-text[hidden] { display: none; }
+.lh-usage-item { display: inline-flex; align-items: center; gap: 6px; }
+.lh-usage-label { color: var(--muted); }
+.lh-usage-num, .usage-inline .usage-num { color: var(--text); font-variant-numeric: tabular-nums; }
+.lh-usage-sep { color: var(--muted); }
+.lh-usage-owner { color: var(--muted); }
+.lh-usage-dot { display: none; width: 6px; height: 6px; border-radius: 50%; box-sizing: border-box; flex: none; }
+[data-level="low"] > .lh-usage-dot { display: inline-block; border: 1px solid var(--text); background: transparent; }
+[data-level="zero"] > .lh-usage-dot { display: inline-block; border: 1px solid var(--text); background: var(--text); }
+[data-level="low"] > .lh-usage-num, [data-level="zero"] > .lh-usage-num,
+.usage-num[data-level="low"], .usage-num[data-level="zero"] { font-weight: 600; }
+/* 1px --border divider, 12px tall, 16px either side, between the counter and Search actions. */
+/* The corner already spaces items by --lh-gap, so the margin only tops it up to 16px. */
+.lh-usage-divider { display: inline-block; width: 1px; height: 12px; margin: 0 calc(16px - var(--lh-gap)); background: var(--border); flex: none; }
+/* Mobile status-line copy of the counter; hidden on desktop. */
+.usage-inline { display: none; }
+.usage-inline .usage-label { color: var(--muted); }
+#status.is-limit { color: var(--text); }
+/* On a limit the calm message stands alone: the Ready/Error word and its dot step aside (landing polish status line). */
+#status.is-limit .status-state, #status.is-limit .status-dot { display: none; }
+/* Run stays visible when today's allowance is used: aria-disabled, never removed. */
+/* Same disabled language as the composer (composer-icons.css): dashed ring, dimmed icon. */
+.cmp-enter[aria-disabled="true"] .icon > * { opacity: 0.4; }
+.lh-menu-usage { display: none; }
+
+/* Glyph specifies 1280 (header) and <=600 (status line). Between them the
+   header has no room beside the centred clock, so the status-line form is used. */
+@media (max-width: 1279px) {
+  .lh-usage, .lh-usage-divider { display: none; }
+  .usage-inline:not([hidden]) { display: inline; }
+  /* On a 429 the status line carries the calm message alone (the counts are already 0). */
+  #status.is-limit + .usage-inline { display: none; }
+  .lh-menu-usage:not([hidden]) { display: flex; flex-direction: column; margin-top: 6px; }
+}
+
+/* Same status-line form when the header measures too tight beside the centre slot (app.js fitUsageMeter). */
+body[data-usage-fit="inline"] .lh-usage, body[data-usage-fit="inline"] .lh-usage-divider { display: none; }
+body[data-usage-fit="inline"] .usage-inline:not([hidden]) { display: inline; }
+body[data-usage-fit="inline"] #status.is-limit + .usage-inline { display: none; }
+body[data-usage-fit="inline"] .lh-menu-usage:not([hidden]) { display: flex; flex-direction: column; margin-top: 6px; }
+
+/* Signed-out visitors read; they don't run. The composer area becomes a quiet prompt. */
+.signin-gate {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 20px 16px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+  text-align: center;
+}
+.signin-gate-text { margin: 0; color: var(--muted); font: 400 14px/1.5 var(--sans); }
+/* Ask DIA gate: the same line plus the same Sign in with Google button as the landing card (Glyph, #48 review). */
+.signin-gate-ask { display: flex; flex-direction: column; align-items: center; gap: 12px; margin: 8px 0 0; text-align: center; }
+.signin-gate-ask[hidden] { display: none; }
+.signin-gate-button { display: flex; justify-content: center; width: 100%; max-width: 400px; min-height: 40px; }
+.signin-gate-button[hidden] { display: none; }
+body[data-auth="signed-out"] .intake-stage .dock-row,
+body[data-auth="signed-out"] #intakeBody,
+body[data-auth="signed-out"] #fileChips,
+body[data-auth="signed-out"] [data-needs-auth],
+body[data-auth="signed-out"] #agentComposer,
+body[data-auth="signed-out"] #agentStage .under-prompt { display: none; }

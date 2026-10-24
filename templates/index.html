@@ -49,7 +49,7 @@
     })();
   </script>
 </head>
-<body data-stage="landing">
+<body data-stage="landing" data-auth="pending">
   <a id="skipLink" class="skip-link" href="#questionnaire">Skip to questionnaire</a>
 
   <!-- Mouse-reactive liquid filter for the wordmark (same engine as Tia). -->
@@ -76,6 +76,8 @@
             <div class="lh-menu-context" aria-hidden="true">
               <div class="lh-menu-stage" id="menuStage">Discovery intake · Questionnaire</div>
               <div>Discovery Intake Agent / Gemini ADK</div>
+              <!-- Usage reset line (mobile, signed-in free users): app.js fills it. -->
+              <div class="lh-menu-usage" id="menuUsage" hidden><span>Signed in</span><span id="menuUsageReset">Resets at midnight ET</span></div>
             </div>
             <button class="dropdown-item" role="menuitem" type="button" data-command="new-intake">New intake</button>
             <button class="dropdown-item" role="menuitem" type="button" data-command="load-sample">Load sample</button>
@@ -128,6 +130,16 @@
         </span>
       </div>
       <div class="lh-corner lh-corner--right">
+        <!-- Daily usage (Glyph lockdown v2). Display only: the server's numbers from /api/usage and
+             each run's response; the server alone enforces the limits. Shown only when signed in. -->
+        <span id="usageMeter" class="lh-usage" role="status" aria-live="off" aria-atomic="true" aria-describedby="usageReset" tabindex="0" hidden>
+          <span class="lh-usage-item" data-bucket="generations" data-level="ok"><span class="lh-usage-dot" aria-hidden="true"></span><span class="lh-usage-num">-</span> <span class="lh-usage-label">generations left</span></span>
+          <span class="lh-usage-sep" aria-hidden="true">·</span>
+          <span class="lh-usage-item" data-bucket="ask" data-level="ok"><span class="lh-usage-dot" aria-hidden="true"></span><span class="lh-usage-num">-</span> <span class="lh-usage-label">Ask DIA left</span></span>
+          <span class="lh-usage-owner" hidden>Owner · unlimited</span>
+        </span>
+        <span id="usageReset" class="visually-hidden"></span>
+        <span class="lh-usage-divider" id="usageDivider" aria-hidden="true" hidden></span>
         <button id="paletteTrigger" class="lh-control lh-search" type="button" aria-haspopup="dialog" aria-controls="commandPalette">
           <span class="lh-search-label">Search actions</span>
           <kbd class="kbd-hint" id="paletteShortcutHint">⌘K</kbd>
@@ -151,7 +163,14 @@
           <!-- Run status (landing polish): dot + state word + optional detail. #statusText is the detail slot every
                message writes to; setRunState() sets data-state ready | processing | complete | error. -->
           <p id="status" class="run-status" role="status" aria-live="polite" aria-atomic="true" data-state="ready"><span class="status-dot" aria-hidden="true"></span><span id="statusState" class="status-state">Ready</span><span id="statusText" class="status-detail"></span></p>
+          <!-- Lockdown v2: mobile status-line copy of the daily counter, right after #status (CSS: #status.is-limit + .usage-inline). -->
+          <span id="usageInline" class="usage-inline" aria-hidden="true" hidden></span>
           <button id="intakeToggle" class="text-link" type="button" aria-expanded="true" aria-controls="intakeBody" hidden>Collapse intake</button>
+        </div>
+        <!-- Signed-out: read-only. The composer is replaced by a quiet sign-in prompt (same gate as Tia). -->
+        <div class="signin-gate" id="signInGate" hidden>
+          <p class="signin-gate-text" id="signInGateText">Sign in with Google to run an intake and ask DIA.</p>
+          <span class="signin-gate-button" id="signInGateButton"></span>
         </div>
         <!-- Intake tray (upload) and filing cabinet (this session's intakes). Icons by Glyph. -->
         <div class="dock-row">
@@ -229,11 +248,11 @@
           <p class="inputs-prompt-foot">Prefer a hand? <span id="inputsPromptName">Bash Systems &amp; Services</span> offers business consulting.<span id="inputsPromptServices" hidden> <a id="inputsPromptLink" href="#" target="_blank" rel="noopener noreferrer">See services</a></span></p>
         </section>
         <div class="actions under-prompt">
-          <button id="uploadLink" class="text-link" type="button">Upload a file</button>
-          <button id="uploadCancel" class="text-link" type="button" hidden>Cancel</button>
-          <span class="dot-sep" aria-hidden="true">·</span>
-          <button id="loadSample" class="text-link" type="button">Load sample</button>
-          <span class="dot-sep" aria-hidden="true">·</span>
+          <button id="uploadLink" class="text-link" type="button" data-needs-auth>Upload a file</button>
+          <button id="uploadCancel" class="text-link" type="button" data-needs-auth hidden>Cancel</button>
+          <span class="dot-sep" aria-hidden="true" data-needs-auth>·</span>
+          <button id="loadSample" class="text-link" type="button" data-needs-auth>Load sample</button>
+          <span class="dot-sep" aria-hidden="true" data-needs-auth>·</span>
           <button type="button" class="text-link help-link" data-command="help" aria-haspopup="dialog" aria-controls="diaHelpDialog">Learn how to use DIA</button>
         </div>
           <p class="prompt-callout" id="intakeNote"><span class="trust-on">Scoring is deterministic. Only Ask DIA and its suggestions send text to Gemini.</span><span class="trust-off">Nothing leaves this browser except the deterministic run.</span></p>
@@ -242,6 +261,7 @@
       <!-- Ask DIA: the live Gemini agent, in the same composer. -->
       <div class="prompt-wrapper agent" id="agentStage">
         <h2>Ask DIA <small id="agentStatus" class="agent-state">checking...</small></h2>
+        <div class="signin-gate-ask" id="signInGateAsk" hidden><p class="signin-gate-text">Sign in with Google to ask DIA.</p><span class="signin-gate-button" id="signInGateAskButton" hidden></span></div>
         <div class="prompt-bar composer has-mic has-cmp" id="agentComposer" data-empty="true">
             <!-- Composer v2 (glyph/composer-icons.md, flows v8.8 2.5-2.8): [+] textarea [mic] [Run], and a floating notch
                  (a small handle bar just above the bar; landing polish). Notch: hover opens the voice fan after 120ms (pointer), tap toggles (touch), Enter/Space/ArrowDown open it on Listen,
@@ -514,6 +534,7 @@
 
   <script src="/static/vendor/jszip.min.js" defer></script>
   <script src="/static/app.js"></script>
+  <script src="/static/google-signin.js"></script>
   <script src="/static/whats-new.js"></script>
 </body>
 </html>

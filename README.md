@@ -163,9 +163,135 @@ python app.py   # forwarded port 8080
 | GET    | `/`                   | Web demo UI                               |
 | GET    | `/healthz`            | Cloud Run health check                    |
 | GET    | `/api/sample`         | Returns the sample questionnaire markdown |
-| GET    | `/api/agent/status`   | Reports whether a Gemini key is configured|
+| GET    | `/api/agent/status`   | Gemini key configured? + agent auth mode  |
 | POST   | `/api/process`        | Deterministic parse/score/generate        |
 | POST   | `/api/agent`          | Live Gemini ADK agent turn                |
+
+## Access and usage limits (lockdown v2)
+
+**No use without signing in, same as Tia.** Signed out, anyone can read and
+browse: the landing page, How it works, the business card link, static
+assets, `/api/config` and health checks. Every functional route needs a
+verified Google sign-in and otherwise answers **401
+`{"error": "sign_in_required"}`** before reading the body or doing any work.
+The UI shows a calm "Sign in with Google" prompt where the composer and Run
+would be.
+
+| Route | Signed out | Signed in (free) | Charged |
+| ----- | ---------- | ---------------- | ------- |
+| `GET /`, static files, `/healthz`, `/health`, `/api/config`, `/api/auth/config`, `/api/agent/status` | 200 | 200 | no |
+| `POST /api/auth/session`, `POST /api/auth/logout` | public (IP-hash burst guard) | — | no |
+| `POST /api/process` | 401 | 10 generations/day | 1 generation |
+| `POST /api/pdf` with `{questionnaire}` | 401 | counts as a generation | 1 generation |
+| `POST /api/pdf` with `{result}` (re-render a saved run) | 401 | export | no |
+| `POST /api/agent` | 503 if `ASK_DIA_ENABLED` off, else 401 | 5 Ask DIA/day | 1 Ask DIA |
+| `POST /api/extract`, `GET /api/sample` | 401 | allowed | no |
+| `GET /api/usage` | 401 | the caller's counts | no |
+
+Routes live in one table in `app.py` (`GET_ROUTES` / `POST_ROUTES`), and
+`tests/test_sign_in_gate.py` fails if a route is added outside it or ungated
+without being on the public allow-list.
+
+**Owners.** `OWNER_EMAILS` is a comma list. A user is an owner only when the
+verified ID token's `email` (with `email_verified: true`) matches an entry,
+trimmed and case-insensitive. Owners are uncapped and skip the burst guards.
+Nothing the client sends (body fields, headers, other cookies) can make
+someone an owner.
+
+**Sign-in.** Google Identity Services gives the browser an ID token, which is
+POSTed once to `/api/auth/session`. The server verifies it with `google-auth`
+(signature, `aud` = `GOOGLE_CLIENT_ID`, `iss`, `exp`, `email_verified`) and
+sets `dia_session`: HttpOnly, SameSite=Lax, Secure on Cloud Run, HMAC-signed
+with `DIA_SESSION_SECRET`, bound to the token's `sub` and the client ID, and
+valid for 2 hours by default. Tampered, expired or foreign cookies are
+refused. Replaying the same Google token just mints another cookie for the
+same `sub`, so it never adds quota.
+
+**Counting.** Counts are keyed on an HMAC of the verified `sub`
+(`DIA_VISITOR_SALT`), never on IPs, cookies or anything client-side. A unit is
+charged atomically **before** the work and refunded on a server error. The
+day resets at midnight America/Toronto. At the cap the server answers **429**
+`{"error": "daily_limit", "bucket", "message", "usage"}` with `Retry-After`;
+the message is calm ("You've used today's 5 Ask DIA questions. More at
+midnight ET.") with no price and no urgency. A per-user burst guard (3 per 10
+seconds) sits in front.
+
+**Where counts live.** `DIA_QUOTA_STORE=firestore` keeps counters in a
+Firestore **Native-mode** database (`DIA_FIRESTORE_DATABASE`, planned
+`dia-quota`, because the project's `(default)` database is Datastore mode).
+Each charge is a read-write transaction (`beginTransaction` → read →
+`commit`), retried with jittered backoff on `ABORTED`, so parallel requests
+can't overspend. Documents carry `expire_at`; add a TTL policy on that field.
+Without Firestore, counters are in memory per instance. If Firestore is down,
+Ask DIA fails closed (503 `quota_unavailable`) and generations fall back to
+the per-instance memory store.
+
+**Client IP.** Only the sign-in burst guard uses an IP, as a salted hash. On
+Cloud Run the **right-most** `X-Forwarded-For` entry is used: Google's front
+end appends the address it saw, and everything to its left is client-supplied
+and forgeable. If the service is ever put behind an external load balancer,
+revisit this (the right-most entry would be the balancer).
+
+**Kill switch.** Ask DIA is **off unless `ASK_DIA_ENABLED` is exactly
+`1`/`true`/`yes`/`on`**. Off, `/api/agent` answers **503** with
+`Retry-After: 3600` before sign-in, the body, the quota store or Gemini, for
+owners too. The intake tools keep working.
+
+**Usage counter.** Signed in, the top bar shows `GENERATIONS 7/10 · ASK DIA
+3/5` (owners see `OWNER · UNLIMITED`). It is display-only: it is filled from
+`GET /api/usage` and from the `usage` field of each run's response.
+
+MCP toolsets are attached only via `DIA_AGENT_MCP_MODE` (`none` by default, or
+`make`, `gcp`, `all`); words in a prompt never switch tools on.
+
+| Variable | Default | Purpose |
+| -------- | ------- | ------- |
+| `ASK_DIA_ENABLED` | off | Kill switch: only `1`/`true`/`yes`/`on` enable Ask DIA. |
+| `GOOGLE_CLIENT_ID` | unset | OAuth Web client ID (public). Unset = nobody can sign in. |
+| `DIA_SESSION_SECRET` | unset | Signs session cookies (≥32 chars, from Secret Manager). |
+| `DIA_SESSION_TTL_SECONDS` | `7200` | Session lifetime (clamped to 5 min–12 h). |
+| `OWNER_EMAILS` | unset | Comma list of owner emails (verified email only). |
+| `DIA_GENERATION_DAILY_LIMIT` | `10` | Generations per user per day. |
+| `DIA_ASK_DAILY_LIMIT` | `5` | Ask DIA questions per user per day. |
+| `DIA_QUOTA_STORE` | `memory` | `firestore` for counts shared across instances. |
+| `DIA_FIRESTORE_PROJECT` / `DIA_FIRESTORE_DATABASE` / `DIA_FIRESTORE_COLLECTION` | ADC project / `(default)` / `dia_agent_quota` | Firestore location (use a Native-mode DB, e.g. `dia-quota`). |
+| `DIA_VISITOR_SALT` | built-in | Secret salt for hashing user ids and IPs (set it in production). |
+| `DIA_BURST_LIMIT` | `3/10` | Per-user burst guard for generations and Ask DIA. |
+| `DIA_UTILITY_BURST_LIMIT` | `10/10` | Per-user burst guard for extract and PDF export. |
+| `DIA_AUTH_RATE_LIMIT` | `10/60` | Sign-in attempts per salted IP hash. |
+| `DIA_TRUST_FORWARDED_FOR` | off | Trust `X-Forwarded-For` off Cloud Run (behind your own proxy). |
+| `DIA_LOCAL_DEV_NO_SIGN_IN` | off | **Local only.** Treat sessionless requests as an uncapped developer. Ignored on Cloud Run; never set it on a public deployment. |
+
+### Sign-in: same scheme as Tia
+
+Token verification is ported from Tia (`mdvnavy/tia-sia`, `packages/auth/tokens.py`
+`GoogleTokenVerifier`): `google.oauth2.id_token.verify_oauth2_token` checks the
+RS256 signature against Google's published keys, `aud` = `GOOGLE_CLIENT_ID` and
+`exp`; then `iss` must be `accounts.google.com`, and `email`, `email_verified=true`
+and `sub` must all be present. The same error classes are used (expired, audience,
+issuer, tampered, unverified). The frontend wiring matches Tia: the GIS script,
+`initialize({client_id, callback})`, the outline/large/"Sign in with"/pill button at
+fitted width, and the credential sent as `Authorization: Bearer <id token>` to
+`POST /api/auth/session`. The response carries Tia's `status`, `authorized`,
+`message` and `user` (sub, email, name), plus DIA's `signed_in`, `email` and `owner`.
+
+Deliberate differences:
+
+- **Cookie session instead of a Bearer token on every call.** Tia keeps the ID token
+  in `sessionStorage` and verifies it on each request. DIA swaps it once for a signed
+  HttpOnly `dia_session` cookie (HMAC, bound to `sub`, `aud` and `email_verified`,
+  2 h by default). That way scripts on the page can't read it, a raw ID token can't
+  unlock functional routes, and quota stays keyed on `sub`.
+- **10 s clock skew** (Tia: 0), so a fresh token isn't rejected over a small clock drift.
+- **No invites, profiles or waitlist.** Every verified Google account gets the free
+  tier, and `OWNER_EMAILS` (verified email only) is uncapped.
+- **Fails closed.** A missing `GOOGLE_CLIENT_ID` or a missing or short
+  `DIA_SESSION_SECRET` disables sign-in (404). Every functional route then returns
+  401, including requests carrying a previously valid cookie.
+
+`tests/test_sign_in_flow.py` exercises the real verifier with a locally generated RSA
+key. A stub transport serves its public key at Google's certs URL, in both x509 and
+JWKS form, so no network is used.
 
 ## Submission hygiene
 

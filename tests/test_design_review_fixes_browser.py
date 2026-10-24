@@ -31,8 +31,12 @@ GOLD = "rgb(200, 169, 110)"
 def base_url():
     os.environ.pop("MEMORY_SHEET_ID", None)
     os.environ.pop("OBS_CAPTURE", None)
-    previous = os.environ.get("ASK_DIA_ENABLED")
-    os.environ["ASK_DIA_ENABLED"] = "true"  # Ask DIA composer layout is checked too (kill switch itself is untouched)
+    # Ask DIA composer layout is checked too (kill switch itself is untouched). Since #48 an unconfigured Ask DIA reads
+    # "temporarily unavailable" and hides Run, so give it a Vertex-only config like live (no model call is made).
+    overrides = {"ASK_DIA_ENABLED": "true", "GOOGLE_GENAI_USE_VERTEXAI": "TRUE",
+                 "GOOGLE_CLOUD_PROJECT": "dia-test-project", "GOOGLE_CLOUD_LOCATION": "global"}
+    previous = {name: os.environ.get(name) for name in overrides}
+    os.environ.update(overrides)
     server = ThreadingHTTPServer(("127.0.0.1", 0), ClientDiscoveryHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -41,10 +45,11 @@ def base_url():
     finally:
         server.shutdown()
         server.server_close()
-        if previous is None:
-            os.environ.pop("ASK_DIA_ENABLED", None)
-        else:
-            os.environ["ASK_DIA_ENABLED"] = previous
+        for name, value in previous.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
 
 
 @pytest.fixture(scope="module")

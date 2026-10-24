@@ -82,6 +82,193 @@ function setBusy(button, busy) {
   button.classList.toggle("busy", busy);
 }
 
+// --- Daily usage counter + sign-in gate (lockdown v2) -----------------------
+// Display only. The numbers always come from the server (/api/usage or the
+// "usage" field of a run's response); nothing here is stored or trusted.
+const usageMeter = document.querySelector("#usageMeter");
+const usageReset = document.querySelector("#usageReset");
+const usageDivider = document.querySelector("#usageDivider");
+const usageInline = document.querySelector("#usageInline");
+const menuUsage = document.querySelector("#menuUsage");
+const signInGate = document.querySelector("#signInGate");
+const signInGateAsk = document.querySelector("#signInGateAsk");
+const RESET_NOTE = "Resets at midnight ET.";
+const LIMIT_TEXT = {
+  generations: (limit) => `You've used today's ${limit} generation${limit === 1 ? "" : "s"}. More at midnight ET.`,
+  ask: (limit) => `You've used today's ${limit} Ask DIA question${limit === 1 ? "" : "s"}. More at midnight ET.`,
+};
+// Counter wording (Glyph, #48 review): "N left", same words and order in the header and the status line:
+// "7 generations left · 3 Ask DIA left". The full sentence (title / usageReset) stays "… left today. Resets …".
+const USAGE_LABEL = {
+  generations: (n) => `generation${n === 1 ? "" : "s"} left`,
+  ask: () => "Ask DIA left",
+};
+let lastUsage = null;
+
+function usageLevel(bucket) {
+  if (!bucket || bucket.remaining <= 0) return "zero";
+  return bucket.remaining === 1 ? "low" : "ok";
+}
+
+function usageSentence(usage) {
+  const g = usage.generations.remaining;
+  const a = usage.ask.remaining;
+  return `${g} generation${g === 1 ? "" : "s"} and ${a} Ask DIA question${a === 1 ? "" : "s"} left today. ${RESET_NOTE}`;
+}
+
+function setRunLimited(button, bucketName, usage) {
+  if (!button) return;
+  const bucket = usage && !usage.unlimited ? usage[bucketName] : null;
+  if (bucket && bucket.remaining <= 0) {
+    button.setAttribute("aria-disabled", "true");
+    button.title = LIMIT_TEXT[bucketName](bucket.limit);
+  } else if (button.getAttribute("aria-disabled") === "true") {
+    button.removeAttribute("aria-disabled");
+    button.removeAttribute("title");
+  }
+}
+
+// The header counter must clear the centre slot (clock + What's new mark) by 16px. When the header can't fit it
+// (e.g. 1280 since #47 hung the mark off the clock), use the status-line form instead, same as below 1280.
+const usageCentre = document.querySelector(".lh-centre-slot");
+function fitUsageMeter() {
+  if (!usageMeter || !usageCentre) return;
+  document.body.removeAttribute("data-usage-fit");
+  if (usageMeter.hidden || !usageMeter.offsetParent) return;
+  if (usageMeter.getBoundingClientRect().left < usageCentre.getBoundingClientRect().right + 16) {
+    document.body.dataset.usageFit = "inline";
+  }
+}
+window.addEventListener("resize", () => { if (lastUsage) fitUsageMeter(); });
+
+function renderUsage(usage) {
+  if (!usageMeter) return;
+  const signedIn = Boolean(usage && usage.signed_in);
+  usageMeter.hidden = !signedIn;
+  usageDivider.hidden = !signedIn;
+  if (!signedIn) {
+    lastUsage = null;
+    document.body.removeAttribute("data-usage-fit");
+    usageInline.hidden = true;
+    menuUsage.hidden = true;
+    usageReset.textContent = "";
+    return;
+  }
+  lastUsage = usage;
+  const items = usageMeter.querySelectorAll(".lh-usage-item");
+  const sep = usageMeter.querySelector(".lh-usage-sep");
+  const owner = usageMeter.querySelector(".lh-usage-owner");
+  if (usage.unlimited) {
+    items.forEach((item) => { item.hidden = true; });
+    sep.hidden = true;
+    owner.hidden = false;
+    usageMeter.removeAttribute("title");
+    usageMeter.removeAttribute("aria-describedby");
+    usageReset.textContent = "";
+    usageInline.hidden = true;
+    menuUsage.hidden = true;
+  } else {
+    owner.hidden = true;
+    sep.hidden = false;
+    items.forEach((item) => {
+      const bucket = usage[item.dataset.bucket];
+      item.hidden = false;
+      item.dataset.level = usageLevel(bucket);
+      item.querySelector(".lh-usage-num").textContent = String(bucket.remaining);
+      item.querySelector(".lh-usage-label").textContent = USAGE_LABEL[item.dataset.bucket](bucket.remaining);
+    });
+    const sentence = usageSentence(usage);
+    usageMeter.title = sentence;
+    usageMeter.setAttribute("aria-describedby", "usageReset");
+    usageReset.textContent = sentence;
+    // Below the header form, the counter sits on its own line right under the status, with the header's wording
+    // and order ("7 generations left · 3 Ask DIA left"). #status is its own line since landing polish, so there's no
+    // leading separator.
+    usageInline.replaceChildren();
+    for (const name of ["generations", "ask"]) {
+      if (usageInline.childNodes.length) usageInline.append(" · ");
+      const bucket = usage[name];
+      const num = document.createElement("span");
+      num.className = "usage-num";
+      num.dataset.level = usageLevel(bucket);
+      num.textContent = String(bucket.remaining);
+      const text = document.createElement("span");
+      text.className = "usage-label";
+      text.textContent = ` ${USAGE_LABEL[name](bucket.remaining)}`;
+      usageInline.append(num, text);
+    }
+    usageInline.hidden = false;
+    menuUsage.hidden = false;
+  }
+  fitUsageMeter();
+  setRunLimited(runAgent, "generations", usage);
+  setRunLimited(runChat, "ask", usage);
+  // Silent on the first fill (page load); announce only later changes, which
+  // only ever happen after a run.
+  if (usageMeter.dataset.filled) usageMeter.setAttribute("aria-live", "polite");
+  usageMeter.dataset.filled = "1";
+}
+
+function setSignedOut(signedOut, { configured = true } = {}) {
+  document.body.dataset.auth = signedOut ? "signed-out" : "signed-in";
+  if (signInGate) signInGate.hidden = !signedOut;
+  if (signInGateAsk) signInGateAsk.hidden = !signedOut;
+  const text = document.querySelector("#signInGateText");
+  if (text) {
+    text.textContent = configured
+      ? "Sign in with Google to run an intake and ask DIA."
+      : "Sign-in isn't available right now. You can still read about DIA.";
+  }
+  if (signedOut) renderUsage(null);
+}
+
+async function refreshUsage() {
+  try {
+    const response = await fetch("/api/usage", { credentials: "same-origin" });
+    if (response.status === 401) {
+      setSignedOut(true);
+      return null;
+    }
+    const usage = await response.json();
+    if (!response.ok) return lastUsage;
+    renderUsage(usage);
+    return usage;
+  } catch (error) {
+    return lastUsage;
+  }
+}
+
+// Shared handling for any gated call's response. Returns true when handled
+// (signed out or today's allowance used), so the caller just stops.
+function handleGateResponse(response, payload) {
+  if (response.status === 401 && payload && payload.error === "sign_in_required") {
+    setSignedOut(true);
+    statusLine.classList.remove("is-limit");
+    statusText.textContent = "Sign in with Google to use DIA.";
+    return true;
+  }
+  if (payload && payload.usage) renderUsage(payload.usage);
+  if (response.status === 429 && payload && payload.error === "daily_limit") {
+    statusText.textContent = payload.message;
+    statusLine.classList.add("is-limit");
+    return true;
+  }
+  return false;
+}
+
+function limitedClick(button) {
+  if (button.getAttribute("aria-disabled") !== "true") return false;
+  // Past the reset (page left open over midnight ET): let the request through so the server rechecks the allowance;
+  // its reply re-renders the counter and clears the block.
+  const resetsAt = Date.parse(lastUsage?.resets_at || "");
+  if (Number.isFinite(resetsAt) && Date.now() >= resetsAt) return false;
+  statusText.textContent = button.title;
+  statusLine.classList.add("is-limit");
+  return true;
+}
+
+window.DIA_USAGE = { render: renderUsage, refresh: refreshUsage, setSignedOut };
+
 // Intake collapse: after a successful run the questionnaire folds away so the
 // post-intake workflow (Ask DIA, results, draft editor) takes the stage. The
 // Run button and status stay visible for quick re-runs.
@@ -112,6 +299,7 @@ loadSample.addEventListener("click", async () => {
   statusText.textContent = "Loading sample...";
   const response = await fetch("/api/sample");
   const payload = await response.json();
+  if (handleGateResponse(response, payload)) return;
   questionnaire.value = payload.questionnaire;
   if (intakeBody.hidden) setIntakeCollapsed(false);
   autosizeComposer(questionnaire);
@@ -120,6 +308,8 @@ loadSample.addEventListener("click", async () => {
 });
 
 runAgent.addEventListener("click", async () => {
+  if (limitedClick(runAgent)) return;
+  statusLine.classList.remove("is-limit");
   InputsPrompt.endSession();  // hides on Run and does not come back for this intake (addendum §3.2)
   setRunState("processing");
   setBusy(runAgent, true);
@@ -131,8 +321,12 @@ runAgent.addEventListener("click", async () => {
       body: JSON.stringify({ questionnaire: questionnaire.value }),
     });
     const payload = await response.json();
+    if (handleGateResponse(response, payload)) {
+      setExportAvailability(latestPayload !== null);
+      return;
+    }
     if (!response.ok) {
-      throw new Error(payload.error || "Processing failed");
+      throw new Error(payload.message || payload.error || "Processing failed");
     }
     const previousId = rerunOf;
     showResults(payload, questionnaire.value);
@@ -188,13 +382,16 @@ document.querySelector(".tabs").addEventListener("keydown", (event) => {
 });
 
 const ASK_DIA_UNAVAILABLE = "Ask DIA is temporarily unavailable.";
+let askDiaDisabled = false;
 
-// Kill switch (ASK_DIA_ENABLED unset on the server): keep the section in
-// place but make the composer inert and say so calmly.
-function disableAskDia() {
+// Kill switch (ASK_DIA_ENABLED unset on the server, #41): keep the section in
+// place but make the composer inert and say so calmly; the intake tools keep working.
+function disableAskDia(message) {
+  askDiaDisabled = true;
   agentStatus.textContent = "temporarily unavailable";
   agentStatus.classList.remove("ok");
   agentMessage.disabled = true;
+  agentMessage.setAttribute("aria-disabled", "true");
   agentMessage.placeholder = ASK_DIA_UNAVAILABLE;
   // The narrow/wide placeholder swap (landing polish) must not bring back "Ask DIA a question…" on a resize.
   agentMessage.dataset.placeholderShort = ASK_DIA_UNAVAILABLE;
@@ -208,7 +405,7 @@ function disableAskDia() {
       button.disabled = true;
     });
   }
-  agentOutput.textContent = ASK_DIA_UNAVAILABLE;
+  agentOutput.textContent = message || ASK_DIA_UNAVAILABLE;
 }
 
 async function refreshAgentStatus() {
@@ -220,13 +417,14 @@ async function refreshAgentStatus() {
       disableAskDia();
       return;
     }
-    if (payload.configured) {
-      agentStatus.textContent = "Gemini connected";
-      agentStatus.classList.add("ok");
-    } else {
-      agentStatus.textContent = "API key not set";
-      agentStatus.classList.remove("ok");
+    if (!payload.configured) {
+      // On but not configured (Vertex env missing): say it's unavailable, like the kill switch. DIA never uses an
+      // API key, so there is no missing-key state to show (Glyph, #48 review).
+      disableAskDia();
+      return;
     }
+    agentStatus.textContent = "Gemini connected";
+    agentStatus.classList.add("ok");
   } catch (error) {
     agentStatus.textContent = "status unavailable";
   }
@@ -372,7 +570,16 @@ async function draftFollowUpQuestions() {
       signal: agentController.signal,
     });
     const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error || "Agent run failed");
+    // Same Ask DIA allowance as a question: same kill-switch, sign-in, counter and limit handling.
+    if (payload.enabled === false) {
+      disableAskDia(payload.error || payload.reply);
+      return;
+    }
+    if (handleGateResponse(response, payload)) {
+      agentOutput.textContent = payload.message || statusText.textContent;
+      return;
+    }
+    if (!response.ok) throw new Error(payload.message || payload.error || "Agent run failed");
     showAiReply((payload.reply || "").trim() || "(empty response)", { questions: Boolean(payload.reply) });
   } catch (error) {
     agentOutput.textContent = error.name === "AbortError" ? "Drafting cancelled" : error.message;
@@ -424,9 +631,17 @@ let chatController = null;
 
 async function sendAgentMessage() {
   if (assistantMode === "off") return null; // Off: no Gemini call, ever
+  if (askDiaDisabled) {
+    agentOutput.textContent = ASK_DIA_UNAVAILABLE;
+    return null;
+  }
   const message = agentMessage.value.trim();
   if (!message) {
     agentOutput.textContent = "Type a question for the agent first.";
+    return null;
+  }
+  if (limitedClick(runChat)) {
+    agentOutput.textContent = runChat.title;
     return null;
   }
   const context = buildAgentContext();
@@ -446,11 +661,15 @@ async function sendAgentMessage() {
     });
     const payload = await response.json();
     if (payload.enabled === false) {
-      disableAskDia();
+      disableAskDia(payload.error || payload.reply);
+      return null;
+    }
+    if (handleGateResponse(response, payload)) {
+      agentOutput.textContent = payload.message || statusText.textContent;
       return null;
     }
     if (!response.ok) {
-      throw new Error(payload.error || "Agent run failed");
+      throw new Error(payload.message || payload.error || "Agent run failed");
     }
     if (controller.signal.aborted || assistantMode === "off") return null;
     showAiReply(payload.reply || "(empty response)");
@@ -461,6 +680,7 @@ async function sendAgentMessage() {
   } finally {
     if (chatController === controller) chatController = null;
     setBusy(runChat, agentMessage.disabled);
+    if (askDiaDisabled) runChat.disabled = true;
   }
 }
 
@@ -2647,7 +2867,8 @@ async function extractOne(file, signal) {
   try { payload = await response.json(); } catch (error) { payload = null; }
   if (!response.ok) {
     if (!payload || !payload.error) throw Object.assign(new Error(NETWORK_MESSAGE), { network: true });
-    throw new Error(payload.error);
+    if (handleGateResponse(response, payload)) throw new Error(payload.message || statusText.textContent);
+    throw new Error(payload.message || payload.error);
   }
   return payload;
 }
@@ -3570,6 +3791,8 @@ async function fetchPdf(item, signal) {
   const response = await fetch("/api/pdf", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    // Re-render the saved run ({result}); sending the questionnaire instead
+    // would re-run the pipeline and cost a generation.
     body: JSON.stringify({
       questionnaire: item.questionnaire,
       result: scrubForExport(item.result),
@@ -3579,7 +3802,8 @@ async function fetchPdf(item, signal) {
   });
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
-    throw new Error(payload.error || "PDF rendering failed on the server.");
+    if (handleGateResponse(response, payload)) throw new Error(payload.message || statusText.textContent);
+    throw new Error(payload.message || payload.error || "PDF rendering failed on the server.");
   }
   // Screen and PDF must never disagree: when the PDF's figures differ from the saved ones (older rules), the saved
   // result is rescored and the screen updated to match.
