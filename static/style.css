@@ -1392,6 +1392,9 @@ body[data-usage-fit="inline"] .lh-menu-usage:not([hidden]) { display: flex; flex
 .signin-gate-ask[hidden] { display: none; }
 .signin-gate-button { display: flex; justify-content: center; width: 100%; max-width: 400px; min-height: 40px; }
 .signin-gate-button[hidden] { display: none; }
+/* Google's button iframe paints an opaque white backing when the page is color-scheme: dark and the iframe is light.
+   Pinning its containers to light removes the backing; the button's own theme (filled_black / outline) follows the page. */
+.signin-gate-button, #diaSignIn { color-scheme: light; }
 body[data-auth="signed-out"] .intake-stage .dock-row,
 body[data-auth="signed-out"] #intakeBody,
 body[data-auth="signed-out"] #fileChips,
