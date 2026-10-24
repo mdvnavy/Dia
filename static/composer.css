@@ -308,12 +308,13 @@ html:not([data-theme="light"]) .prompt-bar:focus-within { outline-color: #7C828A
 .has-cmp .voice-item .icon { width: 36px; height: 36px; }
 .has-cmp .voice-label { display: none; }
 /* The drawer is 12px taller than the old 42px row, so the status line / Ask DIA heading slide a little further. */
-/* #46 lifts the whole status row (.intake-bar) by --intake-lift; the drawer is 12px taller, so each lift gets +12px
-   and the stage's phone top margin grows by the same 12px. #status itself is not lifted again. */
+/* #46 lifts the whole status row (.intake-bar) by --intake-lift; #status itself is not lifted again. The drawer is 12px
+   taller than #46's, so the lift and the phones' top margin are retuned to keep ~8px+ of air between the status row and
+   both the hero's last line and the open drawer (1280: 9/6px; 390 and 360: 8.5/8px, and 12.5/18px with "Collapse intake"). */
 .intake-stage { --intake-lift: 34px; }
 @media (max-width: 600px) {
-  .intake-stage { --intake-lift: 42px; }
-  .intake-stage:has(#intakeToggle:not([hidden])) { --intake-lift: 52px; margin-top: 30px; }
+  .intake-stage { --intake-lift: 34px; margin-top: 8px; }
+  .intake-stage:has(#intakeToggle:not([hidden])) { --intake-lift: 44px; margin-top: 22px; }
 }
 .agent:has(#agentVoiceNotch[aria-expanded="true"]) > h2 { translate: 0 -50px; }
 .agent:has(> h2 + .prompt-bar.has-cmp) { margin-top: 68px; }
