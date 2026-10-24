@@ -66,7 +66,7 @@ def browser():
 def open_page(browser, base_url):
     contexts, errors = [], []
 
-    def _open(theme="light", width=1280, height=800, ask_dia=False):
+    def _open(theme="light", width=1280, height=800, ask_dia=False, kill_switch=False):
         context = browser.new_context(viewport={"width": width, "height": height}, color_scheme=theme,
                                       user_agent="Mozilla/5.0 (X11; Linux x86_64) Chrome/130")
         contexts.append(context)
@@ -75,6 +75,8 @@ def open_page(browser, base_url):
         p.add_init_script(f"localStorage.setItem('dia-theme', '{theme}')")
         if ask_dia:   # the browser's view of a server with ASK_DIA_ENABLED on (#41's kill switch is off by default)
             p.route("**/api/agent/status", lambda route: route.fulfill(json={"configured": True, "enabled": True}))
+        if kill_switch:   # the browser's view of a server with ASK_DIA_ENABLED unset (this module turns it on)
+            p.route("**/api/agent/status", lambda route: route.fulfill(json={"configured": True, "enabled": False}))
         p.goto(base_url + "/")
         p.wait_for_function("document.querySelector('#agentStatus').textContent !== 'checking...'")
         return p
@@ -585,7 +587,7 @@ def test_status_ready_processing_complete(open_page):
 
 def test_kill_switch_placeholder_survives_a_resize(open_page):
     """ASK_DIA_ENABLED off (#41): the narrow/wide placeholder swap must not bring back "Ask DIA a question…"."""
-    p = open_page(width=390, height=844)
+    p = open_page(width=390, height=844, kill_switch=True)
     p.evaluate("openAgent()")
     assert p.get_attribute("#agentMessage", "placeholder") == "Ask DIA is temporarily unavailable."
     p.set_viewport_size({"width": 1280, "height": 800})
