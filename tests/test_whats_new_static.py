@@ -88,6 +88,7 @@ def test_glow_is_on_the_img_with_no_overlay():
     assert "::after" not in _strip_token_blocks(CSS).split("/* panel")[0]
 
 
+@pytest.mark.skip(reason="Retired: the #47 header tag markup moved under the What changed bell; see test_bell_changelog_browser.py")
 def test_tag_markup_clay_images_and_aria_hidden():
     tag = re.search(r'<span class="wn-tag" id="whatsNewTag" aria-hidden="true">(.*?)\n            </span>', HTML, re.S).group(1)
     for t in ("light", "dark"):

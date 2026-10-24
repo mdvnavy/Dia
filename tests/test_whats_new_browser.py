@@ -17,6 +17,9 @@ import pytest
 
 sync_api = pytest.importorskip("playwright.sync_api")
 
+pytestmark = pytest.mark.skip(reason="Retired: the What's new mark and panel (#47) are replaced by the What changed bell; see tests/test_bell_changelog_browser.py")
+
+
 from app import ClientDiscoveryHandler  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
