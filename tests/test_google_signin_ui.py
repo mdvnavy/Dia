@@ -22,6 +22,7 @@ window.google = { accounts: { id: {
   initialize(config) { window.__gisConfig = config; window.__gisCalls.push('initialize'); },
   renderButton(el, options) {
     window.__gisCalls.push('renderButton:' + (el.id || ''));
+    (window.__gisRenders = window.__gisRenders || []).push({ id: el.id || '', theme: options.theme, shape: options.shape, width: options.width });
     const b = document.createElement('button');
     b.className = 'gisButton'; b.type = 'button'; b.textContent = 'Sign in with Google';
     b.onclick = () => window.__gisConfig.callback({ credential: window.__TEST_CRED || 'visitor-cred' });
@@ -521,3 +522,68 @@ def test_limit_block_lifts_after_the_reset_time(browser, live):
     page.wait_for_function("document.querySelector('[data-bucket=generations] .lh-usage-num').textContent === '9'")
     assert page.get_attribute("#runAgent", "aria-disabled") is None
     page.context.close()
+
+
+# --- GIS button theme (Glyph, #48 dark-mode white box) ---------------------
+
+
+def test_gis_button_containers_pin_light_color_scheme():
+    css = re.sub(r"/\*.*?\*/", "", read("static/style.css"), flags=re.S)
+    rule = re.search(r"([^{}]+)\{\s*color-scheme:\s*light;\s*\}", css)
+    assert rule, "the Google button containers must be color-scheme: light"
+    selectors = {s.strip() for s in rule.group(1).split(",")}
+    assert {".signin-gate-button", "#diaSignIn"} <= selectors
+
+
+def _last_render(page, slot):
+    return page.evaluate(f"window.__gisRenders.filter(r => r.id === {slot!r}).slice(-1)[0]")
+
+
+@pytest.mark.parametrize("theme,expected", [("dark", "filled_black"), ("light", "outline")])
+def test_gis_button_theme_follows_page_theme(browser, live, theme, expected):
+    page = open_page(browser, live.url, theme=theme)
+    page.evaluate("document.body.dataset.agent = 'open'")
+    page.wait_for_selector("#signInGateAskButton .gisButton", state="visible")
+    for slot in ("signInGateButton", "signInGateAskButton"):
+        render = _last_render(page, slot)
+        assert render["theme"] == expected and render["shape"] == "pill", (slot, render)
+        assert page.eval_on_selector("#" + slot, "e => getComputedStyle(e).colorScheme") == "light"
+    assert _last_render(page, "diaSignIn")["theme"] == expected
+    page.context.close()
+
+
+def test_gis_button_rerenders_on_theme_toggle(browser, live):
+    page = open_page(browser, live.url, theme="dark")
+    page.evaluate("document.body.dataset.agent = 'open'")
+    page.wait_for_selector("#signInGateAskButton .gisButton", state="visible")
+    width = _last_render(page, "signInGateButton")["width"]
+    page.click("#themeToggle")
+    assert page.evaluate("document.documentElement.dataset.theme") == "light"
+    page.wait_for_function("window.__gisRenders.filter(r => r.id === 'signInGateButton').slice(-1)[0].theme === 'outline'")
+    for slot in ("signInGateButton", "signInGateAskButton", "diaSignIn"):
+        assert _last_render(page, slot)["theme"] == "outline", slot
+        # One button per slot after a re-render, not a stack of old ones.
+        assert page.eval_on_selector_all(f"#{slot} .gisButton", "els => els.length") == 1
+    assert _last_render(page, "signInGateButton")["width"] == width  # width still fitted to the slot
+    page.click("#themeToggle")
+    page.wait_for_function("window.__gisRenders.filter(r => r.id === 'signInGateButton').slice(-1)[0].theme === 'filled_black'")
+    page.context.close()
+
+
+def test_gis_button_rerenders_on_system_scheme_change(browser, live):
+    page = open_page(browser, live.url, theme="light")
+    page.wait_for_selector("#signInGateButton .gisButton", state="visible")
+    # The page theme is <html data-theme>; flip it the way a scheme-following page would, then fire the media change.
+    page.evaluate("document.documentElement.dataset.theme = 'dark'")
+    page.emulate_media(color_scheme="dark")
+    page.wait_for_function("window.__gisRenders.filter(r => r.id === 'signInGateButton').slice(-1)[0].theme === 'filled_black'")
+    page.context.close()
+
+
+def test_gis_gate_button_width_matches_its_slot(browser, live):
+    for width in (390, 1280):
+        page = open_page(browser, live.url, width=width, theme="dark")
+        page.wait_for_selector("#signInGateButton .gisButton", state="visible")
+        slot_w = page.eval_on_selector("#signInGateButton", "e => Math.floor(e.getBoundingClientRect().width)")
+        assert _last_render(page, "signInGateButton")["width"] == str(min(400, slot_w))
+        page.context.close()
