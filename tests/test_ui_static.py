@@ -34,8 +34,13 @@ def _contrast(a: tuple[int, int, int], b: tuple[int, int, int]) -> float:
 
 
 def _theme_vars(selector: str) -> dict[str, str]:
+    # The main theme block plus any later one-line blocks for the same selector (e.g. --control-focus).
     block = re.search(re.escape(selector) + r"\s*\{(.*?)\n\}", CSS, re.S).group(1)
-    return dict(re.findall(r"--([\w-]+):\s*([^;]+);", block))
+    found = dict(re.findall(r"--([\w-]+):\s*([^;]+);", block))
+    for extra in re.findall(r"^" + re.escape(selector) + r"\s*\{([^}\n]*)\}", CSS, re.M):
+        for name, value in re.findall(r"--([\w-]+):\s*([^;]+);", extra):
+            found.setdefault(name, value)
+    return found
 
 
 def _resolve(theme: dict[str, str], name: str) -> str:

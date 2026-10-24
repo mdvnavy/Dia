@@ -43,10 +43,11 @@ def test_ids_are_unique():
 
 
 @pytest.mark.parametrize("prefix,composer_id,textarea,mic,run", COMPOSERS)
-def test_composer_order_plus_input_mic_enter(prefix, composer_id, textarea, mic, run):
+def test_composer_order_plus_input_enter_mic(prefix, composer_id, textarea, mic, run):
     bar = _block(composer_id)
     assert 'data-empty="true"' in _tag(INDEX, composer_id) and "has-cmp" in _tag(INDEX, composer_id)
-    order = [bar.index(f'id="{x}"') for x in (f"{prefix}PlusButton", textarea, mic, run)]
+    # Glyph review #4 (WCAG 2.4.3): Run comes before the mic in the DOM so Tab follows the visual order.
+    order = [bar.index(f'id="{x}"') for x in (f"{prefix}PlusButton", textarea, run, mic)]
     assert order == sorted(order)
     mic_tag = _tag(bar, mic)
     assert "cmp-circle cmp-mic" in mic_tag and 'aria-pressed="false"' in mic_tag
