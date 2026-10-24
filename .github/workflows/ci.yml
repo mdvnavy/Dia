@@ -1,3 +1,6 @@
+# Gate CI baseline (proposal: dia-tia/ops/proposals/2026-10-23_ci-branch-protection.md).
+# Job names `tests` and `secret-scan` are unchanged so they can be made required later.
+# No deploys, no cloud credentials, no secrets other than GITHUB_TOKEN.
 name: ci
 
 on:
@@ -5,29 +8,91 @@ on:
     branches: ["**"]
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Required-checks plan (decided 2026-10-23, applied after Forge's all-clear):
+    # day one requires `tests`, `secret-scan`, `visual-gate`; `lint` is NOT required
+    # for one day, then is promoted to required.
+    # TODO(Gate): ruff step is report-only (step-level continue-on-error, job stays green)
+    # because main has 2 pre-existing F821 errors (undefined name `socket` in
+    # tests/e2e/test_adversarial.py:116 and :139). Fix those and drop continue-on-error
+    # before promoting `lint` to required.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+      - name: ruff (syntax errors and undefined names only; report-only)
+        continue-on-error: true
+        run: uvx ruff@0.14.0 check --select E9,F63,F7,F82 --output-format github .
+
   tests:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: requirements.txt
+      - name: Install system deps
+        run: sudo apt-get update -q && sudo apt-get install -y -q poppler-utils
       - name: Install dependencies
-        run: |
-          sudo apt-get update -q && sudo apt-get install -y -q poppler-utils
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+        run: uv venv .venv && uv pip install -r requirements.txt
       - name: Run tests
-        run: python -m pytest -q
+        run: .venv/bin/python -m pytest -q
+
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - name: docker build (no push)
+        run: docker build -t dia:ci .
+
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: requirements.txt
+      - run: uv venv .venv && uv pip install -r requirements.txt
+      - name: Start app (no API keys) and probe
+        run: |
+          PORT=8080 HOST=127.0.0.1 nohup .venv/bin/python app.py > /tmp/app.log 2>&1 &
+          for i in $(seq 1 45); do curl -fsS -o /dev/null http://127.0.0.1:8080/ && break; sleep 2; done
+          fail=0
+          for path in / /api/config; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:8080$path")
+            echo "GET $path -> $code"; [ "$code" = "200" ] || fail=1
+          done
+          [ $fail = 0 ] || { cat /tmp/app.log; exit 1; }
 
   secret-scan:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: gitleaks
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
