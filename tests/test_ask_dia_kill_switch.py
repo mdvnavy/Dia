@@ -61,7 +61,8 @@ def test_agent_off_by_default_returns_503_without_model_call(monkeypatch, no_mod
     monkeypatch.delenv("ASK_DIA_ENABLED", raising=False)
     status, payload, headers = _request("POST", "/api/agent", json.dumps({"message": "ping"}))
     assert status == 503
-    assert payload == {"enabled": False, "reply": "Ask DIA is temporarily unavailable."}
+    # Lockdown v2 keeps #41's shape and adds a longer "error" message.
+    assert payload["enabled"] is False and payload["reply"] == "Ask DIA is temporarily unavailable."
     assert headers.get("Retry-After")
     assert no_model == []
 
@@ -78,7 +79,8 @@ def test_agent_explicit_true_enables(monkeypatch, no_model):
     monkeypatch.setenv("ASK_DIA_ENABLED", "true")
     status, payload, _ = _request("POST", "/api/agent", json.dumps({"message": "ping"}))
     assert status == 200
-    assert payload == {"configured": True, "reply": "pong"}
+    # Lockdown v2 adds the caller's "usage" (the suite runs with the local-dev sign-in escape hatch).
+    assert payload["configured"] is True and payload["reply"] == "pong"
     assert no_model == ["ping"]
 
 
@@ -86,14 +88,15 @@ def test_status_off_by_default(monkeypatch):
     monkeypatch.delenv("ASK_DIA_ENABLED", raising=False)
     status, payload, _ = _request("GET", "/api/agent/status")
     assert status == 200
-    assert payload == {"configured": False, "enabled": False}
+    # Lockdown v2 adds auth fields (auth, signed_in, email, owner) to the public status.
+    assert (payload["configured"], payload["enabled"]) == (False, False)
 
 
 def test_status_when_enabled(monkeypatch, no_model):
     monkeypatch.setenv("ASK_DIA_ENABLED", "1")
     status, payload, _ = _request("GET", "/api/agent/status")
     assert status == 200
-    assert payload == {"configured": True, "enabled": True}
+    assert (payload["configured"], payload["enabled"]) == (True, True)
 
 
 def test_intake_still_works_when_ask_dia_off(monkeypatch, no_model):
