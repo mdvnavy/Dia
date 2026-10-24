@@ -26,14 +26,8 @@ def load_and_validate_config() -> dict[str, any]:
         load_dotenv(REPO_ENV_PATH, override=False)
         _dotenv_loaded = True
 
-    gemini_api_key = os.environ.get("GEMINI_API_KEY")
-    testing = os.environ.get("TESTING") == "true"
-
-    if not gemini_api_key:
-        if testing:
-            logger.warning("GEMINI_API_KEY is not set.")
-        else:
-            raise ValueError("GEMINI_API_KEY is required but missing from the environment.")
+    # Gemini runs on Vertex AI with ADC (see vertex_config), so no Gemini API
+    # key is read or required here any more.
 
     # Optional variables
     jules_api_key = os.environ.get("JULES_API_KEY")
@@ -78,7 +72,6 @@ def load_and_validate_config() -> dict[str, any]:
         port_val = 4455
 
     return {
-        "GEMINI_API_KEY": gemini_api_key,
         "JULES_API_KEY": jules_api_key,
         "SERVER_IP": ip_val,
         "SERVER_PORT": port_val,

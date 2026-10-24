@@ -8,7 +8,7 @@ flowchart LR
         subgraph PIPE["Deterministic pipeline"]
             P["parse"] --> V["validate"] --> S["score"] --> G["generate docs<br/>profile / analysis / proposal"]
         end
-        AG["Gemini ADK agent<br/>LlmAgent · gemini-2.5-flash<br/>function tools + McpToolset"]
+        AG["Gemini ADK agent<br/>LlmAgent · gemini-3.8-flash<br/>function tools + McpToolset"]
     end
     SM["Secret Manager<br/>GEMINI_API_KEY · MAKE_MCP_TOKEN"]
     subgraph MAKE["Make — DIA Agent Toolbox (MCP server)"]
