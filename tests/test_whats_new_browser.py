@@ -690,7 +690,8 @@ def test_16_fetch_after_first_paint_and_never_blocks_intake(session):
     h.page.click("#loadSample")
     h.page.wait_for_function("questionnaire.value.length > 0")
     h.page.click("#runAgent")
-    h.page.wait_for_function("statusText.textContent.startsWith('Complete')", timeout=8000)
+    # Landing polish (#40): the state word lives in #statusState and #status carries data-state.
+    h.page.wait_for_function("document.querySelector('#status').dataset.state === 'complete'", timeout=8000)
     assert h.state == "none"
     h.page.click("#whatsNew")  # opens straight away with skeleton rows while the fetch is pending
     assert h.page.get_attribute("#whatsNewPanel", "aria-busy") == "true"
