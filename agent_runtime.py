@@ -3,7 +3,8 @@
 The web demo runs on Python's threaded ``http.server``, while ADK exposes an
 async ``Runner``. This module wraps a single agent turn in ``asyncio.run`` so a
 request handler can call :func:`run_agent` synchronously, and degrades
-gracefully when ``GEMINI_API_KEY`` / ``GOOGLE_API_KEY`` is not configured.
+gracefully when Vertex AI is not configured. Gemini is reached only through
+Vertex AI (see ``vertex_config``); an API key in the environment is ignored.
 """
 
 from __future__ import annotations
@@ -34,12 +35,14 @@ MCP_MODES = {
 }
 
 class AgentNotConfigured(RuntimeError):
-    """Raised when no Google API key is available for live agent runs."""
+    """Raised when Vertex AI is not configured for live agent runs."""
 
 
 def is_configured() -> bool:
-    """Return True when a Gemini/Google API key is present in the environment."""
-    return bool(os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"))
+    """Return True when Vertex AI is configured (API keys never count)."""
+    from vertex_config import is_vertex_configured
+
+    return is_vertex_configured()
 
 
 def _select_mcp_toolsets(message: str = "") -> tuple[bool, bool]:
@@ -119,12 +122,12 @@ def run_agent(message: str) -> str:
 
     Raises:
         ValueError: when ``message`` is empty.
-        AgentNotConfigured: when no Google API key is configured.
+        AgentNotConfigured: when Vertex AI is not configured.
     """
+    from vertex_config import VERTEX_ENV_HINT
+
     if not message.strip():
         raise ValueError("message is required")
     if not is_configured():
-        raise AgentNotConfigured(
-            "Set GEMINI_API_KEY (or GOOGLE_API_KEY) to enable live Gemini agent runs."
-        )
+        raise AgentNotConfigured(f"{VERTEX_ENV_HINT} Live Gemini agent runs use Vertex AI only.")
     return asyncio.run(_run_turn(message))

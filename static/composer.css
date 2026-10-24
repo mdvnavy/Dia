@@ -52,3 +52,203 @@ a.dropdown-item { text-decoration: none; cursor: pointer; }
 
 /* The composer sits in a centred hero; menu text stays start-aligned (Glyph's "Icon style" label row). */
 .plus-menu { text-align: start; }
+
+/* ==========================================================================
+   Landing polish (feat/landing-polish). Overrides on top of glyph/composer-icons.css, existing tokens only.
+   Glyph to review: every value below is listed in the PR notes.
+   ========================================================================== */
+
+/* 1. Mic fixed in the corner (Glyph review + Ikenna): the mic is the bar's last flex item, 12px in (8px on phones),
+      mirroring the plus, and it never moves. Run's slot is reserved inside the textarea's right padding (one circle +
+      the 8px gap), so text never reflows; Run sits in that slot, just LEFT of the mic, and is shown only with text.
+      Show: 180ms EASE_OUT fade + scale 0.9 -> 1. Hide (Ikenna: reverses, not instant): 150ms ease-in fade + scale
+      back to 0.9, then visibility drops. Uses the `scale` property so the hover `transform: scale(1.08)` still works.
+      Reduced motion: a short 100ms fade, no scale. */
+.prompt-bar.has-cmp { --run-slot: calc(var(--cmp-circle) + 8px); --bar-pad: 12px; }
+.prompt-bar.has-cmp .prompt-input { padding-right: var(--run-slot); }
+.prompt-bar.has-cmp .cmp-run-slot {
+  position: absolute; z-index: 1; right: calc(var(--bar-pad) + var(--run-slot)); top: 50%; translate: 0 -50%;
+  pointer-events: none;
+}
+.prompt-bar.has-cmp.multiline .cmp-run-slot { top: auto; bottom: var(--bar-pad); translate: none; }
+.prompt-bar.has-cmp .cmp-enter,
+.prompt-bar.has-cmp .cmp-enter[hidden] { display: flex; animation: none; }
+.prompt-bar.has-cmp .cmp-enter {
+  opacity: 1; scale: 1; visibility: visible; pointer-events: auto;
+  transition: all var(--dia-dur-run-in, 180ms) var(--dia-ease-out, cubic-bezier(0.16, 1, 0.3, 1)), visibility 0s;
+}
+.prompt-bar.has-cmp .cmp-enter[hidden] {
+  opacity: 0; scale: 0.9; visibility: hidden; pointer-events: none;
+  transition: all 150ms var(--dia-ease-in, cubic-bezier(0.55, 0, 0.75, 0.2)), visibility 0s linear 150ms;
+}
+:root:is([data-icon-style="zelda"], [data-icon-style="dia-pixel"]) .prompt-bar.has-cmp .cmp-enter { transition-timing-function: steps(2, end), linear; }
+@media (prefers-reduced-motion: reduce) {
+  .prompt-bar.has-cmp .cmp-enter, .prompt-bar.has-cmp .cmp-enter[hidden] { scale: 1; animation: none; }
+  .prompt-bar.has-cmp .cmp-enter { transition: opacity 100ms linear, visibility 0s; }
+  .prompt-bar.has-cmp .cmp-enter[hidden] { transition: opacity 100ms linear, visibility 0s linear 100ms; }
+}
+.cmp-tip-mic { right: var(--bar-pad, 12px); }   /* the mic is in the corner now */
+@media (max-width: 600px) {
+  .prompt-bar.has-cmp { --run-slot: calc(var(--cmp-circle-mobile) + 8px); --bar-pad: 8px; }
+}
+
+/* 2. Floating notch: a small handle bar floating just above the prompt bar (replaces the 36x12 tab on the top edge).
+      Button box 48x20 (hit area 48x28 desktop, 48x44 touch); the visible handle is a 32x4 rounded bar. */
+.cmp-notch.cmp-notch--float {
+  top: -26px; width: 48px; height: 20px; border-radius: 10px; display: grid; place-items: center;
+  color: inherit; background: none;
+}
+.cmp-notch--float::before { inset: -4px 0; }
+@media (pointer: coarse) { .cmp-notch--float::before { inset: -12px -2px; } }
+.notch-handle {
+  display: block; width: 32px; height: 4px; border-radius: 2px; background: var(--notch-chev);
+  transition: width var(--dia-dur-lift, 160ms) var(--dia-ease-out, cubic-bezier(0.16, 1, 0.3, 1)), background-color 140ms linear;
+}
+.cmp-notch--float:is(:hover, :focus-visible) .notch-handle { background: var(--muted); }
+.cmp-notch--float[aria-expanded="true"] .notch-handle { width: 40px; background: var(--text); }
+:root:is([data-icon-style="zelda"], [data-icon-style="dia-pixel"]) .notch-handle { border-radius: 0; transition: none; }
+/* The tip floats above the handle instead of the bar's edge. */
+.has-cmp .cmp-tip-notch { bottom: calc(100% + 34px); }
+
+/* Voice panel (Glyph review + Ikenna): a compact single row (42px tall) on an opaque --raised layer with the plus
+   menu's shadow. Its bottom edge sits 11px above the handle (handle top = bar - 26px), and while it's open the status
+   line slides up 22px into the hero's bottom margin, so the panel never covers "Ready" or the description. */
+.has-cmp .voice-fan {
+  bottom: calc(100% + 37px); flex-direction: row; align-items: center; gap: 2px; padding: 4px;
+  border-radius: 21px; background: var(--raised);
+}
+.has-cmp .voice-item {
+  width: auto; height: 32px; padding: 0 12px 0 0; flex-direction: row; gap: 7px; border-radius: 16px; white-space: nowrap;
+}
+.has-cmp .voice-item .icon { width: 32px; height: 32px; flex: none; }
+.has-cmp .voice-item:is(:hover, :focus-visible):not([aria-disabled="true"]) { background: var(--surface); }
+.has-cmp .voice-item:focus-visible { outline-offset: 0; }
+.has-cmp .voice-label { font-size: 12px; line-height: 1; text-align: start; }
+.has-cmp .voice-note { display: inline; margin-left: 4px; }
+.has-cmp .voice-note::before { content: "· "; }
+/* Phones: icon-only (each item keeps its aria-label; labels were aria-hidden already), 36px targets, so the panel is
+   ~120px wide and sits between the tray and cabinet buttons instead of over their tops. Same height budget (44px). */
+@media (max-width: 600px) {
+  .has-cmp .voice-fan { gap: 2px; padding: 4px; border-radius: 22px; }
+  .has-cmp .voice-item { width: 36px; height: 36px; padding: 0; gap: 0; justify-content: center; border-radius: 18px; }
+  .has-cmp .voice-label { display: none; }
+  .has-cmp .voice-item .icon svg { width: 16px; height: 16px; }
+}
+.intake-stage #status { transition: translate 120ms linear; }
+.intake-stage:has(#intakeVoiceNotch[aria-expanded="true"]) #status {
+  translate: 0 -22px; transition: translate var(--dia-dur-run-in, 180ms) var(--dia-ease-out, cubic-bezier(0.16, 1, 0.3, 1));
+}
+/* Ask DIA: same idea as the landing status line. The heading sits 52px above the bar and, while the panel is open,
+   slides up 38px into the stage's 56px top margin, so the panel never covers "Ask DIA" or its badge. */
+.agent:has(> h2 + .prompt-bar.has-cmp) { margin-top: 56px; }   /* was 40px: room for the slide, ~18px air kept above */
+.agent > h2:has(+ .prompt-bar.has-cmp) { transition: translate 120ms linear; }
+.agent:has(#agentVoiceNotch[aria-expanded="true"]) > h2 {
+  translate: 0 -38px; transition: translate var(--dia-dur-run-in, 180ms) var(--dia-ease-out, cubic-bezier(0.16, 1, 0.3, 1));
+}
+@media (prefers-reduced-motion: reduce) {
+  .intake-stage #status, .intake-stage:has(#intakeVoiceNotch[aria-expanded="true"]) #status,
+  .agent > h2, .agent:has(#agentVoiceNotch[aria-expanded="true"]) > h2 { transition: none; }
+}
+
+/* Clean close (no faint "shadow" left behind): the fan goes hidden in one short 120ms fade, then visibility,
+   box-shadow and pointer events all drop at the same instant. Items no longer sink and stagger out on close. JS
+   also sets `inert` while closed. The tooltip stays muted after a close (see createVoiceFan muteTip). */
+.has-cmp .voice-fan {
+  transition: opacity 120ms linear, visibility 0s linear 120ms, box-shadow 0s linear 120ms;
+}
+.has-cmp .voice-fan:not(.cmp-notch[aria-expanded="true"] ~ .voice-fan) { box-shadow: none; pointer-events: none; }
+.has-cmp .voice-fan .voice-item { transition-delay: 0s; transition-duration: 120ms; transition-timing-function: linear; }
+.has-cmp .cmp-notch[aria-expanded="true"] ~ .voice-fan { box-shadow: var(--shadow-subtle);   /* = .plus-menu */
+  transition: opacity calc(var(--dia-dur-stack-open, 280ms) * 0.6) var(--dia-ease-out, cubic-bezier(0.16, 1, 0.3, 1)), visibility 0s, box-shadow 0s; }
+.has-cmp .cmp-notch[aria-expanded="true"] ~ .voice-fan .voice-item { transition-duration: var(--dia-dur-stack-open, 280ms), calc(var(--dia-dur-stack-open, 280ms) * 0.6); transition-timing-function: var(--dia-ease-out, cubic-bezier(0.16, 1, 0.3, 1)); transition-delay: calc(var(--d, 0) * var(--dia-stagger-open, 30ms)); }
+.cmp-notch[data-tip-muted] + .cmp-tip { opacity: 0; visibility: hidden; transition: none; }
+
+/* 3. Line order: status above the bar (in .intake-bar, where the scoring note was), the note below the links. */
+.intake-stage > .prompt-callout { margin-top: 14px; text-align: center; }
+
+/* 4. Run status: dot + state word (+ optional detail). Green = --good (dark #8bd39c on #0c0c0e ≈ 11:1;
+      light #1a5f33 on #f3f1ec ≈ 7.3:1). Processing pulses the silver focus tone; reduced motion: no pulse. */
+.run-status {
+  margin: 0; display: inline-flex; align-items: center; gap: 7px; min-height: 18px;
+  color: var(--muted); font: 500 12px/1.4 var(--mono);
+}
+#status.run-status { flex-basis: auto; justify-content: center; }   /* style.css #status was a full-width row under the links */
+.status-dot { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--muted); }
+.status-detail:not(:empty)::before { content: "·"; margin: 0 7px 0 0; color: var(--muted); }
+.status-detail { color: var(--muted); }
+.run-status[data-state="ready"] .status-state { color: var(--good); }
+.run-status[data-state="ready"] .status-dot { background: var(--good); }
+.run-status[data-state="processing"] .status-state { color: var(--text); }
+.run-status[data-state="processing"] .status-dot { background: var(--control-focus, var(--focus-ring)); }
+.run-status[data-state="complete"] .status-state { color: var(--text); }
+.run-status[data-state="complete"] .status-dot { background: var(--good); box-shadow: 0 0 0 2px var(--bg), 0 0 0 3px var(--good); }
+.run-status[data-state="error"] .status-state { color: var(--text); }
+.run-status[data-state="error"] .status-dot { background: #c2410c; }   /* = .intake-error border */
+@media (prefers-reduced-motion: no-preference) {
+  .run-status[data-state="processing"] .status-dot { animation: cmp-pulse var(--dia-dur-pulse, 1.6s) var(--dia-ease-pulse, ease-in-out) infinite; }
+}
+
+/* 5. Smaller icons, same buttons: line icons 24 -> 18px in the 46px circles (16px in 38px on phones), 20 -> 18px in
+      the 44px dock tiles and the 40px fan circles. Pixel sprites stay at 2x (32px) so they keep crisp integer scaling. */
+.cmp-circle .icon svg { width: 18px; height: 18px; }
+.voice-item .icon svg { width: 18px; height: 18px; }
+.dock-icon .icon svg { width: 18px; height: 18px; }
+@media (max-width: 600px) { .cmp-circle .icon svg { width: 16px; height: 16px; } }
+/* Dark buttons match light's proportions: the dark drop shadow was a wider silver glow (0 6px 16px at .35) that made
+   the circles read larger than in light. Same geometry as light (0 4px 12px), dark-theme ink. Light is untouched. */
+html:not([data-theme="light"]) .action-btn.cmp-circle:not(:hover, :focus-visible, [aria-disabled="true"]) { box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45), inset 0 2px 2px rgba(255, 255, 255, 0.6), inset 0 -2px 3px rgba(0, 0, 0, 0.3); }
+/* Ask DIA: the floating handle needs clear air under the heading's badge. */
+.agent > h2 + .prompt-bar.has-cmp { margin-top: 52px; }
+
+/* Plus menu viewport guard (createPlusMenu placeMenu, Glyph review): flipped below the bar when there's more room
+   there; otherwise it opens upward with its top clamped 8px below the 52px letterhead band and its height capped at
+   the space left. The menu is a column: the groups scroll in .pm-scroll (bottom-edge fade while there's more below),
+   and All commands is a sticky footer row that's always visible. Rows keep 36px on desktop. */
+.plus-menu { display: flex; flex-direction: column; }
+.pm-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+/* Scroll cue, ported from Tia's plus-menu guard (tia-sia bfae6fd, #29): a 28px sticky gradient into the menu's own
+   background along the scroll area's bottom edge, shown (150ms fade) only while there's more below. */
+.pm-scroll::after {
+  content: ""; display: block; position: sticky; bottom: 0; height: 28px; margin-top: -28px; pointer-events: none;
+  opacity: 0; transition: opacity 150ms ease; background: linear-gradient(color-mix(in srgb, var(--surface) 0%, transparent), var(--surface) 85%);
+}
+.pm-scroll[data-more]::after { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .pm-scroll::after { transition: none; } }
+.plus-menu > .pm-sep, .pm-foot { flex: none; }
+@media (min-width: 601px) {
+  .plus-menu[data-drop="down"] { bottom: auto; top: calc(100% + 10px); transform: translateY(calc(-1 * var(--dia-fan-rise))); }
+}
+
+/* Phones: the intake placeholder gets a shorter line so it never cuts off mid-word (set by JS at <=600px),
+   and any overflow ends in a clean ellipsis. */
+@media (max-width: 600px) {
+  .prompt-input::placeholder { text-overflow: ellipsis; }
+}
+
+/* Run / send in dark (Glyph, PR #40): graphite like Tia's, not gold or silver. Mustard/gold stays the drag-over cue only.
+   Light keeps its silver send button. The pixel style keeps its own flat dark circle (composer-icons.css). */
+html:not([data-theme="light"]) .action-btn.cmp-enter {
+  --send-from: #3a3a40;
+  --send-to: #26262a;
+  --send-hover-from: #45454c;
+  --send-hover-to: #2e2e33;
+  --on-accent: #eeeef2;
+  --accent-rgb: 163, 169, 177;
+  border-color: rgba(255, 255, 255, 0.16);
+}
+html:not([data-theme="light"]) .action-btn.cmp-enter:not(:hover, :focus-visible, [aria-disabled="true"]) {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45), inset 0 1px 1px rgba(255, 255, 255, 0.12), inset 0 -2px 3px rgba(0, 0, 0, 0.35);
+}
+html:not([data-theme="light"]) .action-btn.cmp-enter:is(:hover, :focus-visible) {
+  border-color: rgba(255, 255, 255, 0.32);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5), 0 0 14px rgba(163, 169, 177, 0.18), inset 0 1px 2px rgba(255, 255, 255, 0.18), inset 0 -2px 4px rgba(0, 0, 0, 0.4);
+}
+
+/* Composer bar glow in dark (Glyph, PR #40): neutral silver #7C828A instead of the gold accent, same 0 0 40px blur and
+   spread and the same 0.22 alpha; the focus outline goes silver too (#7C828A ≈ 4.8:1 on #0c0c0e). Covers hover, which
+   shared the gold. Light is unchanged. Mustard stays the drag-over cue only (tray icon, #DFA81C). */
+html:not([data-theme="light"]) .prompt-bar {
+  --pill-shadow-hover: 0 30px 72px rgba(0, 0, 0, 0.6), 0 0 40px rgba(124, 130, 138, 0.22);
+}
+html:not([data-theme="light"]) .prompt-bar:is(:focus-within, :hover) { outline-color: rgba(124, 130, 138, 0.5); }
+html:not([data-theme="light"]) .prompt-bar:focus-within { outline-color: #7C828A; }

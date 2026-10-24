@@ -701,6 +701,10 @@ pre.response-text {
   text-transform: uppercase;
 }
 
+.score-card small[hidden] { display: none; }
+/* Proto, on #39: reopened intakes scored before value at stake. */
+.score-card .legacy-score-hint { margin-top: 6px; letter-spacing: .02em; text-transform: none; }
+
 .score-card strong {
   display: block;
   margin: 9px 0;
@@ -1336,3 +1340,52 @@ body[data-auth="signed-out"] #fileChips,
 body[data-auth="signed-out"] [data-needs-auth],
 body[data-auth="signed-out"] #agentComposer,
 body[data-auth="signed-out"] #agentStage .under-prompt { display: none; }
+
+/* Assistant (persona-ux.md v1.2 §3, Glyph §5): no avatar, a DIA mono speaker label, AI text as plain text
+   with a 1px muted left rule, a muted mono "AI draft" label (not a chip), silver only. */
+.trust-off { display: none; }
+html[data-assistant="off"] .trust-on { display: none; }
+html[data-assistant="off"] .trust-off { display: inline; }
+html[data-assistant="off"] .agent,
+html[data-assistant="off"] [data-command="ask"] { display: none !important; }
+html[data-assistant="expert"] body:not([data-agent="open"]) .agent { display: none; }
+.followup { display: flex; flex-direction: column; align-items: center; gap: 2px; margin-top: 12px; }
+.followup[hidden] { display: none; }
+.issues [hidden], .score-card [hidden] { display: none; }
+.ai-label { color: var(--muted); font: 500 11px/1.4 var(--mono); letter-spacing: 0; text-transform: none; }
+.response-header .ai-label { margin-left: 8px; }
+.ai-text { border-left: 1px solid var(--muted); padding-left: 12px; }
+.ai-actions { display: flex; justify-content: center; gap: 12px; margin-top: 10px; }
+.assistant-option { padding: 6px 14px; }
+/* Glyph §5.4: silver only inside Ask DIA, in both themes (same pin as the icon-style control). */
+.agent { --accent: #A3A9B1; --accent-ink: var(--text); }
+
+/* dia-savant inputs addendum: pre-run inputs prompt (§3), quiet surface with silver accents; Glyph owns the final look. */
+.inputs-prompt { text-align: left; margin: 10px 4px 0; padding: 12px 14px; border: 1px solid #A3A9B1; border-radius: 10px; background: var(--surface); color: var(--text); font-size: 14px; }
+.inputs-prompt[hidden], .before-after[hidden], .score-delta[hidden] { display: none !important; }
+.inputs-prompt-head { display: flex; align-items: flex-start; gap: 8px; }
+.inputs-prompt-head h3 { flex: 1; margin: 0 0 6px; font: 600 15px/1.35 var(--sans); text-transform: none; }
+.inputs-prompt-head .icon-button { width: 28px; height: 28px; font-size: 18px; line-height: 1; }
+.inputs-prompt ul { margin: 4px 0 8px; padding-left: 20px; }
+.inputs-prompt li + li { margin-top: 6px; }
+.inputs-prompt-why { color: var(--muted); font-size: 12.5px; }
+.inputs-prompt-old { margin: 0 0 4px; color: var(--muted); }
+.inputs-prompt-foot { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+.inputs-prompt-foot a { color: inherit; text-decoration: underline; }
+/* §7.3 Scored before / after: on screen only. */
+.before-after { text-align: left; margin: 14px 0; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; font-size: 14px; }
+.before-after h3 { margin: 0 0 8px; font: 600 15px var(--sans); text-transform: none; }
+.before-after dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; }
+.before-after dt { color: var(--muted); }
+.before-after dd { margin: 0; }
+.drawer-confirm button + button { margin-left: 8px; }
+.card-rerun { margin-left: auto; }
+.card-rerun + .card-remove { margin-left: 0; }
+#cabinetClear { white-space: nowrap; }
+.score-card .score-delta { margin-top: 4px; font: 400 13px var(--sans); letter-spacing: 0; text-transform: none; }
+/* v1.1.2: while the cabinet drawer is open, the toast (Remove's Undo) lives inside it, pinned to its bottom edge. */
+.drawer > .toast { left: 16px; right: 16px; top: auto; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); translate: none; max-width: none; }
+/* Remove: the card collapses at once (the grid gap goes with it); reduced motion skips the collapse in JS. */
+.drawer-card.is-removing { overflow: hidden; opacity: 0; margin-top: -10px; pointer-events: none;
+  transition: height 180ms ease, opacity 120ms linear, margin-top 180ms ease; }
+@media (prefers-reduced-motion: reduce) { .drawer-card.is-removing { transition: none; } }

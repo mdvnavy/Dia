@@ -10,6 +10,7 @@ from character import root_agent
 from google.adk.agents.llm_agent import LlmAgent
 
 from client_discovery.core import (
+    client_score_dict,
     generate_documents,
     parse_questionnaire_markdown,
     score_opportunity,
@@ -30,6 +31,16 @@ def read_sample_questionnaire() -> str:
     )
 
 
+def _savant_extras(intake, score, issues) -> dict[str, object]:
+    """dia-savant §6 JSON fields, as in app.build_intake_response."""
+    from client_discovery.report_model import build_report, value_at_stake_text
+
+    report = build_report(intake, score, issues)
+    return {"value_at_stake": score.value_at_stake, "value_at_stake_partial": score.value_at_stake_partial,
+            "value_at_stake_text": value_at_stake_text(score), "flags": list(score.flags), "flag_actions": list(report["actions"]),
+            "sources": report["sources"], "inputs_confidence": report["inputs_confidence"]}
+
+
 def build_intake_response(questionnaire: str) -> dict[str, object]:
     if not questionnaire.strip():
         raise ValueError("questionnaire is required")
@@ -40,9 +51,10 @@ def build_intake_response(questionnaire: str) -> dict[str, object]:
 
     # Resolve strategic analysis
     strategic_analysis = None
-    gemini_api_key = os.environ.get("GEMINI_API_KEY")
-    if not gemini_api_key:
-        strategic_analysis = "DIA Agent Error: GEMINI_API_KEY is missing or invalid."
+    from vertex_config import VERTEX_ENV_HINT, is_vertex_configured
+
+    if not is_vertex_configured():
+        strategic_analysis = f"DIA Agent Error: Vertex AI is not configured. {VERTEX_ENV_HINT}"
     else:
         try:
             # Construct a unified, structured prompt for the cognitive agent root_agent.run
@@ -74,7 +86,8 @@ def build_intake_response(questionnaire: str) -> dict[str, object]:
         except Exception as e:
             strategic_analysis = f"DIA Agent Error: {e}"
 
-    documents = generate_documents(intake, score, strategic_analysis)
+    # The draft stays out of the documents (and so out of every export); it rides beside them for screen use only.
+    documents = generate_documents(intake, score)
 
     if issues:
         try:
@@ -86,6 +99,8 @@ def build_intake_response(questionnaire: str) -> dict[str, object]:
     return {
         "intake": asdict(intake),
         "issues": [asdict(issue) for issue in issues],
-        "score": asdict(score),
+        "score": client_score_dict(score),  # no tier price band (Ikenna: match the site)
         "documents": documents,
+        **_savant_extras(intake, score, issues),
+        "strategic_analysis": strategic_analysis,
     }

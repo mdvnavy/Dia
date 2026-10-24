@@ -29,30 +29,32 @@ def test_load_config_success():
     }
     with patch.dict(os.environ, env, clear=True), patch("client_discovery.config.load_dotenv") as mock_load_dotenv:
         config = load_and_validate_config()
-        assert config["GEMINI_API_KEY"] == "test-gemini-key"
+        assert "GEMINI_API_KEY" not in config  # Vertex AI only; the key is never read
         assert config["JULES_API_KEY"] == "test-jules-key"
         assert config["SERVER_IP"] == "192.168.1.100"
         assert config["SERVER_PORT"] == 4444
         assert config["SERVER_PASSWORD"] == "secret-obs-pass"
         mock_load_dotenv.assert_called()
 
-def test_load_config_missing_gemini_key_in_production():
+def test_load_config_does_not_require_gemini_key_in_production():
+    # Gemini runs on Vertex AI with ADC, so removing the GEMINI_API_KEY secret
+    # from the deploy must not make config loading (OBS/Jules paths) raise.
     env = {
         "TESTING": "false",
     }
     with patch.dict(os.environ, env, clear=True), patch("client_discovery.config.load_dotenv"):
-        with pytest.raises(ValueError) as excinfo:
-            load_and_validate_config()
-        assert "GEMINI_API_KEY is required" in str(excinfo.value)
+        config = load_and_validate_config()
+        assert "GEMINI_API_KEY" not in config
 
-def test_load_config_missing_gemini_key_in_testing():
+
+def test_load_config_does_not_require_gemini_key_in_testing():
     env = {
         "TESTING": "true",
     }
     with patch.dict(os.environ, env, clear=True), patch("client_discovery.config.load_dotenv"), patch("client_discovery.config.logger") as mock_logger:
         config = load_and_validate_config()
-        assert config["GEMINI_API_KEY"] is None
-        mock_logger.warning.assert_any_call("GEMINI_API_KEY is not set.")
+        assert "GEMINI_API_KEY" not in config
+        assert all("GEMINI_API_KEY" not in str(c) for c in mock_logger.warning.call_args_list)
 
 def test_load_config_missing_optional_keys():
     env = {
@@ -61,7 +63,6 @@ def test_load_config_missing_optional_keys():
     }
     with patch.dict(os.environ, env, clear=True), patch("client_discovery.config.load_dotenv"), patch("client_discovery.config.logger") as mock_logger:
         config = load_and_validate_config()
-        assert config["GEMINI_API_KEY"] == "test-gemini-key"
         assert config["JULES_API_KEY"] is None
         assert config["SERVER_IP"] == "127.0.0.1"
         assert config["SERVER_PORT"] == 4455

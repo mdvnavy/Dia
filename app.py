@@ -11,7 +11,10 @@ import re
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
+from client_discovery.report_model import build_report, value_at_stake_text
+from client_discovery.inputs import CONSULTING_NAME, consulting_url
 from client_discovery.core import (
+    client_score_dict,
     generate_documents,
     parse_questionnaire_markdown,
     score_opportunity,
@@ -58,6 +61,14 @@ ICON_PATH = re.compile(r"^/static/icons/((?:[a-z0-9-]{1,32}/)?[a-z0-9][a-z0-9@-]
 DEFAULT_DONATE_URL = "https://www.paypal.com/ncp/payment/5UFVJBMWWKRBY"
 
 
+def ask_dia_enabled() -> bool:
+    """Kill switch for Ask DIA (POST /api/agent). OFF unless explicitly enabled."""
+    return os.environ.get("ASK_DIA_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+ASK_DIA_DISABLED_REPLY = "Ask DIA is temporarily unavailable."
+
+
 def donate_url() -> str | None:
     """Single source for the Donate link: DIA_DONATE_URL (https only), defaulting to DEFAULT_DONATE_URL.
     Empty or invalid = the item is hidden."""
@@ -74,6 +85,12 @@ def donate_url() -> str | None:
 def public_config() -> dict[str, object]:
     """Client-visible settings (no secrets)."""
     return {"donateUrl": donate_url()}
+
+
+def consulting_config() -> dict[str, object]:
+    """Inputs addendum §3.6/§5.3: the path 2 name and the optional services link for the pre-run prompt.
+    Served apart from /api/config so the Donate config stays untouched."""
+    return {"consultingName": CONSULTING_NAME, "consultingUrl": consulting_url()}
 
 
 def icon_file(path: str) -> Path | None:
@@ -96,16 +113,45 @@ def build_intake_response(questionnaire: str) -> dict[str, object]:
     if not questionnaire.strip():
         raise ValueError("questionnaire is required")
 
-    intake = parse_questionnaire_markdown(questionnaire)
+    return response_for_intake(parse_questionnaire_markdown(questionnaire))
+
+
+def rescore_result(result: dict[str, object]) -> dict[str, object]:
+    """Proto (#39 follow-up): an intake saved under older rules is rescored from its saved intake answers, the same
+    input the PDF is built from, so the screen and the PDF show the same figures. Marked `rescored`."""
+    from client_discovery.report import intake_from_result
+
+    if not isinstance(result, dict) or not isinstance(result.get("intake"), dict):
+        raise ValueError("result with intake is required")
+    response = response_for_intake(intake_from_result(result))
+    response["rescored"] = True
+    return response
+
+
+def score_header(score: dict[str, object]) -> str:
+    """"Tier|total/max|timeline": the figures the screen shows, sent with a PDF so the two can be compared."""
+    return f"{score.get('tier')}|{score.get('total_score')}/{score.get('max_score')}|{score.get('timeline')}"
+
+
+def response_for_intake(intake) -> dict[str, object]:
     issues = validate_intake(intake)
     score = score_opportunity(intake)
     documents = generate_documents(intake, score)
+    report = build_report(intake, score, issues)
 
     return {
         "intake": asdict(intake),
         "issues": [asdict(issue) for issue in issues],
-        "score": asdict(score),
+        "score": client_score_dict(score),  # no tier price band (Ikenna: match the site)
         "documents": documents,
+        # dia-savant §6: deterministic extras for the JSON export and the screen (no AI text).
+        "value_at_stake": score.value_at_stake,
+        "value_at_stake_partial": score.value_at_stake_partial,  # True: value_at_stake is a lower bound
+        "value_at_stake_text": value_at_stake_text(score),       # "about $X" or "at least $X"
+        "flags": list(score.flags),
+        "flag_actions": list(report["actions"]),
+        "sources": report["sources"],
+        "inputs_confidence": report["inputs_confidence"],
     }
 
 
@@ -120,6 +166,7 @@ GET_ROUTES: dict[str, tuple[str, bool]] = {
     "/healthz": ("handle_health", False),
     "/health": ("handle_health", False),
     "/api/config": ("handle_config", False),
+    "/api/consulting": ("handle_consulting", False),
     "/api/auth/config": ("handle_auth_config", False),
     "/api/agent/status": ("handle_agent_status", False),
     "/api/sample": ("handle_sample", True),
@@ -132,6 +179,8 @@ POST_ROUTES: dict[str, tuple[str, bool]] = {
     "/api/agent": ("handle_agent", True),
     "/api/extract": ("handle_extract", True),
     "/api/pdf": ("handle_pdf", True),
+    # Main's rescore of a saved result: deterministic, no Gemini and not a new run, so signed-in only, never charged.
+    "/api/rescore": ("handle_rescore", True),
 }
 
 
@@ -181,7 +230,8 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
             # for owners too, so flipping ASK_DIA_ENABLED stops all spend.
             self.close_connection = True
             self.send_json(
-                {"enabled": False, "error": ASK_DIA_UNAVAILABLE_MESSAGE},
+                # Main's #41 shape ({"enabled": false, "reply"}) plus the lockdown's longer "error" message.
+                {"enabled": False, "reply": ASK_DIA_DISABLED_REPLY, "error": ASK_DIA_UNAVAILABLE_MESSAGE},
                 HTTPStatus.SERVICE_UNAVAILABLE,
                 extra_headers={"Retry-After": str(ASK_DIA_RETRY_AFTER_SECONDS)},
             )
@@ -204,6 +254,9 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
 
     def handle_config(self) -> None:
         self.send_json(public_config())
+
+    def handle_consulting(self) -> None:
+        self.send_json(consulting_config())
 
     def handle_sample(self) -> None:
         self.send_json({"questionnaire": read_sample_questionnaire()})
@@ -370,7 +423,10 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
             self.send_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
             return
         questionnaire = str(payload.get("questionnaire") or "")
-        from_result = isinstance(payload.get("result"), dict)
+        saved = payload.get("result")
+        # Proto (#39 follow-up, main): a saved result is the source only when it carries its intake answers
+        # (render_pdf rescores them by DIA's own rules); otherwise the questionnaire is the fallback.
+        from_result = isinstance(saved, dict) and isinstance(saved.get("intake"), dict)
         charged = False
         if from_result:
             if not self._burst_ok(utility_burst):
@@ -399,21 +455,38 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
             return
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "application/pdf")
+        from client_discovery.core import client_score_dict as _csd, score_opportunity as _so
+        from client_discovery.report import intake_from_result
+
+        self.send_header("X-DIA-Score", score_header(_csd(_so(intake_from_result(result)))))
         self.send_header("Content-Disposition", f'attachment; filename="{pdf_filename(result)}"')
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
 
+    def handle_rescore(self) -> None:
+        """Rescore a saved result under the current rules. Nothing is recorded (it is not a new run)."""
+        try:
+            payload = self.read_json()
+            response = rescore_result(payload.get("result"))
+        except json.JSONDecodeError:
+            self.send_json({"error": "invalid json"}, HTTPStatus.BAD_REQUEST)
+            return
+        except ValueError as error:
+            self.send_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
+            return
+        self.send_json(response)
+
     def _record_engagement(self, response: dict[str, object]) -> None:
         try:
             from client_discovery import memory
-            from client_discovery.models import ClientIntake, OpportunityScore
+            from client_discovery.models import ClientIntake
 
             if not memory.is_enabled():
                 return
             memory.record_engagement(
                 ClientIntake(**response["intake"]),
-                OpportunityScore(**response["score"]),
+                score_opportunity(ClientIntake(**response["intake"])),  # internal: the full score
                 source="/api/process",
                 documents=sorted(response.get("documents", {})),
             )
@@ -586,9 +659,10 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
                 {
                     "configured": False,
                     "reply": (
-                        "Live Gemini agent is not configured. Set GEMINI_API_KEY "
-                        "(or GOOGLE_API_KEY) to enable it. The deterministic intake "
-                        "pipeline above still works without an API key."
+                        "Live Gemini agent is not configured. It runs on Vertex AI: set "
+                        "GOOGLE_GENAI_USE_VERTEXAI=TRUE, GOOGLE_CLOUD_PROJECT and "
+                        "GOOGLE_CLOUD_LOCATION. The deterministic intake pipeline above "
+                        "still works without it."
                     ),
                 }
             )

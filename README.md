@@ -14,9 +14,11 @@ It ships two complementary paths:
 1. **Deterministic pipeline** (`/api/process`) - parses, validates, scores, and
    generates documents with no API key required. Fully reproducible.
 2. **Live Gemini agent** (`/api/agent`) - a Google ADK `LlmAgent` that calls the
-   Gemini API and uses the deterministic functions as tools. Enabled when a
-   `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) is configured; degrades gracefully
-   otherwise.
+   Gemini on **Vertex AI** and uses the deterministic functions as tools.
+   Enabled when `GOOGLE_GENAI_USE_VERTEXAI=TRUE`, `GOOGLE_CLOUD_PROJECT` and
+   `GOOGLE_CLOUD_LOCATION` are set (auth is ADC); degrades gracefully
+   otherwise. There is no API-key path: `GEMINI_API_KEY` / `GOOGLE_API_KEY`
+   are ignored even when present (`vertex_config.py`).
 
 ## UI features
 
@@ -73,8 +75,12 @@ The repo includes a `Dockerfile` and `deploy-cloudrun.sh`. With the gcloud CLI
 authenticated:
 
 ```bash
-PROJECT_ID=your-project GEMINI_API_KEY=your-key ./deploy-cloudrun.sh
+PROJECT_ID=your-project ./deploy-cloudrun.sh   # optional: VERTEX_LOCATION=global (default)
 ```
+
+The runtime service account needs `roles/aiplatform.user` (the script does not
+grant IAM). The script sets the three Vertex env vars with `--update-env-vars`
+(other env on the service is kept) and unbinds any old `GEMINI_API_KEY` secret.
 
 This enables the required services and runs `gcloud run deploy --source .`,
 building the container with Cloud Build and deploying it. The app binds to
@@ -85,7 +91,7 @@ To enable Google-managed MCP tools in Cloud Run, pass `GCP_MCP_URL` to the same
 script, for example:
 
 ```bash
-PROJECT_ID=your-project GEMINI_API_KEY=your-key \
+PROJECT_ID=your-project \
   GCP_MCP_URL=https://monitoring.googleapis.com/mcp ./deploy-cloudrun.sh
 ```
 
@@ -123,8 +129,9 @@ warning and never blocks or delays an intake.
 ## Run in Codespaces
 
 This repo includes a `.devcontainer/devcontainer.json` for GitHub Codespaces
-(Python 3.12 + Google Cloud CLI). Add `GEMINI_API_KEY` as a Codespaces secret
-before running Gemini-backed flows. Do not commit `.env`.
+(Python 3.12 + Google Cloud CLI). Gemini-backed flows use Vertex AI: run
+`gcloud auth application-default login` and set the three Vertex env vars
+from `.env.example`. Do not commit `.env`.
 
 ```bash
 gcloud --version
