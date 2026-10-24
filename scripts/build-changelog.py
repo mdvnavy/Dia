@@ -58,10 +58,12 @@ SUMMARY: dict[int, tuple[str, str] | None] = {
          "the audio options, and hovering one tells you what it does."),
     49: ("Tidier links on phones",
          "On phones, the links under the prompt bar no longer end with a stray dot when they wrap onto two lines."),
+    50: ("A clearer sign-in button in dark mode",
+         "In dark mode, the Google sign-in button no longer sits in a white box."),
     48: ("Sign in with Google",
          "Sign in with your Google account to use Dia. Each person gets 10 runs a day, a counter shows how many are "
          "left, and the count resets at midnight Eastern time."),
-    50: ("What changed, under the bell",
+    51: ("What changed, under the bell",
          "The bell at the top shows what changed. A dot means something is new. Rest on it or tap it for the latest "
          "changes, or choose See all changes for the full list."),
 }
