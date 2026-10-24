@@ -66,13 +66,17 @@ def browser():
 def open_page(browser, base_url):
     contexts, errors = [], []
 
-    def _open(theme="light", width=1280, height=800):
+    def _open(theme="light", width=1280, height=800, ask_dia=False, kill_switch=False):
         context = browser.new_context(viewport={"width": width, "height": height}, color_scheme=theme,
                                       user_agent="Mozilla/5.0 (X11; Linux x86_64) Chrome/130")
         contexts.append(context)
         p = context.new_page()
         p.on("pageerror", lambda error: errors.append(str(error)))
         p.add_init_script(f"localStorage.setItem('dia-theme', '{theme}')")
+        if ask_dia:   # the browser's view of a server with ASK_DIA_ENABLED on (#41's kill switch is off by default)
+            p.route("**/api/agent/status", lambda route: route.fulfill(json={"configured": True, "enabled": True}))
+        if kill_switch:   # the browser's view of a server with ASK_DIA_ENABLED unset (this module turns it on)
+            p.route("**/api/agent/status", lambda route: route.fulfill(json={"configured": True, "enabled": False}))
         p.goto(base_url + "/")
         p.wait_for_function("document.querySelector('#agentStatus').textContent !== 'checking...'")
         return p
@@ -104,13 +108,16 @@ def test_mic_sits_inside_the_bar_corner(open_page, width, height):
     left_inset, right_inset = plus["x"] - bar["x"], bar["r"] - mic["r"]
     assert abs(left_inset - right_inset) <= 2, (left_inset, right_inset)
     assert abs((mic["y"] + mic["h"] / 2) - (plus["y"] + plus["h"] / 2)) <= 1
-    assert mic["w"] >= 38 and mic["h"] >= 38  # hit target unchanged (46 desktop, 38 phones)
+    assert mic["w"] >= 44 and mic["h"] >= 44  # prompt bar v2: real 44px targets everywhere
     # With text, the mic stays exactly where it was and Run appears just to its LEFT, inside the bar.
     # Measured relative to the bar (the bar itself lifts 2px on focus/hover).
     rel = lambda: {k: round(v - (bar_now["x"] if k in ("x", "r") else bar_now["y"] if k in ("y", "b") else 0), 2)
                    for k, v in box(p, "#intakeMic").items()}
     bar_now = box(p, "#intakeComposer")
     before = rel()
+    # Prompt bar v2: the empty bar centres its placeholder (no right padding); the Run slot is reserved from the first
+    # typed character, which is also when Run appears, so typed text never reflows.
+    p.fill("#questionnaire", "C")
     padding = p.eval_on_selector("#questionnaire", "e => getComputedStyle(e).paddingRight")
     p.fill("#questionnaire", "Client: Gearhead")
     p.wait_for_selector("#runAgent:not([hidden])")
@@ -160,7 +167,7 @@ def test_run_with_text_is_a_full_enabled_button_silver_in_light_graphite_in_dark
 @pytest.mark.parametrize("width,height", WIDTHS)
 def test_composer_order_is_plus_text_run_mic_and_the_mic_mirrors_the_plus(open_page, width, height):
     """Glyph: order [+] text [Run] [mic]; the rule is that the mic's inset mirrors the plus's
-    (12px inside the border on desktop and tablet, 8px on phones, where the bar padding is 8px)."""
+    (12px inside the border on desktop and tablet; 4px on phones, where prompt bar v2's slimmer bar pads 4px)."""
     p = open_page(width=width, height=height)
     p.fill("#questionnaire", "Client: Gearhead")
     p.wait_for_selector("#runAgent:not([hidden])")
@@ -171,7 +178,7 @@ def test_composer_order_is_plus_text_run_mic_and_the_mic_mirrors_the_plus(open_p
     border = float(p.eval_on_selector("#intakeComposer", "e => getComputedStyle(e).borderRightWidth").rstrip("px"))
     plus_inset, mic_inset = plus["x"] - bar["x"] - border, (bar["r"] - border) - mic["r"]
     assert abs(mic_inset - plus_inset) <= 0.5, ("mic must mirror the plus", plus_inset, mic_inset)
-    assert abs(mic_inset - (12 if width > 600 else 8)) <= 0.5, mic_inset
+    assert abs(mic_inset - (12 if width > 600 else 4)) <= 0.5, mic_inset
 
 
 BAR_LOOK = """() => { const c = getComputedStyle(document.querySelector('#intakeComposer'));
@@ -253,7 +260,7 @@ def test_composer_icons_are_smaller_in_both_themes(open_page):
             "#intakeComposer .cmp-circle .icon svg",
             "els => els.filter(e => e.getClientRects().length).map(e => Math.round(e.getBoundingClientRect().width))")
         button = box(p, "#intakeMic")
-        assert button["w"] == 46  # button size unchanged
+        assert button["w"] == 44  # prompt bar v2: 44px circles (was 46)
     assert sizes["light"] == sizes["dark"] and sizes["light"] and all(16 <= s <= 18 for s in sizes["light"])
 
 
@@ -424,7 +431,7 @@ def test_open_voice_panel_clears_the_tray_and_cabinet_buttons_at_390(open_page, 
 @pytest.mark.parametrize("width,height", [(1280, 800), (390, 844)])
 def test_open_ask_dia_voice_panel_leaves_the_heading_uncovered(open_page, theme, width, height):
     """Bash/Ikenna: the Ask DIA panel never covers that composer's heading (the heading slides up, like the status)."""
-    p = open_page(theme=theme, width=width, height=height)
+    p = open_page(theme=theme, width=width, height=height, ask_dia=True)
     p.evaluate("() => document.querySelector('.dropdown-item[data-command=\"ask\"]')?.click() || (document.body.dataset.agent = 'open')")
     p.wait_for_selector("#agentVoiceNotch", state="visible")
     p.eval_on_selector("#agentVoiceNotch", "e => e.scrollIntoView({block: 'center'})")
@@ -578,9 +585,22 @@ def test_status_ready_processing_complete(open_page):
 
 # ---------- narrow placeholder and plus-menu viewport guard ----------
 
+def test_kill_switch_placeholder_survives_a_resize(open_page):
+    """ASK_DIA_ENABLED off (#41): the narrow/wide placeholder swap must not bring back "Ask DIA a question…"."""
+    p = open_page(width=390, height=844, kill_switch=True)
+    p.evaluate("openAgent()")
+    assert p.get_attribute("#agentMessage", "placeholder") == "Ask DIA is temporarily unavailable."
+    p.set_viewport_size({"width": 1280, "height": 800})
+    p.wait_for_timeout(100)
+    assert p.get_attribute("#agentMessage", "placeholder") == "Ask DIA is temporarily unavailable."
+    p.set_viewport_size({"width": 390, "height": 844})
+    p.wait_for_timeout(100)
+    assert p.get_attribute("#agentMessage", "placeholder") == "Ask DIA is temporarily unavailable."
+
+
 @pytest.mark.parametrize("selector", ["#questionnaire", "#agentMessage"])
 def test_placeholder_is_not_clipped_at_390(open_page, selector):
-    p = open_page(width=390, height=844)
+    p = open_page(width=390, height=844, ask_dia=True)
     if selector == "#agentMessage":
         p.evaluate("openAgent()")
         p.wait_for_selector("#agentMessage", state="visible")
