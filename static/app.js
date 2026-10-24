@@ -3902,3 +3902,36 @@ rerunUpdated.addEventListener("click", () => {
   if (entry) { rerunIntake(entry); return; }
   rerunIntake({ id: null, title: latestPayload?.intake?.company_name || "this intake", questionnaire: lastRunQuestionnaire || questionnaire.value });
 });
+
+// Link rows (Upload a file · Load sample · Learn how to use DIA): when the row wraps at 390/360, no "·" may be
+// left hanging at a line end (or lead a line). Measure with every separator shown, then turn each separator
+// whose neighbour sits on another line into a line break (.dot-sep.is-break, see style.css).
+function fitDotSeparators(row) {
+  const seps = [...row.querySelectorAll(":scope > .dot-sep")];
+  seps.forEach((sep) => sep.classList.remove("is-break"));
+  const shown = (el) => el && !el.hidden && el.getClientRects().length > 0;
+  const sibling = (sep, dir) => {
+    let el = sep[dir];
+    while (el && (!shown(el) || el.classList.contains("dot-sep"))) el = el[dir];
+    return el;
+  };
+  const top = (el) => el.getBoundingClientRect().top;
+  const breaks = seps.filter((sep) => {
+    if (!shown(sep)) return false;
+    const before = sibling(sep, "previousElementSibling"), after = sibling(sep, "nextElementSibling");
+    const line = top(sep), lh = sep.getBoundingClientRect().height || 1;
+    return (after && top(after) - line > lh) || (before && line - top(before) > lh);
+  });
+  breaks.forEach((sep) => sep.classList.add("is-break"));
+}
+document.querySelectorAll(".actions.under-prompt").forEach((row) => {
+  if (!row.querySelector(":scope > .dot-sep")) return;
+  let width = -1;
+  const refit = () => fitDotSeparators(row);
+  new ResizeObserver(([entry]) => {
+    const w = Math.round(entry.contentRect.width);
+    if (w !== width) { width = w; refit(); }   // width only: the break changes the row's height, never its width
+  }).observe(row);
+  new MutationObserver(refit).observe(row, { subtree: true, attributes: true, attributeFilter: ["hidden"], childList: true, characterData: true });
+  document.fonts?.ready?.then(refit);
+});
