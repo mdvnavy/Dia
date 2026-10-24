@@ -27,30 +27,12 @@ APP_NAME = "dia_discovery_intake_agent"
 USER_ID = "demo-user"
 logger = logging.getLogger(__name__)
 
-MAKE_MCP_KEYWORDS = (
-    "make tool",
-    "record lead",
-    "save proposal",
-    "email proposal",
-    "escalate",
-    "handoff",
-    "enrich prospect",
-    "google drive",
-    "sheet",
-)
-
-GCP_MCP_KEYWORDS = (
-    "gcp",
-    "cloud run",
-    "monitoring",
-    "metric",
-    "dashboard",
-    "alert",
-    "logs",
-    "latency",
-    "error rate",
-)
-
+MCP_MODES = {
+    "none": (False, False),
+    "make": (True, False),
+    "gcp": (False, True),
+    "all": (True, True),
+}
 
 class AgentNotConfigured(RuntimeError):
     """Raised when Vertex AI is not configured for live agent runs."""
@@ -63,34 +45,25 @@ def is_configured() -> bool:
     return is_vertex_configured()
 
 
-def _truthy_env(name: str) -> bool:
-    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+def _select_mcp_toolsets(message: str = "") -> tuple[bool, bool]:
+    """Return (include_make, include_gcp) from explicit configuration only.
 
+    MCP toolsets can trigger real side effects (Make scenarios) or attach very
+    large schemas (GCP Monitoring), so they are never switched on by words in
+    the user's message - that would let any prompt (or prompt injection) opt
+    itself into tools. ``DIA_AGENT_MCP_MODE`` is the only switch:
 
-def _select_mcp_toolsets(message: str) -> tuple[bool, bool]:
-    """Choose MCP toolsets for this turn without bloating ordinary demo prompts.
+    ``none`` (default) | ``make`` | ``gcp`` | ``all``
 
-    GCP Monitoring exposes very large schemas through MCP. Attaching those tools
-    to every Gemini turn can exceed model input limits before the agent runs, so
-    the web bridge keeps client-report questions on the core DIA tools by
-    default and attaches MCPs only when the turn is explicitly operational.
+    Unknown values (including the retired ``auto``) fall back to ``none``.
+    ``message`` is accepted for call-site compatibility and deliberately unused.
     """
-    mode = os.environ.get("DIA_AGENT_MCP_MODE", "auto").strip().lower()
-    if mode == "all":
-        return True, True
-    if mode == "make":
-        return True, False
-    if mode == "gcp":
-        return False, True
-    if mode == "none":
-        return False, False
-
-    lowered = message.lower()
-    include_make = any(keyword in lowered for keyword in MAKE_MCP_KEYWORDS)
-    include_gcp = _truthy_env("DIA_AGENT_ALLOW_GCP_MCP_TOOLS") and any(
-        keyword in lowered for keyword in GCP_MCP_KEYWORDS
-    )
-    return include_make, include_gcp
+    del message
+    mode = os.environ.get("DIA_AGENT_MCP_MODE", "none").strip().lower() or "none"
+    if mode not in MCP_MODES:
+        logger.warning("Unknown DIA_AGENT_MCP_MODE %r; MCP tools disabled", mode)
+        mode = "none"
+    return MCP_MODES[mode]
 
 
 async def _run_turn(message: str) -> str:

@@ -36,6 +36,7 @@ MAX_REQUEST_BYTES = 10 * 1024 * 1024
 PUBLIC_FILES = {
     "/": BASE_DIR / "templates" / "index.html",
     "/static/app.js": BASE_DIR / "static" / "app.js",
+    "/static/google-signin.js": BASE_DIR / "static" / "google-signin.js",
     "/static/style.css": BASE_DIR / "static" / "style.css",
     "/static/cabinet-fan.css": BASE_DIR / "static" / "cabinet-fan.css",
     "/static/pixel-hover.css": BASE_DIR / "static" / "pixel-hover.css",
@@ -178,6 +179,35 @@ def response_for_intake(intake) -> dict[str, object]:
     }
 
 
+# --- route table (lockdown v2: "No use without signing in") -------------------
+#
+# Every functional route is listed here with gated=True and is refused with
+# 401 {"error": "sign_in_required"} before any work when there is no valid
+# signed session. Only the sign-in endpoints and read-only pages are public.
+# tests/test_sign_in_gate.py fails if a route is added outside this table or
+# is added ungated without being on its public allow-list.
+GET_ROUTES: dict[str, tuple[str, bool]] = {
+    "/healthz": ("handle_health", False),
+    "/health": ("handle_health", False),
+    "/api/config": ("handle_config", False),
+    "/api/consulting": ("handle_consulting", False),
+    "/api/auth/config": ("handle_auth_config", False),
+    "/api/agent/status": ("handle_agent_status", False),
+    "/api/sample": ("handle_sample", True),
+    "/api/usage": ("handle_usage", True),
+}
+POST_ROUTES: dict[str, tuple[str, bool]] = {
+    "/api/auth/session": ("handle_auth_session", False),
+    "/api/auth/logout": ("handle_auth_logout", False),
+    "/api/process": ("handle_process", True),
+    "/api/agent": ("handle_agent", True),
+    "/api/extract": ("handle_extract", True),
+    "/api/pdf": ("handle_pdf", True),
+    # Main's rescore of a saved result: deterministic, no Gemini and not a new run, so signed-in only, never charged.
+    "/api/rescore": ("handle_rescore", True),
+}
+
+
 class ClientDiscoveryHandler(BaseHTTPRequestHandler):
     server_version = "DIADiscoveryIntakeAgent/0.1"
     # Socket timeout so a client that claims a body but never sends it cannot
@@ -186,25 +216,8 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         path = urlparse(self.path).path
-        if path in ("/healthz", "/health"):
-            self.send_json({"status": "ok"})
-            return
-        if path == "/api/sample":
-            self.send_json({"questionnaire": read_sample_questionnaire()})
-            return
-        if path == "/api/config":
-            self.send_json(public_config())
-            return
-        if path == "/api/consulting":
-            self.send_json(consulting_config())
-            return
-        if path == "/api/agent/status":
-            if not ask_dia_enabled():
-                self.send_json({"configured": False, "enabled": False})
-                return
-            from agent_runtime import is_configured
-
-            self.send_json({"configured": is_configured(), "enabled": True})
+        if path in GET_ROUTES:
+            self._dispatch(GET_ROUTES[path])
             return
 
         file_path = PUBLIC_FILES.get(path)
@@ -220,33 +233,155 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path
-        if path == "/api/process":
-            self.handle_process()
-            return
-        if path == "/api/agent":
-            self.handle_agent()
-            return
-        if path == "/api/extract":
-            self.handle_extract()
-            return
-        if path == "/api/pdf":
-            self.handle_pdf()
-            return
-        if path == "/api/rescore":
-            self.handle_rescore()
+        if path in POST_ROUTES:
+            self._dispatch(POST_ROUTES[path])
             return
         self.send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
 
+    def _dispatch(self, route: tuple[str, bool]) -> None:
+        """Run a route's handler; gated routes need a valid signed session."""
+        from agent_auth import (
+            ASK_DIA_RETRY_AFTER_SECONDS,
+            ASK_DIA_UNAVAILABLE_MESSAGE,
+            SIGN_IN_MESSAGE,
+            SIGN_IN_REQUIRED,
+            ask_dia_enabled,
+            request_identity,
+        )
+
+        handler_name, gated = route
+        self.identity = None
+        if handler_name == "handle_agent" and not ask_dia_enabled():
+            # Kill switch first, before sign-in, the body, quota or Gemini,
+            # for owners too, so flipping ASK_DIA_ENABLED stops all spend.
+            self.close_connection = True
+            self.send_json(
+                # Main's #41 shape ({"enabled": false, "reply"}) plus the lockdown's longer "error" message.
+                {"enabled": False, "reply": ASK_DIA_DISABLED_REPLY, "error": ASK_DIA_UNAVAILABLE_MESSAGE},
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                extra_headers={"Retry-After": str(ASK_DIA_RETRY_AFTER_SECONDS)},
+            )
+            return
+        if gated:
+            self.identity = request_identity(self.headers)
+            if self.identity is None:
+                # Don't read the body: drop the connection after replying.
+                self.close_connection = True
+                self.send_json(
+                    {"error": SIGN_IN_REQUIRED, "message": SIGN_IN_MESSAGE},
+                    HTTPStatus.UNAUTHORIZED,
+                    extra_headers={"Cache-Control": "no-store"},
+                )
+                return
+        getattr(self, handler_name)()
+
+    def handle_health(self) -> None:
+        self.send_json({"status": "ok"})
+
+    def handle_config(self) -> None:
+        self.send_json(public_config())
+
+    def handle_consulting(self) -> None:
+        self.send_json(consulting_config())
+
+    def handle_sample(self) -> None:
+        self.send_json({"questionnaire": read_sample_questionnaire()})
+
+    # --- quota helpers (gated routes only; self.identity is set) -------------
+
+    def _usage(self) -> dict[str, object]:
+        from agent_quota import get_quota
+
+        identity = self.identity
+        if identity.uncapped:
+            return {"signed_in": True, "owner": True, "unlimited": True}
+        return {"signed_in": True, "owner": False, "unlimited": False, **get_quota().usage(identity.sub)}
+
+    def _burst_ok(self, limiter) -> bool:
+        """Per-user burst guard; owners skip it. Sends the 429 when tripped."""
+        if self.identity.uncapped:
+            return True
+        allowed, retry_after = limiter.check(self.identity.sub)
+        if not allowed:
+            self.send_json(
+                {"error": "burst_limited", "message": "That's a lot at once. Give it a few seconds and try again."},
+                HTTPStatus.TOO_MANY_REQUESTS,
+                extra_headers={"Retry-After": str(retry_after)},
+            )
+        return allowed
+
+    def _charge(self, bucket: str) -> bool:
+        """Charge one unit before the work. Sends the 429/503 and returns False when refused."""
+        from agent_quota import QuotaUnavailable, get_quota, limit_message
+
+        if self.identity.uncapped:
+            return True
+        quota = get_quota()
+        try:
+            result = quota.consume(bucket, self.identity.sub)
+            self._charges = {**getattr(self, "_charges", {}), bucket: result}
+        except QuotaUnavailable:
+            self.send_json(
+                {"error": "quota_unavailable", "message": "DIA couldn't check today's allowance. Try again in a moment."},
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                extra_headers={"Retry-After": "30"},
+            )
+            return False
+        if not result.allowed:
+            self.send_json(
+                {
+                    "error": "daily_limit",
+                    "bucket": bucket,
+                    "message": limit_message(bucket, result.state.limit),
+                    "usage": self._usage(),
+                },
+                HTTPStatus.TOO_MANY_REQUESTS,
+                extra_headers={"Retry-After": str(result.retry_after(quota.now()))},
+            )
+            return False
+        return True
+
+    def _refund(self, bucket: str) -> None:
+        from agent_quota import get_quota
+
+        if not self.identity.uncapped:
+            # Refund the charge this request made (its day and store), not whatever "today" is now.
+            charge = getattr(self, "_charges", {}).pop(bucket, None)
+            get_quota().refund(bucket, self.identity.sub, charge)
+
+    def handle_usage(self) -> None:
+        self.send_json(self._usage(), extra_headers={"Cache-Control": "no-store"})
+
     def handle_process(self) -> None:
+        from agent_auth import generation_burst
+        from agent_quota import GENERATIONS
+
+        if not self._burst_ok(generation_burst):
+            return
         try:
             payload = self.read_json()
-            response = build_intake_response(str(payload.get("questionnaire", "")))
         except json.JSONDecodeError:
             self.send_json({"error": "invalid json"}, HTTPStatus.BAD_REQUEST)
             return
         except ValueError as error:
             self.send_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
             return
+        questionnaire = str(payload.get("questionnaire", ""))
+        if not questionnaire.strip():
+            self.send_json({"error": "questionnaire is required"}, HTTPStatus.BAD_REQUEST)
+            return
+        if not self._charge(GENERATIONS):
+            return
+        try:
+            response = build_intake_response(questionnaire)
+        except ValueError as error:
+            self._refund(GENERATIONS)
+            self.send_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
+            return
+        except Exception:
+            self._refund(GENERATIONS)
+            raise
+        response["usage"] = self._usage()
 
         self.send_json(response)
 
@@ -264,8 +399,11 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
 
     def handle_extract(self) -> None:
         """Raw file body in, questionnaire text out. Filename via X-Filename or ?name=."""
+        from agent_auth import utility_burst
         from client_discovery.extract import MAX_UPLOAD_BYTES, ExtractionError, extract_text
 
+        if not self._burst_ok(utility_burst):
+            return
         query = parse_qs(urlparse(self.path).query)
         filename = unquote(self.headers.get("X-Filename", "")) or (query.get("name") or [""])[0]
         try:
@@ -295,30 +433,52 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
         self.send_json({"filename": filename, "questionnaire": text, "characters": len(text)})
 
     def handle_pdf(self) -> None:
-        """Render the formatted intake report. Body: {questionnaire} or {result}, optional date."""
+        """Render the formatted intake report. Body: {result} or {questionnaire}, optional date.
+
+        Re-rendering an existing run ({result}) is an export and is not
+        charged. Building from a {questionnaire} re-runs the pipeline, so it
+        costs one generation (otherwise it would be an uncapped /api/process).
+        """
+        from agent_auth import generation_burst, utility_burst
+        from agent_quota import GENERATIONS
         from client_discovery.report import pdf_filename, render_pdf
 
         try:
             payload = self.read_json()
-            questionnaire = str(payload.get("questionnaire") or "")
-            saved = payload.get("result")
-            # Proto (#39 follow-up): a saved result is the source when one exists (its intake answers, rescored by
-            # DIA's own rules in render_pdf), so the PDF matches the screen; the questionnaire is the fallback.
-            if isinstance(saved, dict) and isinstance(saved.get("intake"), dict):
-                result = saved
-            elif questionnaire.strip():
-                result = build_intake_response(questionnaire)
-            else:
-                raise ValueError("questionnaire or result is required")
-            report_date = payload.get("date")
-            body = render_pdf(result, report_date=str(report_date) if report_date else None)
         except json.JSONDecodeError:
             self.send_json({"error": "invalid json"}, HTTPStatus.BAD_REQUEST)
             return
         except ValueError as error:
             self.send_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
             return
+        questionnaire = str(payload.get("questionnaire") or "")
+        saved = payload.get("result")
+        # Proto (#39 follow-up, main): a saved result is the source only when it carries its intake answers
+        # (render_pdf rescores them by DIA's own rules); otherwise the questionnaire is the fallback.
+        from_result = isinstance(saved, dict) and isinstance(saved.get("intake"), dict)
+        charged = False
+        if from_result:
+            if not self._burst_ok(utility_burst):
+                return
+        elif questionnaire.strip():
+            if not self._burst_ok(generation_burst) or not self._charge(GENERATIONS):
+                return
+            charged = True
+        else:
+            self.send_json({"error": "questionnaire or result is required"}, HTTPStatus.BAD_REQUEST)
+            return
+        try:
+            result = payload["result"] if from_result else build_intake_response(questionnaire)
+            report_date = payload.get("date")
+            body = render_pdf(result, report_date=str(report_date) if report_date else None)
+        except ValueError as error:
+            if charged:
+                self._refund(GENERATIONS)
+            self.send_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
+            return
         except Exception as error:  # noqa: BLE001
+            if charged:
+                self._refund(GENERATIONS)
             logger.warning("pdf render failed: %s", error)
             self.send_json({"error": "PDF rendering failed on the server."}, HTTPStatus.INTERNAL_SERVER_ERROR)
             return
@@ -374,18 +534,139 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
         except Exception as error:  # noqa: BLE001 - capture must never break intake
             logger.warning("OBS capture skipped: %s", error)
 
-    def handle_agent(self) -> None:
-        # Kill switch first: no body parsing, no model call, no quota when off.
-        if not ask_dia_enabled():
-            self.close_connection = True
+    # --- live agent ---------------------------------------------------------
+
+    def _secure_request(self) -> bool:
+        return bool(os.environ.get("K_SERVICE")) or (
+            self.headers.get("X-Forwarded-Proto", "").lower() == "https"
+        )
+
+    def _queue_header(self, name: str, value: str) -> None:
+        pending = getattr(self, "_pending_headers", None)
+        if pending is None:
+            pending = self._pending_headers = []
+        pending.append((name, value))
+
+    def _auth_state(self) -> dict[str, object]:
+        from agent_auth import request_identity
+
+        identity = request_identity(self.headers)
+        if identity is None:
+            return {"signed_in": False, "email": None, "owner": False}
+        return {
+            "signed_in": True,
+            "email": identity.email or None,
+            "owner": identity.uncapped,
+        }
+
+    def handle_auth_config(self) -> None:
+        from agent_auth import google_client_id, sign_in_enabled
+
+        enabled = sign_in_enabled()
+        self.send_json(
+            {
+                "enabled": enabled,
+                "google_client_id": google_client_id() if enabled else None,
+                **self._auth_state(),
+            },
+            extra_headers={"Cache-Control": "no-store"},
+        )
+
+    def handle_auth_session(self) -> None:
+        from agent_auth import (
+            SignInError,
+            auth_burst,
+            client_ip,
+            hashed_ip,
+            is_owner_identity,
+            make_session,
+            session_cookie_header,
+            sign_in_enabled,
+            verify_google_credential,
+        )
+
+        if not sign_in_enabled():
+            self.send_json({"error": "Google sign-in is not configured."}, HTTPStatus.NOT_FOUND)
+            return
+        # JSON only: a cross-site <form> can't send application/json without a
+        # CORS preflight, so this also blocks login CSRF.
+        if not self.headers.get("Content-Type", "").lower().startswith("application/json"):
+            self.send_json({"error": "json body required"}, HTTPStatus.UNSUPPORTED_MEDIA_TYPE)
+            return
+        allowed, retry_after = auth_burst.check(
+            hashed_ip(client_ip(self.headers, self.client_address[0]))
+        )
+        if not allowed:
             self.send_json(
-                {"enabled": False, "reply": ASK_DIA_DISABLED_REPLY},
-                HTTPStatus.SERVICE_UNAVAILABLE,
-                headers={"Retry-After": "3600"},
+                {"error": "Too many sign-in attempts. Give it a minute and try again."},
+                HTTPStatus.TOO_MANY_REQUESTS,
+                extra_headers={"Retry-After": str(retry_after)},
             )
             return
+        try:
+            payload = self.read_json()
+            # Tia sends the GIS credential as "Authorization: Bearer <id token>";
+            # a JSON {"credential"} body is also accepted.
+            credential = self.headers.get("Authorization", "") or str(payload.get("credential", ""))
+            identity = verify_google_credential(credential)
+        except SignInError as error:
+            self.send_json(
+                {"error": str(error), "status": "unauthorized", "authorized": False, "message": str(error)},
+                HTTPStatus.UNAUTHORIZED,
+            )
+            return
+        except (json.JSONDecodeError, ValueError):
+            self.send_json({"error": "invalid json"}, HTTPStatus.BAD_REQUEST)
+            return
+        self._queue_header(
+            "Set-Cookie", session_cookie_header(make_session(identity), self._secure_request())
+        )
+        owner = is_owner_identity(identity)
+        # Tia's /api/auth/session shape (status, authorized, message, user) plus
+        # DIA's signed_in/email/owner. The ID token itself is never echoed.
+        self.send_json(
+            {
+                "status": "authorized",
+                "authorized": True,
+                "message": "Signed in.",
+                "user": {"sub": identity.sub, "email": identity.email, "name": identity.name},
+                "signed_in": True,
+                "email": identity.email,
+                "owner": owner,
+            },
+            extra_headers={"Cache-Control": "no-store"},
+        )
 
+    def handle_auth_logout(self) -> None:
+        from agent_auth import clear_session_cookie_header
+
+        self._queue_header("Set-Cookie", clear_session_cookie_header(self._secure_request()))
+        self.send_json({"signed_in": False, "email": None, "owner": False})
+
+    def handle_agent_status(self) -> None:
+        """Public: whether Ask DIA is on and configured, and who is signed in. No counts."""
+        from agent_auth import ask_dia_enabled, configured_mode
+        from agent_runtime import is_configured
+
+        enabled = ask_dia_enabled()
+        self.send_json(
+            {
+                "enabled": enabled,
+                "configured": bool(enabled and is_configured()),
+                "auth": configured_mode(),
+                **self._auth_state(),
+            },
+            extra_headers={"Cache-Control": "no-store"},
+        )
+
+    def handle_agent(self) -> None:
+        """Ask DIA. The kill switch and sign-in gate already ran in _dispatch."""
+        from agent_auth import ask_burst
+        from agent_quota import ASK
         from agent_runtime import AgentNotConfigured, is_configured, run_agent
+
+        if not self._burst_ok(ask_burst):
+            return
 
         try:
             payload = self.read_json()
@@ -402,6 +683,7 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
             return
 
         if not is_configured():
+            # Nothing is spent, so nothing is charged against the quota.
             self.send_json(
                 {
                     "configured": False,
@@ -415,19 +697,24 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
             )
             return
 
+        # Charge before the model call; refund if the call fails.
+        if not self._charge(ASK):
+            return
         try:
             reply = run_agent(message)
         except AgentNotConfigured as error:
-            self.send_json({"configured": False, "reply": str(error)})
+            self._refund(ASK)
+            self.send_json({"configured": False, "reply": str(error), "usage": self._usage()})
             return
         except Exception as error:  # noqa: BLE001 - surface agent errors to the demo UI
+            self._refund(ASK)
             self.send_json(
-                {"error": f"agent run failed: {error}"},
+                {"error": f"agent run failed: {error}", "usage": self._usage()},
                 HTTPStatus.BAD_GATEWAY,
             )
             return
 
-        self.send_json({"configured": True, "reply": reply})
+        self.send_json({"configured": True, "reply": reply, "usage": self._usage()})
 
     def read_json(self) -> dict[str, object]:
         try:
@@ -450,13 +737,15 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
         self,
         payload: dict[str, object],
         status: HTTPStatus = HTTPStatus.OK,
-        headers: dict[str, str] | None = None,
+        extra_headers: dict[str, str] | None = None,
     ) -> None:
         body = json.dumps(payload, indent=2).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
-        for name, value in (headers or {}).items():
+        headers = [*(getattr(self, "_pending_headers", None) or []), *(extra_headers or {}).items()]
+        self._pending_headers = []
+        for name, value in headers:
             self.send_header(name, value)
         self.end_headers()
         self.wfile.write(body)
