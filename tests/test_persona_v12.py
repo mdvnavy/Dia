@@ -54,8 +54,11 @@ def test_assistant_segmented_control_reuses_icon_style_component_below_it():
 
 
 def test_trust_line_copy_per_mode():
-    assert "Scoring is deterministic. Only Ask DIA and its suggestions send text to Gemini." in INDEX
-    assert "Nothing leaves this browser except the deterministic run." in INDEX
+    # Proto help popover v0.2: the copy lives in HELP_POPOVER (app.js) and fills the popover footnote #intakeNote.
+    assert "Scoring is rule-based and doesn't use AI. Only Ask DIA and its suggestions send text to Gemini." in APP_JS
+    assert "Scoring is rule-based and doesn't use AI. Ask DIA is off, so no text goes to Gemini." in APP_JS
+    assert 'id="intakeNote"' in INDEX and 'data-hp="footOn"' in INDEX and 'data-hp="footOff"' in INDEX
+    assert "Nothing leaves this browser except the deterministic run." not in APP_JS
 
 
 def test_first_person_only_inside_ask_dia():
@@ -269,7 +272,10 @@ def test_off_mode_removes_ask_dia_and_sends_nothing(context, base_url):
     page.evaluate("setAssistantMode('off')")
     run_intake(page, MISSING)
     assert page.is_hidden("#draftFollowups") and page.is_hidden("#agentStage")
+    page.click("#helpPopoverBtn")   # the line lives in the help popover's footnote (Proto help popover v0.2)
     assert page.is_visible("#intakeNote .trust-off") and page.is_hidden("#intakeNote .trust-on")
+    assert page.inner_text("#intakeNote .trust-off") == "Scoring is rule-based and doesn't use AI. Ask DIA is off, so no text goes to Gemini."
+    page.keyboard.press("Escape")
     assert page.is_hidden('#navDropdown [data-command="ask"]')
     page.evaluate("openAgent(); document.querySelector('#agentMessage').value = 'hi'; sendAgentMessage(); draftFollowUpQuestions();")
     page.wait_for_timeout(200)

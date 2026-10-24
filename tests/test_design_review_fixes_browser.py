@@ -168,25 +168,29 @@ def test_open_voice_panel_never_covers_collapse_intake(open_page, theme, width, 
     # The toggle is still clickable where it's drawn.
     hit = p.evaluate(f"document.elementFromPoint({toggle['x'] + toggle['w'] / 2}, {toggle['y'] + toggle['h'] / 2})?.id")
     assert hit == "intakeToggle"
-    p.click("#intakeVoiceNotch")
+    p.keyboard.press("Escape")   # composer v3: the open drawer pill covers the hidden notch
 
 
 # ---------- 3. voice panel targets ----------
 
 @pytest.mark.parametrize("width,height", [(390, 844), (360, 780)])
-def test_voice_panel_items_are_44px_on_phones(open_page, width, height):
+def test_voice_panel_items_have_44px_targets_on_phones(open_page, width, height):
     p = open_page(width=width, height=height)
     p.click("#intakeVoiceNotch")
     p.wait_for_function("getComputedStyle(document.querySelector('#intakeVoiceFan')).opacity === '1'")
     p.wait_for_timeout(400)
     items = p.eval_on_selector_all("#intakeVoiceFan .voice-item", "els => els.map(e => { const r = e.getBoundingClientRect(); return [r.width, r.height]; })")
-    assert len(items) == 3 and all(w >= 44 and h >= 44 for w, h in items), items
+    # Composer v3 (Glyph): 36px icon items; phones add an invisible 44px hit area (::before, inset -4px) with no overlap.
+    assert len(items) == 3 and all(w >= 36 and h >= 36 for w, h in items), items
+    hits = p.eval_on_selector_all("#intakeVoiceFan .voice-item", "els => els.map(e => { const s = getComputedStyle(e, '::before'); const r = e.getBoundingClientRect(); return s.content === 'none' ? [0, 0, 0] : [r.width - 2 * parseFloat(s.left), r.height - 2 * parseFloat(s.top), r.left + parseFloat(s.left)]; })")
+    assert all(w >= 44 and h >= 44 for w, h, _ in hits), hits
+    assert all(hits[i][2] + hits[i][0] <= hits[i + 1][2] + 0.5 for i in range(len(hits) - 1)), hits
     fan, bar = _box(p, "#intakeVoiceFan"), _box(p, "#intakeComposer")
     for dock in ("#trayButton", "#cabinetButton"):
         assert not _overlaps(fan, _box(p, dock)), dock
     assert fan["x"] >= bar["x"] and fan["r"] <= bar["r"]
-    # The glyph stays 16px.
-    assert p.eval_on_selector("#intakeFanListen .icon svg", "e => Math.round(e.getBoundingClientRect().width)") == 16
+    # Composer v3 glyphs are 18px.
+    assert p.eval_on_selector("#intakeFanListen .icon svg", "e => Math.round(e.getBoundingClientRect().width)") == 18
 
 
 # ---------- 4. tab order ----------
@@ -229,8 +233,12 @@ def _hex_rgb(value):
 def test_dark_focus_ring_is_control_focus_not_gold(open_page, selector):
     p = open_page(theme="dark")
     p.evaluate("""() => { document.querySelector('#inputsPrompt').hidden = false; document.querySelector('#inputsPromptServices').hidden = false; }""")
-    p.focus("#questionnaire")
-    p.keyboard.press("Tab")  # keyboard modality, so :focus-visible applies to the next programmatic focus too
+    if selector == "#loadSample":   # Load sample lives in the help popover (composer v3)
+        p.click("#helpPopoverBtn")
+        p.keyboard.press("Tab")   # keyboard modality inside the popover
+    else:
+        p.focus("#questionnaire")
+        p.keyboard.press("Tab")  # keyboard modality, so :focus-visible applies to the next programmatic focus too
     p.focus(selector)
     assert p.evaluate("(s) => document.querySelector(s).matches(':focus-visible')", selector)
     look = p.evaluate(FOCUS, selector)
@@ -242,7 +250,7 @@ def test_dark_focus_ring_is_control_focus_not_gold(open_page, selector):
 
 def test_light_focus_ring_unchanged(open_page):
     p = open_page(theme="light")
-    p.focus("#questionnaire")
+    p.click("#helpPopoverBtn")   # Load sample lives in the help popover (composer v3)
     p.keyboard.press("Tab")
     p.focus("#loadSample")
     assert p.evaluate(FOCUS, "#loadSample")["color"] == "rgb(95, 102, 112)"

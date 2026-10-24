@@ -72,7 +72,7 @@ def option_labels(p):
 
 
 def test_palette_keyboard_filter_run_and_focus_return(page):
-    page.focus("#loadSample")
+    page.focus("#trayButton")   # Load sample moved into the help popover (composer v3); the tray is on the first screen
     page.keyboard.press("Control+k")
     assert page.evaluate("commandPalette.open")
     assert active_id(page) == "paletteInput"
@@ -102,7 +102,7 @@ def test_palette_keyboard_filter_run_and_focus_return(page):
     page.keyboard.press("Escape")
     assert not page.evaluate("commandPalette.open")
     assert page.get_attribute("#paletteInput", "aria-expanded") == "false"
-    assert active_id(page) == "loadSample"  # focus returns where it was
+    assert active_id(page) == "trayButton"  # focus returns where it was
 
     # Enter runs the active command.
     before = page.evaluate("document.documentElement.dataset.theme")
@@ -121,6 +121,7 @@ def test_palette_keyboard_filter_run_and_focus_return(page):
 
 
 def test_palette_runs_intake_and_new_intake_resets_to_landing(page):
+    page.click("#helpPopoverBtn")
     page.click("#loadSample")
     page.wait_for_function("document.querySelector('#questionnaire').value.length > 0")
     page.keyboard.press("Control+k")
@@ -186,7 +187,7 @@ def test_reduced_motion_disables_palette_animation(browser, base_url):
 
 def test_light_focus_ring_uses_dark_silver(page):
     page.evaluate("document.documentElement.dataset.theme = 'light'")
-    page.focus("#loadSample")
+    page.focus("#trayButton")
     page.keyboard.press("Tab")  # keyboard focus so :focus-visible applies
     colour = page.evaluate("getComputedStyle(document.activeElement).outlineColor")
     assert colour == "rgb(95, 102, 112)"

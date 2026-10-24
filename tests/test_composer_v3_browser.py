@@ -179,7 +179,9 @@ def test_drawer_is_a_small_floating_pill_above_the_bar(open_page, width):
     p.click("#intakeVoiceNotch")
     p.wait_for_timeout(300)
     fan, bar = box(p, "#intakeVoiceFan"), box(p, "#intakeComposer")
-    assert round(fan["h"]) == 44 and fan["w"] <= 130, fan
+    # 3 x 36 + gaps + 4px padding + 1px border: 4px gaps on desktop (126); phones widen the gap to 8px (134) so the
+    # 44px hit areas don't overlap (Ikenna: keep 44x44 targets on phones).
+    assert round(fan["h"]) == 44 and fan["w"] <= (130 if width >= 768 else 134), fan
     assert abs(bar["y"] - fan["b"] - 8) <= 1.01
     assert abs((fan["x"] + fan["w"] / 2) - (bar["x"] + bar["w"] / 2)) <= 1.01
     for sel in ("#status", "#trayButton", "#cabinetButton"):
@@ -342,7 +344,8 @@ def test_learn_opens_help_and_settings_and_returns_focus(open_page):
     assert p.evaluate("document.querySelector('#diaHelpDialog').open")
     p.keyboard.press("Escape")
     p.wait_for_function("!document.querySelector('#diaHelpDialog').open")
-    assert p.evaluate("document.activeElement.id") == "helpPopoverBtn"
+    # focus returns on the dialog's (async) close event
+    p.wait_for_function("document.activeElement.id === 'helpPopoverBtn'", timeout=2000)
 
 
 def test_load_sample_empty_box_loads(open_page):

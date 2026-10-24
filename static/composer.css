@@ -421,11 +421,12 @@ html .prompt-bar.has-cmp .cmp-run-slot { right: calc(var(--v3-pad) + var(--run-s
 @media (min-width: 601px) { html .prompt-bar.has-cmp .cmp-run-slot { right: calc(var(--v3-pad) - 1px + var(--run-slot)); } }
 html .prompt-bar.has-cmp.multiline .cmp-run-slot { bottom: var(--v3-pad); }
 html .prompt-bar.has-cmp .cmp-mic { margin-left: auto; translate: none; }
-html .prompt-bar.has-cmp .cmp-enter[hidden] { opacity: 0 !important; scale: 0.9; visibility: hidden; pointer-events: none; transition: opacity 160ms ease-in, scale 160ms ease-in, visibility 0s linear 160ms; }
-html .prompt-bar.has-cmp .cmp-enter:not([hidden]) { opacity: 1; scale: 1; visibility: visible; pointer-events: auto; }
-@media (prefers-reduced-motion: reduce) {
-  html .prompt-bar.has-cmp .cmp-enter, html .prompt-bar.has-cmp .cmp-enter[hidden] { scale: 1; transition: opacity 160ms linear, visibility 0s linear 160ms; }
-  html .prompt-bar.has-cmp .cmp-enter:not([hidden]) { transition: opacity 160ms linear, visibility 0s; }
+/* Selectors carry .action-btn.cmp-circle so they outrank the shared button transition above. */
+html .prompt-bar.has-cmp .action-btn.cmp-circle.cmp-enter[hidden] { opacity: 0 !important; scale: 0.9; visibility: hidden; pointer-events: none; transition: opacity 160ms ease-in, scale 160ms ease-in, visibility 0s linear 160ms; }
+html .prompt-bar.has-cmp .action-btn.cmp-circle.cmp-enter:not([hidden]) { opacity: 1; scale: 1; visibility: visible; pointer-events: auto; }
+@media (prefers-reduced-motion: reduce) {   /* opacity only (Glyph v3), a short 100ms fade */
+  html .prompt-bar.has-cmp .action-btn.cmp-circle.cmp-enter[hidden] { scale: 1; transition: opacity 100ms linear, visibility 0s linear 100ms; }
+  html .prompt-bar.has-cmp .action-btn.cmp-circle.cmp-enter:not([hidden]) { scale: 1; transition: opacity 100ms linear, visibility 0s; }
 }
 .cmp-tip-mic { right: var(--v3-pad); }
 
@@ -438,9 +439,15 @@ html .dock-row .dock-icon:hover, html .dock-row .cabinet-btn:hover { background:
 html .dock-row .dock-icon:active { background: var(--v3-btn-active); }
 html .dock-row .dock-icon .icon svg { width: 18px; height: 18px; }
 @media (max-width: 767.98px) { html .dock-row .dock-icon::before { content: ""; position: absolute; inset: -4px; border-radius: 12px; } }
+/* Drag-over keeps its mustard (#DFA81C, drag-over only) and the bar's dashed outline over the v3 overrides. */
+html body.file-dragging .dock-row .dock-icon.tray-icon { border: 1px solid var(--icon-mark, #DFA81C); }
+html body.file-dragging .prompt-bar.has-cmp#intakeComposer { outline: 2px dashed var(--control-focus); outline-offset: 4px; }
 
 /* Notch: 32x6 handle floating 6px above the bar, 64x24 invisible hit area; hidden while the drawer is open. */
-html .has-cmp .cmp-notch.cmp-notch--float { top: -22px; width: 64px; height: 24px; border-radius: 12px; left: 50%; translate: -50% 0; }
+html .has-cmp .cmp-notch.cmp-notch--float { top: -25px; width: 64px; height: 24px; border-radius: 12px; left: 50%; translate: -50% 0; }
+/* The hit area ends at the bar's top edge (no overlap; -25px because the offset is from the wrapper's padding edge,
+   1px inside the bar's outer edge); the handle sits 6px above the bar inside it. */
+html .has-cmp .cmp-notch--float .notch-handle { position: absolute; left: 50%; bottom: 6px; translate: -50% 0; margin: 0; }
 html .has-cmp .cmp-notch--float::before { inset: 0; }
 html .has-cmp .notch-handle { width: 32px; height: 6px; border-radius: 3px; background: var(--v3-notch); }
 html .has-cmp .cmp-notch--float:is(:hover, :focus-visible) .notch-handle { width: 32px; background: var(--muted); }
@@ -455,7 +462,9 @@ html .has-cmp .voice-fan {
   transition: opacity 120ms linear, transform 160ms var(--dia-ease-out, cubic-bezier(0.16, 1, 0.3, 1)), visibility 0s linear 120ms;
 }
 @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  html .has-cmp .voice-fan { background: var(--v3-bar-bg); backdrop-filter: blur(16px) saturate(140%); -webkit-backdrop-filter: blur(16px) saturate(140%); }
+  /* blur only while open, so a closed drawer leaves no trace (no backdrop, shadow or filter) */
+  html .has-cmp .voice-fan { background: var(--v3-bar-bg); }
+  html .has-cmp .cmp-notch[aria-expanded="true"] ~ .voice-fan { backdrop-filter: blur(16px) saturate(140%); -webkit-backdrop-filter: blur(16px) saturate(140%); }
 }
 html .has-cmp .cmp-notch[aria-expanded="true"] ~ .voice-fan {
   transform: none; box-shadow: var(--v3-bar-shadow);
@@ -465,6 +474,12 @@ html .has-cmp .voice-fan .voice-item { width: 36px; height: 36px; padding: 0; bo
 html .has-cmp .voice-fan .voice-item:is(:hover, :focus-visible):not([aria-disabled="true"]) { background: var(--v3-btn-hover); }
 html .has-cmp .voice-fan .voice-item .icon { width: 36px; height: 36px; }
 html .has-cmp .voice-fan .voice-item .icon svg { width: 18px; height: 18px; }
+/* Phones keep 44x44 targets: 36px items get an invisible 44px hit area, and an 8px gap stops neighbours overlapping. */
+@media (max-width: 767.98px) {
+  html .has-cmp .voice-fan { gap: 8px; }
+  html .has-cmp .voice-fan .voice-item { position: relative; }
+  html .has-cmp .voice-fan .voice-item::before { content: ""; position: absolute; inset: -4px; border-radius: 50%; }
+}
 @media (prefers-reduced-motion: reduce) { html .has-cmp .voice-fan, html .has-cmp .cmp-notch[aria-expanded="true"] ~ .voice-fan { transform: none; } }
 
 /* Status row moves under the link row (8px), so the open drawer never meets it and nothing slides. */
@@ -528,7 +543,7 @@ html[data-theme="light"] { --hp-bg: rgba(253, 252, 250, 0.90); }
 }
 .hp-close::before { content: ""; position: absolute; inset: -12px; }   /* 44x44 hit area */
 .hp-close:hover { color: var(--text); }
-.hp-close:focus-visible { outline: 2px solid var(--lh-ring, var(--control-focus)); outline-offset: 2px; }
+.hp-close:focus-visible { outline: 2px solid var(--control-focus); outline-offset: 2px; }
 .hp-steps { margin: 6px 0 0; padding-left: 1.3em; color: var(--muted); font: 400 13px/19px var(--sans); font-variant-numeric: tabular-nums; }
 .hp-steps li + li { margin-top: 4px; }
 .hp-actions, .hp-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; margin-top: 12px; }
@@ -540,7 +555,7 @@ html[data-theme="light"] { --hp-bg: rgba(253, 252, 250, 0.90); }
   font: 500 13px/1.4 var(--sans); color: var(--text); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--border);
 }
 .hp-panel .text-link:hover { text-decoration-color: currentColor; }
-.hp-panel .text-link:focus-visible { outline: 2px solid var(--lh-ring, var(--control-focus)); outline-offset: 2px; border-radius: 4px; }
+.hp-panel .text-link:focus-visible { outline: 2px solid var(--control-focus); outline-offset: 2px; border-radius: 4px; }
 .hp-panel .text-link[aria-busy="true"] { opacity: 0.6; cursor: progress; }
 .hp-error { margin: 6px 0 0; color: var(--text); font: 400 12px/17px var(--sans); }
 .hp-limits { margin: 8px 0 0; color: var(--muted); font: 400 12px/17px var(--sans); }

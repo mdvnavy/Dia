@@ -319,7 +319,8 @@ def test_js_prompt_copy_equals_inputs_py():
 def test_prompt_markup_and_copy():
     section = INDEX[INDEX.index('<section id="inputsPrompt"'):INDEX.index("</section>", INDEX.index('<section id="inputsPrompt"'))]
     assert 'aria-labelledby="inputsPromptTitle"' in section
-    assert INDEX.index('id="intakeError"') < INDEX.index('id="inputsPrompt"') < INDEX.index('id="loadSample"')
+    assert INDEX.index('id="intakeError"') < INDEX.index('id="inputsPrompt"')
+    assert INDEX.index('id="helpPopover"') < INDEX.index('id="loadSample"')   # Load sample lives in the help popover
     assert "Before you run: a few inputs would sharpen this" in section
     assert 'aria-label="Dismiss input tips"' in section
     assert "This questionnaire has no &quot;Workflows and value&quot; section." in section or \
@@ -411,6 +412,7 @@ def test_prompt_dismiss_button_and_hides_on_run(context, base_url):
 
 def test_prompt_on_load_sample_shows_nothing_for_the_complete_sample(context, base_url):
     page = open_page(context, base_url)
+    page.click("#helpPopoverBtn")
     page.click("#loadSample")
     page.wait_for_function("document.querySelector('#statusText').textContent === 'Sample loaded'")
     page.wait_for_timeout(1100)

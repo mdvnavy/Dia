@@ -1,6 +1,7 @@
-"""Link row separator (fix-link-row-separator, 2026-10-23): at 390 and 360 wide the under-prompt link row wraps
-"Learn how to use DIA" onto its own line. No "·" may be left hanging after "Load sample" (or lead the second line);
-the separator between links that share a line stays, and wide screens keep the one-line row with both separators.
+"""Link row separator (fix-link-row-separator, 2026-10-23), updated for the composer v3 first-screen cleanup:
+Ikenna (2026-10-23 21:49-22:02 ET) removed the under-prompt link row. "Upload a file" is gone (the tray opens the file
+chooser), and "Load sample" / "Learn how to use DIA" moved into the help popover. So no link or "·" separator may be
+painted under the bar at any width, and the popover's actions carry no separators either (no dangling "·" anywhere).
 
 Runs the real app in-process and drives it with Playwright (Chromium); skipped when Chromium isn't available."""
 from __future__ import annotations
@@ -58,70 +59,36 @@ def browser():
         b.close()
 
 
-def _row(browser, base_url, width, theme="light"):
+def _page(browser, base_url, width, theme="light"):
     context = browser.new_context(viewport={"width": width, "height": 844 if width < 600 else 800})
     context.add_init_script(f"try {{ localStorage.setItem('dia-theme', '{theme}'); }} catch (e) {{}}")
     page = context.new_page()
     page.goto(base_url + "/")
-    page.wait_for_selector(".actions.under-prompt #loadSample")
-    page.wait_for_timeout(300)  # let the ResizeObserver / fonts.ready refit settle
+    page.wait_for_selector("#helpPopoverBtn")
+    page.wait_for_timeout(300)
     return context, page
 
 
-def _lines(items):
-    """Group painted items into visual lines by vertical overlap."""
-    lines = []
-    for item in [i for i in items if i["painted"]]:
-        for line in lines:
-            if item["top"] < line[0]["bottom"] and item["bottom"] > line[0]["top"]:
-                line.append(item)
-                break
-        else:
-            lines.append([item])
-    return lines
-
-
-@pytest.mark.parametrize("width", [390, 360])
+@pytest.mark.parametrize("width", [1280, 390, 360])
 @pytest.mark.parametrize("theme", ["light", "dark"])
-def test_wrapped_link_row_has_no_dangling_separator(browser, base_url, width, theme):
-    context, page = _row(browser, base_url, width, theme)
+def test_no_link_row_or_separator_under_the_bar(browser, base_url, width, theme):
+    context, page = _page(browser, base_url, width, theme)
     try:
-        lines = _lines(page.evaluate(ROW_JS))
-        assert len(lines) == 2, [[i["text"] for i in line] for line in lines]
-        assert [i["text"] for i in lines[1]] == ["Learn how to use DIA"]
-        assert [i["text"] for i in lines[0]] == ["Upload a file", "·", "Load sample"]
-        for line in lines:
-            assert not line[0]["sep"] and not line[-1]["sep"], [i["text"] for i in line]
-        # both lines stay centred in the row once the dangling "·" is gone
-        row = page.evaluate("() => { const r = document.querySelector('.actions.under-prompt').getBoundingClientRect(); return {l: r.left, r: r.right}; }")
-        for line in lines:
-            assert abs((line[0]["left"] - row["l"]) - (row["r"] - line[-1]["right"])) <= 2
-        # the break adds no extra height: one row gap (8px) between the lines, as before the fix
-        assert 6 <= lines[1][0]["top"] - lines[0][0]["bottom"] <= 12
+        painted = [i["text"] for i in page.evaluate(ROW_JS) if i["painted"]]
+        assert painted == [], painted
+        assert page.evaluate("[...document.querySelectorAll('.dot-sep')].filter(e => e.getBoundingClientRect().width > 0).length") == 0
     finally:
         context.close()
 
 
-@pytest.mark.parametrize("width", [390, 360])
-def test_resizing_back_to_wide_restores_both_separators(browser, base_url, width):
-    context, page = _row(browser, base_url, width)
+@pytest.mark.parametrize("width", [1280, 390, 360])
+def test_help_popover_actions_have_no_dangling_separator(browser, base_url, width):
+    context, page = _page(browser, base_url, width)
     try:
-        page.set_viewport_size({"width": 1280, "height": 800})
-        page.wait_for_timeout(300)
-        lines = _lines(page.evaluate(ROW_JS))
-        assert [[i["text"] for i in line] for line in lines] == [["Upload a file", "·", "Load sample", "·", "Learn how to use DIA"]]
-        page.set_viewport_size({"width": width, "height": 844})
-        page.wait_for_timeout(300)
-        lines = _lines(page.evaluate(ROW_JS))
-        assert [[i["text"] for i in line] for line in lines] == [["Upload a file", "·", "Load sample"], ["Learn how to use DIA"]]
-    finally:
-        context.close()
-
-
-def test_wide_link_row_keeps_both_separators(browser, base_url):
-    context, page = _row(browser, base_url, 1280)
-    try:
-        lines = _lines(page.evaluate(ROW_JS))
-        assert [[i["text"] for i in line] for line in lines] == [["Upload a file", "·", "Load sample", "·", "Learn how to use DIA"]]
+        page.click("#helpPopoverBtn")
+        page.wait_for_selector("#helpPopover:not([hidden])")
+        texts = page.eval_on_selector_all("#helpPopoverActions > *:not([hidden])", "els => els.map(e => e.textContent.trim())")
+        assert texts == ["Load sample", "Learn how to use DIA"], texts
+        assert "·" not in page.eval_on_selector("#helpPopover", "e => e.innerText")
     finally:
         context.close()

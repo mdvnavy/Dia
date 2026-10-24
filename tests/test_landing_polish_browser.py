@@ -108,7 +108,10 @@ def test_mic_sits_inside_the_bar_corner(open_page, width, height):
     left_inset, right_inset = plus["x"] - bar["x"], bar["r"] - mic["r"]
     assert abs(left_inset - right_inset) <= 2, (left_inset, right_inset)
     assert abs((mic["y"] + mic["h"] / 2) - (plus["y"] + plus["h"] / 2)) <= 1
-    assert mic["w"] >= 44 and mic["h"] >= 44  # prompt bar v2: real 44px targets everywhere
+    # Composer v3 (Glyph): 36px circles; phones extend the target to 44px with ::before (inset -4px).
+    assert mic["w"] == 36 and mic["h"] == 36
+    if width < 768:
+        assert p.eval_on_selector("#intakeMic", "e => { const s = getComputedStyle(e, '::before'); return e.getBoundingClientRect().width - 2 * parseFloat(s.left); }") >= 44
     # With text, the mic stays exactly where it was and Run appears just to its LEFT, inside the bar.
     # Measured relative to the bar (the bar itself lifts 2px on focus/hover).
     rel = lambda: {k: round(v - (bar_now["x"] if k in ("x", "r") else bar_now["y"] if k in ("y", "b") else 0), 2)
@@ -139,20 +142,18 @@ BUTTON_LOOK = """s => { const e = document.querySelector(s), cs = getComputedSty
 
 @pytest.mark.parametrize("theme", ["light", "dark"])
 def test_run_with_text_is_a_full_enabled_button_silver_in_light_graphite_in_dark(open_page, theme):
-    """Glyph (PR #40): dark Run is graphite (#3a3a40 -> #26262a, like Tia), never gold; light stays the mic's silver."""
+    """Composer v3 (Glyph 2026-10-23): send uses the same translucent fill and ink as the mic (no clay gradient,
+    no colour) in both themes, and is never gold. (Replaces PR #40's silver/graphite Run.)"""
     p = open_page(theme=theme)
-    p.click("#loadSample")
+    p.fill("#questionnaire", "Client: Gearhead")
     p.wait_for_selector("#runAgent:not([hidden])")
     p.wait_for_timeout(300)
+    look = """s => { const cs = getComputedStyle(document.querySelector(s)); return [cs.backgroundColor, cs.backgroundImage, cs.color]; }"""
     run, mic = p.evaluate(BUTTON_LOOK, "#runAgent"), p.evaluate(BUTTON_LOOK, "#intakeMic")
     assert run["disabled"] is False and run["ariaDisabled"] is None
-    assert run["opacity"] == 1 and run["visibility"] == "visible" and run["border"] == "solid"
-    if theme == "light":
-        assert run["bg"] == mic["bg"] and run["color"] == mic["color"]  # unchanged: same silver fill and ink as the mic
-        assert "rgb(230, 232, 235)" in run["bg"] and "rgb(184, 189, 196)" in run["bg"]
-    else:
-        assert "rgb(58, 58, 64)" in run["bg"] and "rgb(38, 38, 42)" in run["bg"], run
-        assert _luminance(_rgb(run["color"])) > 0.7   # light icon ink on graphite
+    assert run["opacity"] == 1 and run["visibility"] == "visible"
+    assert p.evaluate(look, "#runAgent") == p.evaluate(look, "#intakeMic")
+    assert run["bg"] == "none"   # no gradient
     # Never gold/mustard (dark --accent #c8a96e, drag-over #DFA81C), resting or hovered.
     for state in ("rest", "hover"):
         if state == "hover":
@@ -175,29 +176,38 @@ def test_composer_order_is_plus_text_run_mic_and_the_mic_mirrors_the_plus(open_p
     bar, plus, text, run, mic = (box(p, s) for s in ("#intakeComposer", "#intakePlusButton", "#questionnaire", "#runAgent", "#intakeMic"))
     text_end = text["r"] - float(p.eval_on_selector("#questionnaire", "e => getComputedStyle(e).paddingRight").rstrip("px"))
     assert plus["r"] <= text["x"] + 1 and text_end <= run["x"] + 1 and run["r"] <= mic["x"], (plus, text, run, mic)
-    border = float(p.eval_on_selector("#intakeComposer", "e => getComputedStyle(e).borderRightWidth").rstrip("px"))
-    plus_inset, mic_inset = plus["x"] - bar["x"] - border, (bar["r"] - border) - mic["r"]
+    # Composer v3: the corner is flush to the bar's 6px inner padding (4 on phones), the 1px border counted inside it.
+    plus_inset, mic_inset = plus["x"] - bar["x"], bar["r"] - mic["r"]
     assert abs(mic_inset - plus_inset) <= 0.5, ("mic must mirror the plus", plus_inset, mic_inset)
-    assert abs(mic_inset - (12 if width > 600 else 4)) <= 0.5, mic_inset
+    assert abs(mic_inset - (6 if width >= 768 else 4)) <= 0.5, mic_inset
 
 
-BAR_LOOK = """() => { const c = getComputedStyle(document.querySelector('#intakeComposer'));
-  return {outline: c.outlineColor + ' ' + c.outlineStyle, shadow: c.boxShadow}; }"""
+def _rgb_str(value):
+    value = value.strip().lstrip("#")
+    return "rgb({}, {}, {})".format(*(int(value[i:i + 2], 16) for i in (0, 2, 4)))
+
+
+# Composer v3 draws the translucent surface (border + shadow) on ::before when backdrop-filter is supported.
+BAR_LOOK = """() => { const e = document.querySelector('#intakeComposer'), c = getComputedStyle(e), b = getComputedStyle(e, '::before');
+  const s = parseFloat(b.borderTopWidth) > 0 ? b : c;
+  return {outline: c.outlineStyle, border: s.borderTopColor + ' ' + s.borderTopWidth, shadow: s.boxShadow,
+          focus: getComputedStyle(document.documentElement).getPropertyValue('--control-focus').trim()}; }"""
 GOLD = ("200, 169, 110", "223, 168, 28")
 
 
 @pytest.mark.parametrize("state", ["focus", "hover"])
 def test_dark_bar_glow_is_neutral_silver_never_gold(open_page, state):
-    """Glyph: in dark the bar's glow is #7C828A at 0.22 with the same 0 0 40px blur/spread as the old gold one."""
+    """Composer v3 (Glyph): no glow at all. Dark keeps its 0 6px 20px shadow; focus-within turns the 1px border to
+    --control-focus. Never gold."""
     p = open_page(theme="dark")
     p.mouse.move(2, 2)
     p.focus("#questionnaire") if state == "focus" else p.hover("#intakeComposer", position={"x": 300, "y": 10})
     p.wait_for_timeout(400)
     look = p.evaluate(BAR_LOOK)
-    assert "rgba(124, 130, 138, 0.22) 0px 0px 40px 0px" in look["shadow"], look
-    assert not any(g in look["outline"] + look["shadow"] for g in GOLD), look
+    assert look["shadow"] == "rgba(0, 0, 0, 0.4) 0px 6px 20px 0px", look
+    assert not any(g in look["border"] + look["shadow"] for g in GOLD), look
     if state == "focus":
-        assert look["outline"] == "rgb(124, 130, 138) solid"
+        assert look["border"] == _rgb_str(look["focus"]) + " 1px", look
 
 
 def test_light_bar_focus_is_unchanged(open_page):
@@ -205,9 +215,9 @@ def test_light_bar_focus_is_unchanged(open_page):
     p.mouse.move(2, 2)
     p.focus("#questionnaire")
     p.wait_for_timeout(400)
-    assert p.evaluate(BAR_LOOK) == {"outline": "rgb(95, 102, 112) solid",
-        "shadow": "rgba(28, 20, 8, 0.22) 0px 30px 72px 0px, rgba(163, 169, 177, 0.22) 0px 0px 40px 0px, "
-                  "rgba(255, 255, 255, 0.9) 0px 2px 3px 0px inset, rgba(255, 255, 255, 0.22) 0px -2px 4px 0px inset"}
+    look = p.evaluate(BAR_LOOK)   # composer v3 light: spec shadow, no glow; focus border is --control-focus
+    assert look["shadow"] == "rgba(0, 0, 0, 0.05) 0px 1px 2px 0px, rgba(0, 0, 0, 0.06) 0px 6px 20px 0px", look
+    assert look["border"] == _rgb_str(look["focus"]) + " 1px", look
 
 
 @pytest.mark.parametrize("theme", ["light", "dark"])
@@ -260,7 +270,7 @@ def test_composer_icons_are_smaller_in_both_themes(open_page):
             "#intakeComposer .cmp-circle .icon svg",
             "els => els.filter(e => e.getClientRects().length).map(e => Math.round(e.getBoundingClientRect().width))")
         button = box(p, "#intakeMic")
-        assert button["w"] == 44  # prompt bar v2: 44px circles (was 46)
+        assert button["w"] == 36  # composer v3: 36px circles (v2 was 44)
     assert sizes["light"] == sizes["dark"] and sizes["light"] and all(16 <= s <= 18 for s in sizes["light"])
 
 
@@ -279,7 +289,8 @@ FAN_STATE = """() => {
 def test_floating_notch_sits_just_above_the_bar(open_page):
     p = open_page()
     notch, bar, handle = box(p, "#intakeVoiceNotch"), box(p, "#intakeComposer"), box(p, "#intakeVoiceNotch .notch-handle")
-    assert notch["b"] < bar["y"] and bar["y"] - notch["b"] <= 12  # floats just above, not on the edge
+    # Composer v3: the 64x24 hit area ends at the bar's top edge; the 32x6 handle floats 6px above the bar.
+    assert notch["b"] <= bar["y"] + 0.5 and abs((bar["y"] - handle["b"]) - 6) <= 0.5, (notch, handle, bar)
     assert abs((notch["x"] + notch["w"] / 2) - (bar["x"] + bar["w"] / 2)) <= 1
     assert handle["h"] <= 6 and handle["w"] <= 40  # a small handle bar
     assert p.get_attribute("#intakeVoiceNotch", "aria-haspopup") == "menu"
@@ -301,7 +312,7 @@ def test_floating_notch_opens_and_closes_with_mouse_and_has_the_actions(open_pag
         assert p.get_attribute("#autoSpeak", "aria-pressed") == "true"
         assert p.get_attribute("#intakeFanAutoSpeak", "aria-checked") == "true"
         assert p.get_attribute("#intakeVoiceNotch", "aria-expanded") == "true"
-    p.click("#intakeVoiceNotch")
+    p.mouse.click(5, 5)   # composer v3: the open pill covers the hidden notch; an outside click closes it
     assert p.get_attribute("#intakeVoiceNotch", "aria-expanded") == "false"
 
 
@@ -331,7 +342,7 @@ def test_floating_notch_closes_cleanly(open_page, theme, how):
     if how == "mouse":
         p.click("#intakeVoiceNotch")
         p.wait_for_timeout(400)
-        p.click("#intakeVoiceNotch")  # pointer stays on the handle
+        p.mouse.click(5, 5)  # composer v3: the open pill covers the notch, so the mouse closes it with an outside click
     else:
         p.focus("#intakeVoiceNotch")
         p.keyboard.press("Enter")
@@ -358,7 +369,7 @@ def test_floating_notch_closes_cleanly(open_page, theme, how):
 
 LAYOUT = """() => {
   const rect = (e) => { const r = e.getBoundingClientRect(); return {x: r.x, y: r.y, r: r.right, b: r.bottom, w: r.width, h: r.height}; };
-  const sub = document.querySelector('.subtitle'), range = document.createRange(); range.selectNodeContents(sub);
+  const sub = document.querySelector('#introSteps'), range = document.createRange(); range.selectNodeContents(sub);   // first screen: wordmark + steps
   const lines = [...range.getClientRects()];
   const fan = document.querySelector('#intakeVoiceFan'), cs = getComputedStyle(fan);
   return {fan: rect(fan), status: rect(document.querySelector('#status')), notch: rect(document.querySelector('#intakeVoiceNotch')),
@@ -387,17 +398,17 @@ def test_open_voice_panel_leaves_status_and_description_uncovered(open_page, the
     assert not _overlaps(layout["fan"], layout["lastLine"]), layout
     assert not _overlaps(layout["status"], layout["lastLine"]), layout
     assert layout["statusOpacity"] == 1 and p.is_visible("#statusState")
-    # Bottom edge at least 10px above the handle; panel inside the viewport.
-    assert layout["notch"]["y"] - layout["fan"]["b"] >= 10, layout
+    # Composer v3: the pill's bottom edge sits 8px above the bar; panel inside the viewport.
+    bar = box(p, "#intakeComposer")
+    assert abs((bar["y"] - layout["fan"]["b"]) - 8) <= 1, (layout["fan"], bar)
     assert layout["fan"]["x"] >= 0 and layout["fan"]["r"] <= width
-    # An opaque --raised layer with the plus menu's shadow.
-    assert _rgb(layout["background"]) == _hex(layout["raised"]) and "rgba" not in layout["background"]
-    assert layout["shadow"] != "none" and layout["shadow"] == layout["menuShadow"]
+    # The bar's translucent surface (not an opaque --raised layer), with a shadow.
+    assert layout["background"].startswith("rgba(") and layout["shadow"] != "none", layout
     # Compact: a single row of the three actions.
     tops = p.eval_on_selector_all("#intakeVoiceFan .voice-item", "els => els.map(e => Math.round(e.getBoundingClientRect().top))")
     assert len(tops) == 3 and len(set(tops)) == 1
     # Closing puts the status line back.
-    p.click("#intakeVoiceNotch")
+    p.keyboard.press("Escape")
     p.wait_for_timeout(400)
     closed = p.evaluate(LAYOUT)
     assert closed["statusOpacity"] == 1
@@ -424,7 +435,7 @@ def test_open_voice_panel_clears_the_tray_and_cabinet_buttons_at_390(open_page, 
     # Icon-only, but every action still has its accessible name; targets stay 36px.
     items = p.eval_on_selector_all("#intakeVoiceFan .voice-item", "els => els.map(e => [e.getAttribute('aria-label'), Math.round(e.getBoundingClientRect().width), Math.round(e.getBoundingClientRect().height)])")
     assert len(items) == 3 and all(label and w >= 36 and h >= 36 for label, w, h in items), items
-    p.click("#intakeVoiceNotch")
+    p.keyboard.press("Escape")
 
 
 @pytest.mark.parametrize("theme", ["light", "dark"])
@@ -442,10 +453,11 @@ def test_open_ask_dia_voice_panel_leaves_the_heading_uncovered(open_page, theme,
     p.wait_for_timeout(400)
     fan, notch = p.eval_on_selector("#agentVoiceFan", RECT), p.eval_on_selector("#agentVoiceNotch", RECT)
     h2, badge = p.eval_on_selector("#agentStage > h2", RECT), p.eval_on_selector("#agentStatus", RECT)
-    above = p.eval_on_selector(".intake-stage > .prompt-callout", RECT)
+    abar = p.eval_on_selector("#agentComposer", RECT)
     assert not _overlaps(fan, h2) and not _overlaps(fan, badge), (fan, h2)
-    assert h2["y"] >= above["b"] + 12, (h2, above)              # the slide stays in the stage's top margin, with air
-    assert notch["y"] - fan["b"] >= 10 and fan["x"] >= 0 and fan["r"] <= width, (fan, notch)
+    # (the .prompt-callout above the stage is gone with the first-screen cleanup; the heading just stays on screen)
+    assert h2["y"] >= 0, h2
+    assert abs((abar["y"] - fan["b"]) - 8) <= 1 and fan["x"] >= 0 and fan["r"] <= width, (fan, abar)   # v3: 8px above the bar
     assert p.eval_on_selector("#agentStage > h2", "e => +getComputedStyle(e).opacity") == 1
     p.keyboard.press("Escape")
     p.mouse.move(2, 2)
@@ -498,7 +510,7 @@ def test_reduced_motion_voice_panel_opens_with_a_fade_only_and_closes_in_120ms(o
     assert opened["itemTransform"] == "none" and opened["fanTranslate"] == "none"
     assert set(opened["delay"].replace(" ", "").split(",")) == {"0s"}
     assert opened["status"] == "0s"  # the status line moves out of the way without animating
-    p.click("#intakeVoiceNotch")
+    p.keyboard.press("Escape")
     closing = p.eval_on_selector("#intakeVoiceFan", "e => { const cs = getComputedStyle(e); return [cs.transitionProperty, cs.transitionDuration, cs.transitionTimingFunction]; }")
     assert closing[0].startswith("opacity") and closing[1].startswith("0.12s") and closing[2].startswith("linear"), closing
 
@@ -517,16 +529,19 @@ def test_reduced_motion_run_is_a_short_fade_without_scale(open_reduced):
 # ---------- 3. line order ----------
 
 @pytest.mark.parametrize("width,height", WIDTHS)
-def test_status_above_the_bar_and_note_below(open_page, width, height):
+def test_status_under_the_bar_and_note_in_the_help_popover(open_page, width, height):
+    # Composer v3 (Glyph first-screen cleanup; Proto help popover v0.2): "Ready" sits 10px under the bar, nothing else
+    # under it, and the Gemini line lives in the (?) popover's footnote with the same id and trust spans.
     p = open_page(width=width, height=height)
-    status, note, bar = box(p, "#status"), box(p, "#intakeNote"), box(p, "#intakeComposer")
-    assert status["b"] <= bar["y"]
-    assert note["y"] >= bar["b"]
-    # Persona v1.2 split the note into trust-on / trust-off spans; only the one for the current mode shows.
-    assert p.inner_text("#intakeNote").strip() == ("Scoring is deterministic. "
+    status, bar = box(p, "#status"), box(p, "#intakeComposer")
+    assert abs(status["y"] - bar["b"] - 10) <= 1.01
+    assert p.locator(".intake-stage .prompt-callout").count() == 0
+    assert p.is_hidden("#intakeNote")
+    p.click("#helpPopoverBtn")
+    p.wait_for_timeout(250)
+    assert p.locator("#helpPopover #intakeNote").count() == 1
+    assert p.inner_text("#intakeNote").strip() == ("Scoring is rule-based and doesn't use AI. "
                                                    "Only Ask DIA and its suggestions send text to Gemini.")
-    under = box(p, ".intake-stage .under-prompt")
-    assert note["y"] >= under["b"]  # where Ready used to be, under the links
 
 
 # ---------- 4. status states ----------
@@ -559,6 +574,7 @@ def test_ready_is_green_with_enough_contrast(open_page, theme):
 
 def test_status_ready_processing_complete(open_page):
     p = open_page()
+    p.click("#helpPopoverBtn")   # Load sample lives in the help popover (composer v3)
     p.click("#loadSample")
     p.wait_for_function("document.querySelector('#questionnaire').value.length > 0")
     assert p.get_attribute("#status", "data-state") == "ready"
