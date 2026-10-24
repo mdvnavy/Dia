@@ -126,17 +126,25 @@ a.dropdown-item { text-decoration: none; cursor: pointer; }
 .has-cmp .voice-label { font-size: 12px; line-height: 1; text-align: start; }
 .has-cmp .voice-note { display: inline; margin-left: 4px; }
 .has-cmp .voice-note::before { content: "· "; }
-/* Phones: icon-only (each item keeps its aria-label; labels were aria-hidden already), 36px targets, so the panel is
-   ~120px wide and sits between the tray and cabinet buttons instead of over their tops. Same height budget (44px). */
+/* Phones: icon-only (each item keeps its aria-label; labels were aria-hidden already), 44px targets (Glyph review #3),
+   so the panel is ~146px wide and still sits between the tray and cabinet buttons. The 16px glyph is unchanged. */
 @media (max-width: 600px) {
-  .has-cmp .voice-fan { gap: 2px; padding: 4px; border-radius: 22px; }
-  .has-cmp .voice-item { width: 36px; height: 36px; padding: 0; gap: 0; justify-content: center; border-radius: 18px; }
+  .has-cmp .voice-fan { gap: 2px; padding: 4px; border-radius: 26px; }
+  .has-cmp .voice-item { width: 44px; height: 44px; padding: 0; gap: 0; justify-content: center; border-radius: 22px; }
   .has-cmp .voice-label { display: none; }
   .has-cmp .voice-item .icon svg { width: 16px; height: 16px; }
 }
-.intake-stage #status { transition: translate 120ms linear; }
-.intake-stage:has(#intakeVoiceNotch[aria-expanded="true"]) #status {
-  translate: 0 -22px; transition: translate var(--dia-dur-run-in, 180ms) var(--dia-ease-out, cubic-bezier(0.16, 1, 0.3, 1));
+/* Glyph review #2: the whole status row (status + "Collapse/Edit intake") slides, not just #status, so the open panel
+   never covers the toggle. Phones stack the toggle under the status (#1) and have a taller panel (#3), so they lift more
+   while the toggle is shown and get the room for it in the stage's top margin. */
+.intake-stage { --intake-lift: 22px; }
+.intake-stage > .intake-bar { transition: translate 120ms linear; }
+.intake-stage:has(#intakeVoiceNotch[aria-expanded="true"]) > .intake-bar {
+  translate: 0 calc(-1 * var(--intake-lift)); transition: translate var(--dia-dur-run-in, 180ms) var(--dia-ease-out, cubic-bezier(0.16, 1, 0.3, 1));
+}
+@media (max-width: 600px) {
+  .intake-stage { --intake-lift: 30px; }
+  .intake-stage:has(#intakeToggle:not([hidden])) { --intake-lift: 40px; margin-top: 18px; }
 }
 /* Ask DIA: same idea as the landing status line. The heading sits 52px above the bar and, while the panel is open,
    slides up 38px into the stage's 56px top margin, so the panel never covers "Ask DIA" or its badge. */
@@ -146,7 +154,7 @@ a.dropdown-item { text-decoration: none; cursor: pointer; }
   translate: 0 -38px; transition: translate var(--dia-dur-run-in, 180ms) var(--dia-ease-out, cubic-bezier(0.16, 1, 0.3, 1));
 }
 @media (prefers-reduced-motion: reduce) {
-  .intake-stage #status, .intake-stage:has(#intakeVoiceNotch[aria-expanded="true"]) #status,
+  .intake-stage > .intake-bar, .intake-stage:has(#intakeVoiceNotch[aria-expanded="true"]) > .intake-bar,
   .agent > h2, .agent:has(#agentVoiceNotch[aria-expanded="true"]) > h2 { transition: none; }
 }
 
@@ -173,6 +181,14 @@ a.dropdown-item { text-decoration: none; cursor: pointer; }
   color: var(--muted); font: 500 12px/1.4 var(--mono);
 }
 #status.run-status { flex-basis: auto; justify-content: center; }   /* style.css #status was a full-width row under the links */
+/* Glyph review #1: on phones the status is one centred paragraph (dot, state and detail flow inline and wrap together)
+   instead of an inline-flex row whose detail shrinks into a narrow column; the intake toggle gets its own line. */
+@media (max-width: 600px) {
+  .intake-bar { flex-direction: column; gap: 2px; }
+  #status.run-status { display: block; align-self: stretch; text-align: center; }
+  .run-status .status-dot { display: inline-block; vertical-align: middle; margin: -2px 7px 0 0; }
+  .run-status .status-detail:not(:empty) { margin-left: 7px; }
+}
 .status-dot { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--muted); }
 .status-detail:not(:empty)::before { content: "·"; margin: 0 7px 0 0; color: var(--muted); }
 .status-detail { color: var(--muted); }
