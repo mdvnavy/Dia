@@ -266,6 +266,8 @@ def test_composer_icons_are_smaller_in_both_themes(open_page):
     sizes = {}
     for theme in ("light", "dark"):
         p = open_page(theme=theme)
+        # icons are injected after load: wait until every visible composer button has its svg
+        p.wait_for_function("[...document.querySelectorAll('#intakeComposer .cmp-circle')].filter(e => e.getClientRects().length).every(e => e.querySelector('.icon svg'))")
         sizes[theme] = p.eval_on_selector_all(
             "#intakeComposer .cmp-circle .icon svg",
             "els => els.filter(e => e.getClientRects().length).map(e => Math.round(e.getBoundingClientRect().width))")

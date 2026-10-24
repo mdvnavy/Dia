@@ -11,9 +11,10 @@
       "live_flag": true,
       "link": null,
       "source": [
-        "ops/CHANGELOG.md#2026-10-23-1-14-pm-et"
+        "ops/CHANGELOG.md#2026-10-23-1-14-pm-et",
+        "approval: ikenna 2026-10-23 21:53 ET via Bash"
       ],
-      "approved_by": "ikenna 2026-10-23 21:53 via Bash",
+      "approved_by": "Ikenna",
       "approved_at": "2026-10-23T21:53:00-04:00"
     },
     {
@@ -26,9 +27,10 @@
       "live_flag": true,
       "link": null,
       "source": [
-        "origin/main 491fea4 (#32); change-log back-fill pending"
+        "origin/main 491fea4 (#32); change-log back-fill pending",
+        "approval: ikenna 2026-10-23 21:53 ET via Bash"
       ],
-      "approved_by": "ikenna 2026-10-23 21:53 via Bash",
+      "approved_by": "Ikenna",
       "approved_at": "2026-10-23T21:53:00-04:00"
     }
   ]
