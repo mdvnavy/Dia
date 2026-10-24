@@ -117,3 +117,28 @@ jobs:
           else
             python scripts/check_whats_new.py
           fi
+
+  # What changed (the header bell): static/changelog.json must match the git history (scripts/build-changelog.py).
+  # A pull request that changes templates/ or static/ without a SUMMARY line, or without rebuilding the file, fails.
+  changelog:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Changelog is current (static/changelog.json)
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          REF: ${{ github.ref }}
+        run: |
+          if [ "$EVENT" = "pull_request" ]; then
+            python3 scripts/build-changelog.py --check --pr "$PR_NUMBER" --base "$BASE_SHA"
+          elif [ "$REF" = "refs/heads/main" ]; then
+            python3 scripts/build-changelog.py --check
+          else
+            echo "Branch push: the changelog is checked on its pull request."
+          fi

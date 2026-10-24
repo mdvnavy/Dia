@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>What changed - DIA</title>
+  <link rel="icon" href="/static/brand/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="/static/brand/favicon-32.png">
+  <link rel="apple-touch-icon" href="/static/brand/clay-mark-180.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/bell-changelog.css?v=2">
+  <script>
+    // Same saved (or system) theme as the main page, before first paint.
+    (function () {
+      try {
+        var saved = localStorage.getItem("dia-theme");
+        document.documentElement.dataset.theme = saved || (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+      } catch (error) { document.documentElement.dataset.theme = "dark"; }
+    })();
+  </script>
+</head>
+<body class="changes-body">
+  <!-- What changed: the full list behind the header bell. Data: /static/changelog.json, built from git history by
+       scripts/build-changelog.py. Opening this page marks every change seen. -->
+  <main class="changes-page" id="main">
+    <nav class="changes-top" aria-label="Back to DIA">
+      <a class="changes-back" href="/"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>Back to DIA</a>
+    </nav>
+    <h1>What changed</h1>
+    <p class="changes-lede">Changes to Dia, newest first.</p>
+    <ol class="changes-list" id="changes-list" aria-busy="true">
+      <li class="cl-entry"><p class="cl-text">Loading the list of changes…</p></li>
+    </ol>
+    <noscript><p class="changes-lede">This list needs JavaScript. The same list is at <a href="/static/changelog.json">/static/changelog.json</a>.</p></noscript>
+  </main>
+  <script src="/static/bell-changelog.js?v=2" defer></script>
+</body>
+</html>

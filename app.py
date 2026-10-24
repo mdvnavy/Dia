@@ -47,6 +47,12 @@ PUBLIC_FILES = {
     "/static/whats-new.json": BASE_DIR / "static" / "whats-new.json",
     "/static/whats-new.css": BASE_DIR / "static" / "whats-new.css",
     "/static/whats-new.js": BASE_DIR / "static" / "whats-new.js",
+    # What changed (the header bell and its full page): static/changelog.json is built from git history by
+    # scripts/build-changelog.py.
+    "/changes": BASE_DIR / "templates" / "changes.html",
+    "/static/changelog.json": BASE_DIR / "static" / "changelog.json",
+    "/static/bell-changelog.css": BASE_DIR / "static" / "bell-changelog.css",
+    "/static/bell-changelog.js": BASE_DIR / "static" / "bell-changelog.js",
 }
 # Runtime sample lives outside tests/ so it ships in the Cloud Run image even
 # when test files are excluded by .dockerignore.

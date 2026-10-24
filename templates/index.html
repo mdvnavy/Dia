@@ -17,6 +17,7 @@
   <link rel="stylesheet" href="/static/fanout-pixel.css">
   <link rel="stylesheet" href="/static/style.css">
   <link rel="stylesheet" href="/static/whats-new.css">
+  <link rel="stylesheet" href="/static/bell-changelog.css?v=2">
   <link rel="stylesheet" href="/static/composer-icons.css">
   <link rel="stylesheet" href="/static/composer.css">
   <script>
@@ -81,7 +82,7 @@
             <button class="dropdown-item" role="menuitem" type="button" data-command="load-sample">Load sample</button>
             <button class="dropdown-item" role="menuitem" type="button" data-command="ask">Ask DIA</button>
             <button class="dropdown-item" role="menuitem" type="button" data-command="help">Learn how to use DIA</button>
-            <button class="dropdown-item" role="menuitem" type="button" data-command="whats-new">What's new</button>
+            <button class="dropdown-item" role="menuitem" type="button" data-command="whats-new">What changed</button>
             <!-- Donate: href comes from DIA_DONATE_URL via /api/config; hidden while unset. -->
             <a class="dropdown-item donate-link" id="navDonate" role="menuitem" aria-label="Donate (opens in a new tab)" href="#" target="_blank" rel="noopener noreferrer" hidden><span>Donate</span><span class="icon donate-icon" data-icon="menu-donate" aria-hidden="true"></span></a>
             <button class="dropdown-item donate-link" role="menuitem" type="button" data-command="donate-interac"><span>Donate by Interac e-Transfer</span><span class="icon donate-icon" data-icon="menu-donate" aria-hidden="true"></span></button>
@@ -104,27 +105,14 @@
           <time class="lh-time" id="lhTime" datetime="">--:--</time>
           <time class="lh-date" id="lhDate" datetime=""></time>
         </div>
-        <span class="wn-wrap" id="whatsNewWrap">
-          <button id="whatsNew" class="wn-btn" type="button" data-state="none"
-                  aria-haspopup="dialog" aria-expanded="false" aria-controls="whatsNewPanel"
-                  aria-label="What's new">
-            <img class="wn-mark" src="/static/brand/clay-mark-44.png"
-                 srcset="/static/brand/clay-mark-22.png 1x, /static/brand/clay-mark-44.png 2x, /static/brand/clay-mark-66.png 3x, /static/brand/clay-mark-88.png 4x"
-                 alt="" width="22" height="22">
-            <!-- NEW tag (spec v0.5 §4): Glyph's clay NEW image, one per theme (CSS picks), just under the mark; shown only with
-                 the glow (data-state="new"). The text shows in forced colours only. -->
-            <span class="wn-tag" id="whatsNewTag" aria-hidden="true">
-              <img class="wn-tag-img wn-tag-img--light" src="/static/brand/clay-new-light-22.png"
-                   srcset="/static/brand/clay-new-light-22.png 1x, /static/brand/clay-new-light-44.png 2x, /static/brand/clay-new-light-66.png 3x"
-                   alt="" width="22" height="8">
-              <img class="wn-tag-img wn-tag-img--dark" src="/static/brand/clay-new-dark-22.png"
-                   srcset="/static/brand/clay-new-dark-22.png 1x, /static/brand/clay-new-dark-44.png 2x, /static/brand/clay-new-dark-66.png 3x"
-                   alt="" width="22" height="8">
-              <span class="wn-tag-text">New</span>
-            </span>
-            <span class="visually-hidden" id="whatsNewCount"></span>
-          </button>
-          <span class="wn-tip" role="tooltip" id="whatsNewTip">What's new</span>
+        <!-- What changed (Ikenna, 2026-10-23 9:55 PM ET: "like a notification center ... with the change log", the
+             family tree's bell). Replaces the What's new mark in the same slot. Resting on it, focusing it or one tap
+             fades in the latest five changes; the link itself (or a second tap) opens the full list at /changes.
+             static/bell-changelog.js; data static/changelog.json, built from git history by scripts/build-changelog.py. -->
+        <span class="dia-bell" id="bell">
+          <a class="dia-bell-btn" id="bell-btn" href="/changes" aria-label="What changed" aria-controls="bell-panel"
+             aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2.2 2.2 0 0 0 4 0"/></svg><span class="dia-bell-dot" aria-hidden="true"></span><span class="cl-new dia-bell-tag" aria-hidden="true"><img class="cl-new-img cl-new-img--light" src="/static/brand/clay-new-light-22.png" srcset="/static/brand/clay-new-light-22.png 1x, /static/brand/clay-new-light-44.png 2x, /static/brand/clay-new-light-66.png 3x" alt="" width="22" height="8"><img class="cl-new-img cl-new-img--dark" src="/static/brand/clay-new-dark-22.png" srcset="/static/brand/clay-new-dark-22.png 1x, /static/brand/clay-new-dark-44.png 2x, /static/brand/clay-new-dark-66.png 3x" alt="" width="22" height="8"><span class="cl-new-text">New</span></span></a>
+          <div class="dia-bell-panel" id="bell-panel" role="region" aria-label="What changed lately"></div>
         </span>
       </div>
       <div class="lh-corner lh-corner--right">
@@ -501,19 +489,8 @@
     <form method="dialog"><button class="help-close" autofocus>Close</button></form>
   </dialog>
 
-  <!-- What's new release notes (spec v0.3 §6): non-modal popover on desktop, modal bottom sheet at <=600px. -->
-  <div class="wn-backdrop" id="whatsNewBackdrop" hidden></div>
-  <section class="wn-panel" id="whatsNewPanel" role="dialog" aria-labelledby="whatsNewTitle" hidden>
-    <header>
-      <div><h2 id="whatsNewTitle" tabindex="-1">What's new</h2><span class="wn-sub">Dia release notes</span></div>
-      <button class="wn-close" id="whatsNewClose" type="button" aria-label="Close What's new">×</button>
-    </header>
-    <div class="wn-body" id="whatsNewBody"></div>
-    <div class="wn-foot">We only list changes you can use today.</div>
-  </section>
-
   <script src="/static/vendor/jszip.min.js" defer></script>
   <script src="/static/app.js"></script>
-  <script src="/static/whats-new.js"></script>
+  <script src="/static/bell-changelog.js?v=2" defer></script>
 </body>
 </html>
