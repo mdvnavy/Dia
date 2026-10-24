@@ -327,3 +327,229 @@ html:not([data-theme="light"]) .prompt-bar:focus-within { outline-color: #7C828A
 }
 .ui-hint[hidden] { display: none; }
 [data-hint] { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+
+/* ==========================================================================
+   Composer v3 (fix-prompt-bar-mic-corner; Glyph spec dia-tia/glyph/2026-10-23_composer-v3_spec.md; Ikenna 9:53 and
+   9:54 PM ET). Desktop >= 768: 48px bar, max 640 wide, 6px inner padding. Phone < 768: 44px bar, 4px padding.
+   - +, mic and send are 36x36 translucent circles (no clay gradient, shadow or bevel), 18px ink icons. On phones each
+     keeps a 44x44 hit area through an invisible ::before (inset -4px); the listening mic keeps its pulse ring instead.
+   - The mic is the bar's last slot, flush in the right corner, and NEVER moves. Send sits in the fixed slot just left
+     of it (36 + 4 gap), hidden (opacity 0, not focusable) while empty, and fades in (160ms, scale .9 -> 1) with text.
+     The textarea's right padding always reserves that slot, so typed text never jumps. DOM/tab order: + textarea send mic.
+   - The bar is a translucent surface (blur 16 / saturate 140%); focus-within is a 1px --control-focus border, no glow.
+   - Notch: a 32x6 handle 6px above the bar (64x24 hit area). The drawer is a 44px floating pill 8px above the bar.
+   - The status row now sits 8px under the link row, so nothing has to slide when the drawer opens.
+   Mustard #DFA81C stays the drag-over cue only.
+   ========================================================================== */
+:root {
+  --v3-btn: rgba(255, 255, 255, 0.08); --v3-btn-hover: rgba(255, 255, 255, 0.12); --v3-btn-active: rgba(255, 255, 255, 0.16);
+  --v3-bar-bg: rgba(28, 28, 30, 0.55); --v3-bar-fallback: rgba(28, 28, 30, 0.92); --v3-bar-border: rgba(255, 255, 255, 0.10); --v3-pop-bg: rgb(28, 28, 30);
+  --v3-bar-shadow: 0 6px 20px rgba(0, 0, 0, 0.40); --v3-notch: rgba(255, 255, 255, 0.22);
+  --v3-pad: 6px; --v3-btn-size: 36px; --v3-gap: 4px; --v3-bar-h: 48px; --v3-radius: 24px;
+}
+html[data-theme="light"] {
+  --v3-btn: rgba(0, 0, 0, 0.05); --v3-btn-hover: rgba(0, 0, 0, 0.08); --v3-btn-active: rgba(0, 0, 0, 0.11);
+  --v3-bar-bg: rgba(255, 255, 255, 0.55); --v3-bar-fallback: rgba(255, 255, 255, 0.88); --v3-bar-border: rgba(0, 0, 0, 0.08); --v3-pop-bg: rgb(255, 255, 255);
+  --v3-bar-shadow: 0 1px 2px rgba(0, 0, 0, 0.05), 0 6px 20px rgba(0, 0, 0, 0.06); --v3-notch: rgba(0, 0, 0, 0.18);
+}
+@media (max-width: 767.98px) { :root { --v3-pad: 4px; --v3-bar-h: 44px; --v3-radius: 22px; } }
+
+/* Bar geometry */
+.prompt-wrapper > .dock-row, .prompt-wrapper .prompt-bar.has-cmp, #intakeBody > .prompt-bar.has-cmp { max-width: 640px; margin-left: auto; margin-right: auto; }
+html .prompt-bar.has-cmp {
+  --bar-pad: var(--v3-pad); --run-slot: calc(var(--v3-btn-size) + var(--v3-gap)); --cmp-bar-radius: var(--v3-radius);
+  min-height: var(--v3-bar-h); padding: var(--v3-pad); gap: var(--v3-gap); border-radius: var(--v3-radius);
+}
+html .prompt-bar.has-cmp.multiline { border-radius: 20px; }
+html .prompt-bar.has-cmp .prompt-input {
+  margin: 0; padding: 0 calc(10px + var(--run-slot)) 0 10px; min-height: 20px; max-height: 120px;
+  font-size: 15px; line-height: 20px;
+}
+html .prompt-bar.has-cmp .prompt-input:placeholder-shown { padding-right: 10px; margin-right: 0; }   /* centred between + and mic */
+html .prompt-bar.has-cmp.multiline .prompt-input { font-size: 15px; line-height: 20px; padding-top: 8px; padding-bottom: 8px; }
+@media (max-width: 767.98px) {
+  html .prompt-bar.has-cmp .prompt-input { font-size: 16px; padding-left: 8px; padding-right: calc(8px + var(--run-slot)); }
+  html .prompt-bar.has-cmp .prompt-input:placeholder-shown { padding-right: 8px; }
+  html .prompt-bar.has-cmp.multiline .prompt-input { font-size: 16px; }
+}
+
+/* Translucent bar surface. Desktop paints the bar; phones paint the ::before layer (keeps the bottom-sheet fix). */
+@media (min-width: 601px) {
+  html .prompt-bar.has-cmp, html .prompt-bar.has-cmp:is(:hover, :focus-within) {
+    background: var(--v3-bar-fallback); border: 1px solid var(--v3-bar-border); outline: none; box-shadow: var(--v3-bar-shadow); transform: none;
+  }
+  html .prompt-bar.has-cmp { padding: calc(var(--v3-pad) - 1px); }   /* the 1px border is inside the 48px */
+  html .prompt-bar.has-cmp:focus-within { border-color: var(--control-focus); }
+  @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    html .prompt-bar.has-cmp, html .prompt-bar.has-cmp:is(:hover, :focus-within) {
+      background: var(--v3-bar-bg); backdrop-filter: blur(16px) saturate(140%); -webkit-backdrop-filter: blur(16px) saturate(140%);
+    }
+  }
+}
+@media (max-width: 600px) {
+  html .prompt-bar.has-cmp, html .prompt-bar.has-cmp:is(:hover, :focus-within) { border: 0; outline: none; }
+  html .prompt-bar.has-cmp::before {
+    inset: 0; background: var(--v3-bar-fallback); border: 1px solid var(--v3-bar-border); box-shadow: var(--v3-bar-shadow);
+  }
+  html .prompt-bar.has-cmp:focus-within::before { border-color: var(--control-focus); }
+  @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    html .prompt-bar.has-cmp::before { background: var(--v3-bar-bg); backdrop-filter: blur(16px) saturate(140%); -webkit-backdrop-filter: blur(16px) saturate(140%); }
+  }
+}
+
+/* Buttons: 36px translucent circles, ink icons. */
+html .prompt-bar.has-cmp .action-btn.cmp-circle,
+html .prompt-bar.has-cmp .cmp-run-slot { width: var(--v3-btn-size); height: var(--v3-btn-size); }
+html .prompt-bar.has-cmp .action-btn.cmp-circle:not([aria-pressed="true"]) {
+  background: var(--v3-btn) !important; border: 0 !important; box-shadow: none !important; color: var(--text) !important;
+  --accent: var(--text); --cmp-icon-accent: var(--text);
+  transform: none !important; transition: background-color 120ms linear, opacity 160ms var(--dia-ease-out, cubic-bezier(0.16, 1, 0.3, 1)), scale 160ms var(--dia-ease-out, cubic-bezier(0.16, 1, 0.3, 1)), visibility 0s;
+}
+html .prompt-bar.has-cmp .action-btn.cmp-circle:not([aria-pressed="true"], [aria-disabled="true"], :disabled):hover { background: var(--v3-btn-hover) !important; }
+html .prompt-bar.has-cmp .action-btn.cmp-circle:not([aria-pressed="true"], [aria-disabled="true"], :disabled):active { background: var(--v3-btn-active) !important; }
+html .prompt-bar.has-cmp .action-btn.cmp-circle[aria-disabled="true"] { border: 1px dashed var(--cmp-dash) !important; }
+html .prompt-bar.has-cmp .action-btn.cmp-circle:focus-visible { outline: 2px solid var(--control-focus); outline-offset: 2px; }
+html .prompt-bar.has-cmp .action-btn.cmp-circle[aria-pressed="true"] { transform: none; }
+html .prompt-bar.has-cmp .cmp-circle .icon svg { width: 18px; height: 18px; stroke-width: 1.75; }
+html .prompt-bar.has-cmp .cmp-enter .icon { translate: none !important; }
+@media (max-width: 767.98px) {
+  html .prompt-bar.has-cmp .action-btn.cmp-circle:not([aria-pressed="true"])::before { content: ""; position: absolute; inset: -4px; border-radius: 50%; }
+}
+
+/* Send: fixed slot just left of the corner mic; the mic never moves. */
+html .prompt-bar.has-cmp .cmp-run-slot { right: calc(var(--v3-pad) + var(--run-slot)); }
+@media (min-width: 601px) { html .prompt-bar.has-cmp .cmp-run-slot { right: calc(var(--v3-pad) - 1px + var(--run-slot)); } }
+html .prompt-bar.has-cmp.multiline .cmp-run-slot { bottom: var(--v3-pad); }
+html .prompt-bar.has-cmp .cmp-mic { margin-left: auto; translate: none; }
+html .prompt-bar.has-cmp .cmp-enter[hidden] { opacity: 0 !important; scale: 0.9; visibility: hidden; pointer-events: none; transition: opacity 160ms ease-in, scale 160ms ease-in, visibility 0s linear 160ms; }
+html .prompt-bar.has-cmp .cmp-enter:not([hidden]) { opacity: 1; scale: 1; visibility: visible; pointer-events: auto; }
+@media (prefers-reduced-motion: reduce) {
+  html .prompt-bar.has-cmp .cmp-enter, html .prompt-bar.has-cmp .cmp-enter[hidden] { scale: 1; transition: opacity 160ms linear, visibility 0s linear 160ms; }
+  html .prompt-bar.has-cmp .cmp-enter:not([hidden]) { transition: opacity 160ms linear, visibility 0s; }
+}
+.cmp-tip-mic { right: var(--v3-pad); }
+
+/* Dock icons (tray, cabinet): 36x36 translucent, radius 10, 18px icon, 8px above the bar, flush to its outer edges. */
+.prompt-wrapper > .dock-row { width: 100%; box-sizing: border-box; margin-top: 0; margin-bottom: 8px; padding: 0; }
+html .dock-row .dock-icon, html .dock-row .cabinet-btn {
+  position: relative; width: 36px; height: 36px; border-radius: 10px; border: 0; background: var(--v3-btn); box-shadow: none;
+}
+html .dock-row .dock-icon:hover, html .dock-row .cabinet-btn:hover { background: var(--v3-btn-hover); }
+html .dock-row .dock-icon:active { background: var(--v3-btn-active); }
+html .dock-row .dock-icon .icon svg { width: 18px; height: 18px; }
+@media (max-width: 767.98px) { html .dock-row .dock-icon::before { content: ""; position: absolute; inset: -4px; border-radius: 12px; } }
+
+/* Notch: 32x6 handle floating 6px above the bar, 64x24 invisible hit area; hidden while the drawer is open. */
+html .has-cmp .cmp-notch.cmp-notch--float { top: -22px; width: 64px; height: 24px; border-radius: 12px; left: 50%; translate: -50% 0; }
+html .has-cmp .cmp-notch--float::before { inset: 0; }
+html .has-cmp .notch-handle { width: 32px; height: 6px; border-radius: 3px; background: var(--v3-notch); }
+html .has-cmp .cmp-notch--float:is(:hover, :focus-visible) .notch-handle { width: 32px; background: var(--muted); }
+html .has-cmp .cmp-notch--float[aria-expanded="true"] .notch-handle { opacity: 0; }
+
+/* Drawer: a small floating pill centred above the bar (bottom 8px above the bar top), same surface as the bar. */
+html .has-cmp .voice-fan {
+  bottom: calc(100% + 8px); left: 50%; right: auto; translate: -50% 0; width: max-content;
+  height: 44px; padding: 4px; gap: 4px; border-radius: 22px; box-sizing: border-box;
+  background: var(--v3-bar-fallback); border: 1px solid var(--v3-bar-border); box-shadow: var(--v3-bar-shadow);
+  transform: translateY(4px);
+  transition: opacity 120ms linear, transform 160ms var(--dia-ease-out, cubic-bezier(0.16, 1, 0.3, 1)), visibility 0s linear 120ms;
+}
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  html .has-cmp .voice-fan { background: var(--v3-bar-bg); backdrop-filter: blur(16px) saturate(140%); -webkit-backdrop-filter: blur(16px) saturate(140%); }
+}
+html .has-cmp .cmp-notch[aria-expanded="true"] ~ .voice-fan {
+  transform: none; box-shadow: var(--v3-bar-shadow);
+  transition: opacity 160ms var(--dia-ease-out, cubic-bezier(0.16, 1, 0.3, 1)), transform 160ms var(--dia-ease-out, cubic-bezier(0.16, 1, 0.3, 1)), visibility 0s;
+}
+html .has-cmp .voice-fan .voice-item { width: 36px; height: 36px; padding: 0; border-radius: 50%; background: var(--v3-btn); transform: none; translate: none; }
+html .has-cmp .voice-fan .voice-item:is(:hover, :focus-visible):not([aria-disabled="true"]) { background: var(--v3-btn-hover); }
+html .has-cmp .voice-fan .voice-item .icon { width: 36px; height: 36px; }
+html .has-cmp .voice-fan .voice-item .icon svg { width: 18px; height: 18px; }
+@media (prefers-reduced-motion: reduce) { html .has-cmp .voice-fan, html .has-cmp .cmp-notch[aria-expanded="true"] ~ .voice-fan { transform: none; } }
+
+/* Status row moves under the link row (8px), so the open drawer never meets it and nothing slides. */
+.intake-stage { display: flex; flex-direction: column; --intake-lift: 0px; }
+.intake-stage > * { order: 0; }
+.intake-stage > .intake-bar { order: 1; margin-top: 10px; translate: none !important; }   /* "Ready" 10px under the bar */
+.intake-stage:has(#intakeVoiceNotch[aria-expanded="true"]) > .intake-bar { translate: none; }
+@media (max-width: 600px) { .intake-stage, .intake-stage:has(#intakeToggle:not([hidden])) { margin-top: 0; --intake-lift: 0px; } }
+.actions.under-prompt { margin-top: 10px; }
+.actions.under-prompt:not(:has(> :not([hidden]))) { display: none; }   /* only "Cancel upload" lives here, while busy */
+/* Ask DIA: the drawer (bar top - 52px) clears the heading without a slide. */
+.agent > h2 + .prompt-bar.has-cmp { margin-top: 60px; }
+.agent:has(#agentVoiceNotch[aria-expanded="true"]) > h2 { translate: none; }
+
+/* First screen cleanup (Glyph spec "First screen cleanup"; Ikenna 9:58 PM ET): wordmark only, then a 3-step list
+   (centred block, left-aligned text, max 420, 15/22 muted, tabular numerals, 6px apart, 16px under the wordmark and
+   24px above the composer). Load sample, Learn how to use DIA and the scoring line live in the (?) help popover. */
+.center-stage .title-brand { margin-bottom: 0; }
+.intro-steps {
+  max-width: 420px; margin: 16px auto 24px; padding: 0 0 0 1.6em; text-align: left;
+  color: var(--muted); font: 400 15px/22px var(--sans); font-variant-numeric: tabular-nums;
+}
+.intro-steps li + li { margin-top: 6px; }
+.intro-steps li::marker { font-variant-numeric: tabular-nums; color: var(--muted); }
+body[data-stage="results"] .intro-steps, body[data-agent="open"] .intro-steps { display: none; }
+
+.top-nav.lh { position: relative; }
+/* Help popover: Glyph "Help icon + popover" (sizes, placement) + Proto help-popover v0.2 (copy, behaviour, panel
+   surface). The (?) sits 12px under the header hairline, flush with the wordmark/crumb text; the panel opens 8px below. */
+.lh-corner--left > .hp-wrap { position: absolute; left: var(--hp-left, 0px); top: calc(100% + 1px + 12px); z-index: 25; }
+.hp-btn {
+  position: relative; display: inline-grid; place-items: center; width: 28px; height: 28px; padding: 0; margin: 0;
+  border: 0; border-radius: 50%; background: var(--v3-btn); color: var(--muted); cursor: pointer;
+  font: 500 13px/1 var(--mono); letter-spacing: 0; text-transform: none;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+.hp-btn::before { content: ""; position: absolute; inset: -8px; border-radius: 50%; }   /* 44x44 hit area */
+.hp-btn:hover, .hp-btn[aria-expanded="true"] { background: var(--v3-btn-hover); color: var(--text); }
+.hp-btn:focus-visible { outline: 2px solid var(--lh-ring, var(--control-focus)); outline-offset: 2px; }
+.hp-panel {
+  position: absolute; left: 0; top: calc(28px + 8px); z-index: 40; box-sizing: border-box;
+  width: 300px; max-width: calc(100vw - 32px); padding: 16px; border-radius: 14px;
+  background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow-lifted, var(--v3-bar-shadow));
+  color: var(--text); font: 400 13px/19px var(--sans); letter-spacing: 0; text-transform: none; text-align: left; white-space: normal;
+  animation: hp-in 160ms var(--dia-ease-out, cubic-bezier(0.16, 1, 0.3, 1)) both;
+}
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .hp-panel { background: var(--hp-bg); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); }
+}
+html, html[data-theme="dark"] { --hp-bg: rgba(20, 20, 22, 0.88); }
+html[data-theme="light"] { --hp-bg: rgba(253, 252, 250, 0.90); }
+.hp-panel[hidden] { display: none; }
+@keyframes hp-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .hp-panel { animation: none; } }
+@media (max-width: 767.98px) { .hp-panel { width: calc(100vw - 32px); } }
+.hp-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.hp-head h2 { margin: 0; font: 600 13px/19px var(--sans); color: var(--text); letter-spacing: 0; text-transform: none; outline: none; }
+.hp-close {
+  position: relative; display: inline-grid; place-items: center; width: 20px; height: 20px; margin: -1px -4px 0 0; padding: 0;
+  border: 0; border-radius: 6px; background: transparent; color: var(--muted); font: 400 16px/1 var(--sans); cursor: pointer;
+}
+.hp-close::before { content: ""; position: absolute; inset: -12px; }   /* 44x44 hit area */
+.hp-close:hover { color: var(--text); }
+.hp-close:focus-visible { outline: 2px solid var(--lh-ring, var(--control-focus)); outline-offset: 2px; }
+.hp-steps { margin: 6px 0 0; padding-left: 1.3em; color: var(--muted); font: 400 13px/19px var(--sans); font-variant-numeric: tabular-nums; }
+.hp-steps li + li { margin-top: 4px; }
+.hp-actions, .hp-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; margin-top: 12px; }
+.hp-actions[hidden], .hp-confirm[hidden], .hp-error[hidden], .hp-limits[hidden] { display: none; }
+.hp-confirm-text { flex-basis: 100%; color: var(--text); font: 400 13px/19px var(--sans); }
+.hp-confirm-buttons { display: flex; gap: 16px; }
+.hp-panel .text-link {
+  min-height: 32px; padding: 6px 0; border: 0; background: none; cursor: pointer;
+  font: 500 13px/1.4 var(--sans); color: var(--text); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--border);
+}
+.hp-panel .text-link:hover { text-decoration-color: currentColor; }
+.hp-panel .text-link:focus-visible { outline: 2px solid var(--lh-ring, var(--control-focus)); outline-offset: 2px; border-radius: 4px; }
+.hp-panel .text-link[aria-busy="true"] { opacity: 0.6; cursor: progress; }
+.hp-error { margin: 6px 0 0; color: var(--text); font: 400 12px/17px var(--sans); }
+.hp-limits { margin: 8px 0 0; color: var(--muted); font: 400 12px/17px var(--sans); }
+.hp-foot { margin: 12px 0 0; padding-top: 12px; border-top: 1px solid var(--border); color: var(--muted); font: 400 12px/17px var(--sans); }
+@media (prefers-contrast: more) { .hp-btn { box-shadow: inset 0 0 0 1px var(--muted); } .hp-foot { color: var(--text); } }
+@media (forced-colors: active) {
+  .hp-btn { border: 1px solid ButtonText; color: ButtonText; background: ButtonFace; forced-color-adjust: none; }
+  .hp-panel { border: 1px solid CanvasText; background: Canvas; color: CanvasText; box-shadow: none; backdrop-filter: none; }
+  .hp-foot { border-top-color: CanvasText; }
+  .hp-panel .text-link { color: LinkText; }
+  .hp-btn:focus-visible, .hp-close:focus-visible, .hp-panel .text-link:focus-visible { outline: 2px solid Highlight; }
+}

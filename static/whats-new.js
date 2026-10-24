@@ -1,7 +1,7 @@
 // What's new indicator + release-notes panel (spec proto/whats-new-indicator.md v0.5, layout A).
 // - Notes: static/whats-new.json, fetched once AFTER first paint (low priority, no-cache); never blocks intake or chat.
 // - Seen: localStorage["dia-whats-new-seen"] = latest live note id, written the moment the panel opens.
-// - No glow on a first visit, on any load error, when storage throws, or when the stored id is no longer listed.
+// - A first visit glows for every live note (Ikenna 2026-10-23: new things must be visible). No glow on any load error, when storage throws, or when the stored id is no longer listed.
 // - The glow is CSS only (static/whats-new.css, --wn-* tokens); this file only flips data-state / data-fade-once.
 (() => {
   "use strict";
@@ -85,7 +85,7 @@
     if (state.status !== "ready" || !state.latestId) { setIndicator(0); return; }
     const seen = readSeen();
     if (!state.storageOk) { setIndicator(0); return; }
-    if (seen === null) { writeSeen(state.latestId); setIndicator(0); return; }       // first visit: no glow
+    if (seen === null) { setIndicator(state.notes.length, { fade }); return; }      // first visit: everything is new
     if (seen === state.latestId) { setIndicator(0); return; }
     const index = state.notes.findIndex((note) => note.id === seen);
     if (index < 0) { writeSeen(state.latestId); setIndicator(0); return; }            // retracted/pruned id
@@ -173,6 +173,7 @@
 
   function open() {
     if (isOpen()) { title.focus(); return; }
+    document.dispatchEvent(new CustomEvent("dia:popover-open", { detail: "whats-new" }));   // one popover at a time
     hideTip();
     markSeen(state.newCount);
     modal = MOBILE.matches;
@@ -189,7 +190,8 @@
   // Notes newer than the stored id, when the panel was opened before the fetch finished.
   function pendingPills() {
     const seen = readSeen();
-    if (!state.storageOk || seen === null) return 0;
+    if (!state.storageOk) return 0;
+    if (seen === null) return state.notes.length;
     const index = state.notes.findIndex((note) => note.id === seen);
     return index < 0 ? 0 : index;
   }
@@ -256,5 +258,6 @@
   }, 0));
   if (document.readyState === "complete") afterPaint(); else window.addEventListener("load", afterPaint, { once: true });
 
+  document.addEventListener("dia:popover-open", (event) => { if (event.detail !== "whats-new") close({ restoreFocus: false }); });
   window.DiaWhatsNew = { open, close, isOpen };
 })();

@@ -90,10 +90,34 @@
         </div>
         <span class="lh-sep" aria-hidden="true">/</span>
         <span class="lh-stage"><span class="visually-hidden">Discovery intake · </span><span id="breadcrumbStage">Questionnaire</span></span>
-        <span class="app-tip">
-          <button id="appInfo" class="info-tip lh-control lh-tip" type="button" aria-expanded="false" aria-label="Show full app name">?</button>
-          <span id="appTipText" class="tip-bubble" role="tooltip">Discovery Intake Agent / Gemini ADK</span>
-        </span>
+        <!-- Help popover. Sizes/placement: Glyph "Help icon + popover"; copy and behaviour: Proto
+             2026-10-23_help-popover.md v0.1 (Ikenna 9:58/10:00 PM ET). The copy lives in HELP_POPOVER in app.js;
+             the [data-hp] slots below are filled from it. Replaces the old #appInfo "?" tooltip. -->
+        <div class="hp-wrap">
+          <button id="helpPopoverBtn" class="hp-btn" type="button" aria-label="Help" aria-haspopup="dialog" aria-expanded="false" aria-controls="helpPopover">?</button>
+          <section id="helpPopover" class="hp-panel" role="dialog" aria-labelledby="helpPopoverTitle" hidden>
+            <div class="hp-head">
+              <h2 id="helpPopoverTitle" tabindex="-1" data-hp="title"></h2>
+              <button class="hp-close" id="helpPopoverClose" type="button" data-hp-label="close">×</button>
+            </div>
+            <ol class="hp-steps" id="helpPopoverSteps"></ol>
+            <div class="hp-actions" id="helpPopoverActions">
+              <button id="loadSample" class="text-link hp-load" type="button" data-hp="load"></button>
+              <button id="helpPopoverLearn" class="text-link hp-learn" type="button" aria-haspopup="dialog" aria-controls="diaHelpDialog" data-hp="learn"></button>
+            </div>
+            <div class="hp-confirm" id="helpPopoverConfirm" role="group" hidden>
+              <span class="hp-confirm-text" data-hp="confirm"></span>
+              <span class="hp-confirm-buttons">
+                <button id="helpPopoverReplace" class="text-link" type="button" data-hp="replace"></button>
+                <button id="helpPopoverCancel" class="text-link" type="button" data-hp="cancel"></button>
+              </span>
+            </div>
+            <p class="hp-error" id="helpPopoverError" role="alert" hidden></p>
+            <!-- Hook for lockdown #48: when sign-in ships, fill and unhide this with the daily limits. -->
+            <p class="hp-limits" id="helpLimits" data-hook="lockdown-limits" hidden></p>
+            <p class="hp-foot" id="intakeNote"><span class="trust-on" data-hp="footOn"></span><span class="trust-off" data-hp="footOff"></span></p>
+          </section>
+        </div>
       </div>
       <!-- Centre: live local time (12-hour, no seconds) above today's date. role=timer is aria-live off,
            so screen readers read it on demand and are never interrupted by the minute tick. -->
@@ -144,7 +168,11 @@
     <!-- Center stage: wordmark, tagline, privacy note, pill composer. -->
     <section class="center-stage">
       <h1 class="title-brand" id="titleBrand" title="Discovery Intake Agent / Gemini ADK">D<span class="tittle">I</span>A<span class="visually-hidden"> - Discovery Intake Agent / Gemini ADK</span></h1>
-      <p class="subtitle">Discovery Intake Agent. Paste a discovery questionnaire to score the opportunity, flag missing details, and draft the profile, analysis, and proposal.</p>
+      <ol class="intro-steps" id="introSteps">
+        <li>Paste the discovery questionnaire to score the opportunity.</li>
+        <li>Flag the missing details.</li>
+        <li>Draft the profile analysis and proposal.</li>
+      </ol>
 
       <div class="prompt-wrapper intake-stage">
         <div class="intake-bar">
@@ -229,14 +257,8 @@
           <p class="inputs-prompt-foot">Prefer a hand? <span id="inputsPromptName">Bash Systems &amp; Services</span> offers business consulting.<span id="inputsPromptServices" hidden> <a id="inputsPromptLink" href="#" target="_blank" rel="noopener noreferrer">See services</a></span></p>
         </section>
         <div class="actions under-prompt">
-          <button id="uploadLink" class="text-link" type="button">Upload a file</button>
-          <button id="uploadCancel" class="text-link" type="button" hidden>Cancel</button>
-          <span class="dot-sep" aria-hidden="true">·</span>
-          <button id="loadSample" class="text-link" type="button">Load sample</button>
-          <span class="dot-sep" aria-hidden="true">·</span>
-          <button type="button" class="text-link help-link" data-command="help" aria-haspopup="dialog" aria-controls="diaHelpDialog">Learn how to use DIA</button>
+          <button id="uploadCancel" class="text-link" type="button" hidden>Cancel upload</button>
         </div>
-          <p class="prompt-callout" id="intakeNote"><span class="trust-on">Scoring is deterministic. Only Ask DIA and its suggestions send text to Gemini.</span><span class="trust-off">Nothing leaves this browser except the deterministic run.</span></p>
       </div>
 
       <!-- Ask DIA: the live Gemini agent, in the same composer. -->
@@ -406,7 +428,6 @@
       </section>
     </section>
 
-    <footer class="footer-note">Press <kbd class="kbd-hint">⌘K</kbd> for actions</footer>
   </main>
 
   <!-- Filing cabinet drawer: intakes saved on this device (localStorage dia-cabinet-v2, max 15). -->
@@ -479,7 +500,7 @@
       <li>Drop a .txt, .md, .csv, .docx, .doc, .rtf or .json file on the tray (or press <kbd class="kbd-hint">Ctrl/⌘</kbd> + <kbd class="kbd-hint">O</kbd>) to fill the questionnaire.</li>
       <li>Every run is filed in the cabinet for this browser tab (up to 15). Open it with <kbd class="kbd-hint">Ctrl/⌘</kbd> + <kbd class="kbd-hint">Shift</kbd> + <kbd class="kbd-hint">F</kbd> to reopen or export PDF, Markdown, JSON or a .zip.</li>
     </ol>
-    <p class="help-tip">Press <kbd class="kbd-hint">⌘K</kbd> anywhere for the command palette, or <kbd class="kbd-hint">/</kbd> to jump to the input.</p>
+    <p class="help-tip">Press <kbd class="kbd-hint">/</kbd> to jump to the input. Search actions at the top opens the command palette.</p>
     <section class="help-settings" aria-labelledby="iconStyleTitle">
       <h3 id="iconStyleTitle">Icon style</h3>
       <div class="icon-style-control" role="radiogroup" aria-labelledby="iconStyleTitle" aria-describedby="iconStyleHelp">

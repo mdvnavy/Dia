@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import hashlib
 import json
 import logging
 import mimetypes
@@ -101,6 +102,50 @@ def consulting_config() -> dict[str, object]:
     return {"consultingName": CONSULTING_NAME, "consultingUrl": consulting_url()}
 
 
+# Cache busting (fix-prompt-bar-mic-corner): index.html is served with every /static/ URL suffixed by ?v=<content
+# hash>, so a new build always loads new CSS/JS. The page itself is `no-cache` (always revalidated), versioned
+# assets are immutable for a year, and anything else under /static/ is `no-cache`. /api/version lets an open tab
+# notice a newer build and reload itself.
+_STATIC_REF = re.compile(r'((?:href|src)=")(/static/[^"?#]+)(")')
+_ASSET_VERSIONS: dict[str, str] = {}
+
+
+def asset_version(path: str) -> str | None:
+    """Short content hash of a public static file, cached per process (the image is immutable)."""
+    if path not in _ASSET_VERSIONS:
+        file_path = PUBLIC_FILES.get(path) or icon_file(path) or brand_file(path)
+        if file_path is None:
+            return None
+        try:
+            _ASSET_VERSIONS[path] = hashlib.sha256(file_path.read_bytes()).hexdigest()[:12]
+        except OSError:
+            return None
+    return _ASSET_VERSIONS[path]
+
+
+def build_version() -> str:
+    """One id for the whole front end: hash of the page plus every asset it references."""
+    if "__build__" not in _ASSET_VERSIONS:
+        digest = hashlib.sha256((BASE_DIR / "templates" / "index.html").read_bytes())
+        for path in sorted(p for p in PUBLIC_FILES if p.startswith("/static/")):
+            digest.update(f"{path}={asset_version(path)}".encode())
+        _ASSET_VERSIONS["__build__"] = digest.hexdigest()[:12]
+    return _ASSET_VERSIONS["__build__"]
+
+
+def render_index(raw: bytes) -> bytes:
+    """Version every /static/ reference and stamp the build id into the page."""
+    html = raw.decode("utf-8")
+
+    def _version(match: re.Match[str]) -> str:
+        version = asset_version(match.group(2))
+        return match.group(0) if version is None else f"{match.group(1)}{match.group(2)}?v={version}{match.group(3)}"
+
+    html = _STATIC_REF.sub(_version, html)
+    html = html.replace("</head>", f'  <meta name="dia-build" content="{build_version()}">\n</head>', 1)
+    return html.encode("utf-8")
+
+
 def icon_file(path: str) -> Path | None:
     """Swappable UI icon sets: /static/icons/<set>/<name>.svg|png (no traversal)."""
     match = ICON_PATH.match(path)
@@ -192,6 +237,9 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
         if path == "/api/consulting":
             self.send_json(consulting_config())
             return
+        if path == "/api/version":
+            self.send_json({"build": build_version()}, headers={"Cache-Control": "no-store"})
+            return
         if path == "/api/agent/status":
             if not ask_dia_enabled():
                 self.send_json({"configured": False, "enabled": False})
@@ -210,7 +258,7 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
             self.send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
             return
 
-        self.send_file(file_path)
+        self.send_file(file_path, request_path=path, versioned="v" in parse_qs(urlparse(self.path).query))
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path
@@ -455,12 +503,19 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def send_file(self, file_path: Path) -> None:
+    def send_file(self, file_path: Path, request_path: str = "", versioned: bool = False) -> None:
         try:
             body = file_path.read_bytes()
         except OSError:
             self.send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
             return
+        if request_path == "/":
+            body = render_index(body)
+            cache_control = "no-cache"
+        elif versioned and request_path.startswith("/static/") and request_path != "/static/whats-new.json":
+            cache_control = "public, max-age=31536000, immutable"
+        else:
+            cache_control = "no-cache"
         content_type = mimetypes.guess_type(file_path.name)[0] or "text/plain"
         if file_path.suffix == ".ico":
             content_type = "image/x-icon"
@@ -469,6 +524,7 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", cache_control)
         self.end_headers()
         self.wfile.write(body)
 

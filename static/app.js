@@ -59,23 +59,148 @@ themeToggle.addEventListener("click", () => {
 
 applyTheme(document.documentElement.dataset.theme || "dark");
 
-// Header tooltip: hover/focus shows the full app name via CSS; click/tap
-// toggles it for touch devices, where hover does not exist.
-const appTip = document.querySelector(".app-tip");
-const appInfo = document.querySelector("#appInfo");
+// --- Help popover (?) ----------------------------------------------------------
+// Proto help-popover v0.2 + Glyph "Help icon + popover". All of the popover's copy lives here, so it can be swapped
+// in one place; the [data-hp] slots in index.html are filled from it at load.
+const HELP_POPOVER = {
+  title: "Getting started",
+  close: "Close help",
+  steps: [
+    "Paste a questionnaire to score the opportunity.",
+    "Fill in the missing details DIA flags.",
+    "Review the profile, analysis, and proposal.",
+  ],
+  load: "Load sample",
+  learn: "Learn how to use DIA",
+  confirm: "Replace your text with the sample?",
+  confirmGroup: "Replace your text?",
+  replace: "Replace",
+  cancel: "Cancel",
+  loadError: "Couldn't load the sample. Try again.",
+  footOn: "Scoring is rule-based and doesn't use AI. Only Ask DIA and its suggestions send text to Gemini.",
+  footOff: "Scoring is rule-based and doesn't use AI. Ask DIA is off, so no text goes to Gemini.",
+  palette: "Getting started",
+};
+const helpWrap = document.querySelector(".hp-wrap");
+const helpBtn = document.querySelector("#helpPopoverBtn");
+const helpPop = document.querySelector("#helpPopover");
+const helpTitle = document.querySelector("#helpPopoverTitle");
+const helpActions = document.querySelector("#helpPopoverActions");
+const helpConfirm = document.querySelector("#helpPopoverConfirm");
+const helpReplace = document.querySelector("#helpPopoverReplace");
+const helpCancel = document.querySelector("#helpPopoverCancel");
+const helpError = document.querySelector("#helpPopoverError");
+const helpLearn = document.querySelector("#helpPopoverLearn");
+helpPop.querySelectorAll("[data-hp]").forEach((el) => { el.textContent = HELP_POPOVER[el.dataset.hp]; });
+helpPop.querySelectorAll("[data-hp-label]").forEach((el) => el.setAttribute("aria-label", HELP_POPOVER[el.dataset.hpLabel]));
+helpConfirm.setAttribute("aria-label", HELP_POPOVER.confirmGroup);
+document.querySelector("#helpPopoverSteps").replaceChildren(...HELP_POPOVER.steps.map((step) => {
+  const li = document.createElement("li");
+  li.textContent = step;
+  return li;
+}));
+const helpWide = matchMedia("(min-width: 601px)");
 
-appInfo.addEventListener("click", (event) => {
-  event.stopPropagation();
-  const open = appTip.classList.toggle("open");
-  appInfo.setAttribute("aria-expanded", String(open));
-});
-
-document.addEventListener("click", (event) => {
-  if (appTip.classList.contains("open") && !appTip.contains(event.target)) {
-    appTip.classList.remove("open");
-    appInfo.setAttribute("aria-expanded", "false");
+function showHelpConfirm(show) {
+  helpConfirm.hidden = !show;
+  helpActions.hidden = show;
+  (show ? helpReplace : loadSample).focus();
+}
+function setHelpOpen(open, { restoreFocus = false } = {}) {
+  if (open === !helpPop.hidden) return;
+  if (open) {
+    // Only one popover at a time: What's new, the DIA menu and the plus menus close without taking focus.
+    document.dispatchEvent(new CustomEvent("dia:popover-open", { detail: "help" }));
+    if (typeof setNavMenu === "function") setNavMenu(false);
+    helpError.hidden = true;
+    helpConfirm.hidden = true;
+    helpActions.hidden = false;
   }
+  helpPop.hidden = !open;
+  helpBtn.setAttribute("aria-expanded", String(open));
+  if (open) helpTitle.focus({ preventScroll: true });
+  else if (restoreFocus) helpBtn.focus({ preventScroll: true });
+}
+function openHelpPopover() { setHelpOpen(true); }
+helpBtn.addEventListener("click", () => setHelpOpen(helpPop.hidden, { restoreFocus: true }));
+document.querySelector("#helpPopoverClose").addEventListener("click", () => setHelpOpen(false, { restoreFocus: true }));
+document.addEventListener("dia:popover-open", (event) => { if (event.detail !== "help") setHelpOpen(false); });
+document.addEventListener("pointerdown", (event) => {
+  if (!helpPop.hidden && !helpWrap.contains(event.target)) setHelpOpen(false);
 });
+helpPop.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  event.preventDefault();
+  event.stopPropagation();
+  if (!helpConfirm.hidden) showHelpConfirm(false);   // Esc in the confirm works like Cancel
+  else setHelpOpen(false, { restoreFocus: true });
+});
+// Desktop is non-modal: tabbing out of the panel (past Learn) closes it and lets focus carry on.
+helpPop.addEventListener("focusout", (event) => {
+  if (!helpPop.hidden && event.relatedTarget && !helpWrap.contains(event.relatedTarget)) setHelpOpen(false);
+});
+helpWide.addEventListener("change", () => { if (!helpPop.hidden) setHelpOpen(false, { restoreFocus: true }); });
+helpLearn.addEventListener("click", () => {
+  setHelpOpen(false);
+  openHelp();
+  helpDialog.addEventListener("close", () => helpBtn.focus({ preventScroll: true }), { once: true });
+});
+helpCancel.addEventListener("click", () => showHelpConfirm(false));
+helpReplace.addEventListener("click", () => loadSampleQuestionnaire({ from: "popover" }));
+loadSample.addEventListener("click", () => requestSample({ from: "popover" }));
+
+// --- Load sample: one rule for every entry point (popover, DIA menu, palette, plus menus) ----
+// Empty box or the sample already in it: load straight away. Otherwise ask first (inline in the popover, a toast
+// elsewhere), because the box may hold a real questionnaire. A failed fetch says so instead of failing silently.
+let sampleText = null;
+function requestSample({ from = "menu" } = {}) {
+  const current = questionnaire.value.trim();
+  if (current && sampleText !== null && current === sampleText.trim()) {
+    finishSampleLoad(from);
+    return;
+  }
+  if (!current) { loadSampleQuestionnaire({ from }); return; }
+  if (from === "popover") { showHelpConfirm(true); return; }
+  showToast(HELP_POPOVER.confirm, [{ label: HELP_POPOVER.replace, run: () => loadSampleQuestionnaire({ from }) }]);
+}
+function finishSampleLoad(from) {
+  if (from === "popover") setHelpOpen(false);
+  if (intakeBody.hidden) setIntakeCollapsed(false);
+  autosizeComposer(questionnaire);
+  setRunState("ready", "Sample loaded");
+  questionnaire.focus({ preventScroll: true });
+  InputsPrompt.schedule();
+}
+async function loadSampleQuestionnaire({ from = "menu" } = {}) {
+  const button = from === "popover" ? (helpConfirm.hidden ? loadSample : helpReplace) : null;
+  if (button) { button.disabled = true; button.setAttribute("aria-busy", "true"); }
+  helpError.hidden = true;
+  statusText.textContent = "Loading sample...";
+  try {
+    const response = await fetch("/api/sample");
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = await response.json();
+    if (typeof payload.questionnaire !== "string") throw new Error("no questionnaire");
+    sampleText = payload.questionnaire;
+    questionnaire.value = payload.questionnaire;
+    questionnaire.dispatchEvent(new Event("input", { bubbles: true }));
+    if (from === "popover") { helpConfirm.hidden = true; helpActions.hidden = false; }
+    finishSampleLoad(from);
+  } catch (error) {
+    setRunState("ready");
+    if (from === "popover") {
+      helpConfirm.hidden = true;
+      helpActions.hidden = false;
+      helpError.textContent = HELP_POPOVER.loadError;
+      helpError.hidden = false;
+      loadSample.focus();
+    } else {
+      showToast(HELP_POPOVER.loadError);
+    }
+  } finally {
+    if (button) { button.disabled = false; button.removeAttribute("aria-busy"); }
+  }
+}
 
 function setBusy(button, busy) {
   button.disabled = busy;
@@ -106,17 +231,6 @@ intakeToggle.addEventListener("click", () => {
   if (!intakeBody.hidden) {
     questionnaire.focus();
   }
-});
-
-loadSample.addEventListener("click", async () => {
-  statusText.textContent = "Loading sample...";
-  const response = await fetch("/api/sample");
-  const payload = await response.json();
-  questionnaire.value = payload.questionnaire;
-  if (intakeBody.hidden) setIntakeCollapsed(false);
-  autosizeComposer(questionnaire);
-  setRunState("ready", "Sample loaded");
-  InputsPrompt.schedule();
 });
 
 runAgent.addEventListener("click", async () => {
@@ -1919,7 +2033,8 @@ const hasResults = () => latestPayload !== null;
 
 const commands = [
   { id: "new-intake", label: "New intake", hint: "Clear questionnaire", run: newIntake },
-  { id: "load-sample", label: "Load sample questionnaire", run: press("#loadSample") },
+  { id: "load-sample", label: "Load sample questionnaire", run: () => requestSample({ from: "menu" }) },
+  { id: "help-popover", label: HELP_POPOVER.palette, keywords: "help how steps sample getting started", run: () => setHelpOpen(true) },
   { id: "run-intake", label: "Run intake", hint: `${modKey} Enter`, enabled: () => !runAgent.disabled && questionnaire.value.trim() !== "", run: () => runAgent.click() },
   { id: "edit-intake", label: "Edit intake", enabled: () => !intakeToggle.hidden && intakeBody.hidden, run: () => { setIntakeCollapsed(false); questionnaire.focus(); } },
   { id: "focus", label: "Focus the input", hint: "/", run: focusComposer },
@@ -2031,6 +2146,7 @@ function openPalette() {
   if (palette.open) return;
   paletteReturnFocus = paletteReturnTarget(document.activeElement);
   setNavMenu(false);
+  setHelpOpen(false);
   if (helpDialog.open) helpDialog.close();
   paletteInput.value = "";
   activeIndex = 0;
@@ -2560,7 +2676,6 @@ toast.addEventListener("mouseleave", () => { toastTimer = setTimeout(hideToast, 
 // --- Intake tray (upload) -----------------------------------------------------
 const trayButton = document.querySelector("#trayButton");
 const trayInput = document.querySelector("#trayInput");
-const uploadLink = document.querySelector("#uploadLink");
 const uploadCancel = document.querySelector("#uploadCancel");
 const intakeComposer = document.querySelector("#intakeComposer");
 const intakeError = document.querySelector("#intakeError");
@@ -2633,7 +2748,6 @@ function setTrayBusy(busy) {
   questionnaire.readOnly = busy;
   runAgent.disabled = busy;
   uploadCancel.hidden = !busy;
-  uploadLink.hidden = busy;
 }
 
 async function extractOne(file, signal) {
@@ -2736,7 +2850,6 @@ function openPicker() {
   trayInput.click();
 }
 trayButton.addEventListener("click", openPicker);
-uploadLink.addEventListener("click", openPicker);
 uploadCancel.addEventListener("click", () => uploadController?.abort());
 trayInput.addEventListener("change", () => {
   loadIntakeFiles(trayInput.files);
@@ -3935,3 +4048,25 @@ document.querySelectorAll(".actions.under-prompt").forEach((row) => {
   new MutationObserver(refit).observe(row, { subtree: true, attributes: true, attributeFilter: ["hidden"], childList: true, characterData: true });
   document.fonts?.ready?.then(refit);
 });
+
+// Stale-tab guard (fix-prompt-bar-mic-corner): a tab restored from the back/forward cache or left open across a
+// deploy keeps the old page. When the tab comes back into view, ask /api/version (no-store) and reload onto the new
+// build, but only while nothing typed or produced would be lost.
+(() => {
+  const current = document.querySelector('meta[name="dia-build"]')?.content;
+  if (!current) return;
+  let checking = false;
+  const idle = () => !questionnaire.value.trim() && !agentMessage.value.trim() && document.body.dataset.stage !== "results";
+  const check = async () => {
+    if (checking || document.visibilityState !== "visible") return;
+    checking = true;
+    try {
+      const response = await fetch("/api/version", { cache: "no-store" });
+      const { build } = response.ok ? await response.json() : {};
+      if (build && build !== current && idle()) window.location.reload();
+    } catch (error) { /* offline: keep the page */ }
+    finally { checking = false; }
+  };
+  document.addEventListener("visibilitychange", check);
+  window.addEventListener("pageshow", (event) => { if (event.persisted) check(); });
+})();
