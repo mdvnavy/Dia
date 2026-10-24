@@ -1,0 +1,184 @@
+/* What's new indicator + release-notes panel (Dia). Spec: proto/whats-new-indicator.md v0.5 (layout A approved
+ * 2026-10-23 1:28 PM ET; silver glow + red NEW 1:57/1:58 PM ET; no pill 2:14 PM ET; Glyph's clay NEW asset and
+ * stronger glow 2:33 PM ET). Tokens and tag rules are copied verbatim from
+ * design/2026-10-23_whats-new-indicator_mock/whats-new-indicator.css (v0.5).
+ * Red appears ONLY in the NEW tag (Glyph's clay image): never other red text, borders, dots or badges. */
+
+/* ---- Tokens ---- */
+:root {
+  --wn-target: 44px;                 /* hit area, every breakpoint */
+  --wn-size: 22px;                   /* visible mark (Glyph clay-mark-22/44/66/88) */
+  --wn-radius: 5px;                  /* matches the clay tile's corner at 22px */
+  --wn-gap: 12px;                    /* clock -> mark */
+  --wn-rest-ring: var(--border);     /* 1px hairline at rest (off state) */
+  --wn-fade: 1200ms;                 /* one-time fade-in (glow + tag), no loop; off under reduced motion */
+  /* SILVER glow, DARK (on #0c0c0e). Glyph final v0.5 (2:33 PM ET); was ring .80, alpha .42, blur 10, spread 1 */
+  --wn-glow-ring: rgba(217, 220, 224, 0.90);                 /* 1px, #D9DCE0 @ .90 */
+  --wn-glow-rgb: 217, 220, 224;  --wn-glow-alpha: 0.55;  --wn-glow-blur: 13px;  --wn-glow-spread: 1.3px;
+  /* NEW tag (v0.5): Glyph's clay NEW asset, centred under the mark. The reds live in the asset; these tokens document them
+     and drive the forced-colours / no-image text fallback. */
+  --wn-tag-text-dark: #FF5C77;                               /* base red, dark (in clay-new-dark-*) */
+  --wn-tag-text-light: #C1102D;                              /* base red, light (in clay-new-light-*) */
+  --wn-tag-text: var(--wn-tag-text-dark);
+  --wn-tag-img-w: 22px;  --wn-tag-img-h: 8px;                /* clay-new-{theme}-22/44/66.png, 1x/2x/3x */
+  --wn-tag-offset-y: 1px;                                    /* mark bottom edge -> tag box (clears the 1px ring) */
+}
+html[data-theme="light"] {
+  /* SILVER glow, LIGHT (on #f3f1ec). Glyph final v0.5; ring unchanged; was alpha .55, blur 9, spread 1 */
+  --wn-glow-ring: rgba(124, 130, 138, 1.0);                  /* 1px, #7C828A @ 1.0 -> 3.43:1 */
+  --wn-glow-rgb: 163, 169, 177;  --wn-glow-alpha: 0.72;  --wn-glow-blur: 12px;  --wn-glow-spread: 1.3px;
+  --wn-tag-text: var(--wn-tag-text-light);
+}
+
+/* ---- Layout A: centre slot. The clock stays exactly centred; the mark hangs off its right edge. ---- */
+.lh-centre-slot {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  display: block; pointer-events: none;
+}
+.lh-centre-slot .lh-centre { position: static; transform: none; }
+/* Bloom must never clip: everything between the mark and the band stays overflow: visible. */
+.top-nav.lh, .lh-centre-slot, .lh-centre, #lhClock, .wn-wrap, .wn-btn { overflow: visible; }
+/* Pixel snap (spec v0.5.1, test 23): the 25px clock (desktop) and the 55px band content (mobile) put the 44px button on a
+   half pixel (y 3.5 at 1280, 5.5 at 390), which softens the 1x mark and NEW image. Nudging it 0.5px down puts its top on a
+   whole pixel and centres it exactly in the 52/56px band. A transform, so nothing else in the layout moves. */
+.wn-wrap {
+  --wn-snap-y: 0.5px;
+  position: absolute; left: calc(100% + var(--wn-gap) - (var(--wn-target) - var(--wn-size)) / 2);
+  top: 50%; transform: translateY(calc(-50% + var(--wn-snap-y)));
+  display: inline-grid;
+}
+
+/* ---- Button + mark ---- */
+.wn-btn {
+  pointer-events: auto; position: relative;
+  width: var(--wn-target); height: var(--wn-target);
+  display: grid; place-items: center;
+  margin: 0; padding: 0; border: 0; border-radius: 10px; background: transparent; cursor: pointer;
+  font: inherit;
+}
+.top-nav.lh .wn-btn, .top-nav.lh .wn-btn:hover { color: var(--lh-ink); background: transparent; }
+/* Nothing on the indicator animates except the one-time fade (the app's global button transitions are off here). */
+.wn-btn, .wn-btn * { transition: none; }
+.wn-btn:focus-visible { outline: 2px solid var(--lh-ring, var(--focus-ring)); outline-offset: -4px; }
+/* v0.4.2: with NEW under the mark, the inset ring's bottom edge would cross the text. When new, draw the ring as a
+   ::before with the same 4px side/top inset but its bottom 2px below the button, so it clears the text by 2px. */
+.wn-btn[data-state="new"]:focus-visible { outline: none; }
+.wn-btn[data-state="new"]:focus-visible::before {
+  content: ""; position: absolute; inset: 4px 4px -2px 4px; border: 2px solid var(--lh-ring, var(--focus-ring));
+  border-radius: 8px; pointer-events: none;
+}
+/* The mark image never changes (same src in every state); only its box-shadow does. */
+.wn-mark {
+  width: var(--wn-size); height: var(--wn-size); display: block;
+  border-radius: var(--wn-radius);
+  box-shadow: 0 0 0 1px var(--wn-rest-ring);
+}
+.wn-btn[data-state="new"] .wn-mark {
+  box-shadow: 0 0 0 1px var(--wn-glow-ring),
+    0 0 var(--wn-glow-blur) var(--wn-glow-spread) rgba(var(--wn-glow-rgb), var(--wn-glow-alpha));
+}
+/* NEW tag: centred, straddling the mark's bottom edge, 2px low so it covers only the mark's bottom 4.5px and the
+   cursor underscore stays visible. aria-hidden in the markup. Shown only when data-state="new". */
+.wn-tag { display: none; }
+.wn-btn[data-state="new"] .wn-tag {
+  display: block; position: absolute; left: 50%; top: calc(50% + var(--wn-size) / 2 + var(--wn-tag-offset-y)); transform: translateX(-50%);
+  width: var(--wn-tag-img-w); height: var(--wn-tag-img-h); padding: 0; line-height: 0; pointer-events: none;
+}
+.wn-tag-img { display: block; width: var(--wn-tag-img-w); height: var(--wn-tag-img-h); }
+.wn-tag-img--light { display: none; }
+html[data-theme="light"] .wn-tag-img--light { display: block; }
+html[data-theme="light"] .wn-tag-img--dark { display: none; }
+.wn-tag-text { display: none; }   /* forced colours only (below) */
+/* One 1.2s fade-in (glow and tag together), once; under reduced motion both simply appear. No pulse, no flicker. */
+@media (prefers-reduced-motion: no-preference) {
+  .wn-btn[data-state="new"][data-fade-once] .wn-mark { animation: wn-fade-in var(--wn-fade) ease-out 1 both; }
+  .wn-btn[data-state="new"][data-fade-once] .wn-tag { animation: wn-tag-in var(--wn-fade) ease-out 1 both; }
+}
+@keyframes wn-fade-in { from { box-shadow: 0 0 0 1px var(--wn-rest-ring), 0 0 0 0 rgba(var(--wn-glow-rgb), 0); } }
+@keyframes wn-tag-in { from { opacity: 0; } }
+@media (prefers-contrast: more) {
+  .wn-btn[data-state="new"] .wn-mark { box-shadow: 0 0 0 2px var(--text), 0 0 var(--wn-glow-blur) var(--wn-glow-spread) rgba(var(--wn-glow-rgb), var(--wn-glow-alpha)); }
+  .wn-btn[data-state="new"] { --wn-tag-offset-y: 2px; }  /* clear the 2px ring; the asset is unchanged (already >= 4.5:1) */
+}
+/* Forced colours: shadows drop; 2px Highlight outline hugging the mark; the tag becomes CanvasText, moved 1px lower to clear the outline. */
+@media (forced-colors: active) {
+  .wn-mark { box-shadow: none; }
+  .wn-btn[data-state="new"] { --wn-tag-offset-y: 2px; }
+  .wn-btn[data-state="new"] .wn-mark { outline: 2px solid Highlight; outline-offset: 0; }
+  .wn-btn[data-state="new"] .wn-tag { width: auto; height: auto; line-height: 1; }
+  .wn-btn[data-state="new"] .wn-tag-img { display: none !important; }
+  .wn-btn[data-state="new"] .wn-tag-text { display: block; color: CanvasText; font: 700 9px/1 var(--sans, Inter, ui-sans-serif, system-ui, sans-serif);
+    letter-spacing: 0.04em; text-transform: uppercase; white-space: nowrap; }
+  .wn-btn[data-state="new"]:focus-visible::before { border-color: Highlight; }
+}
+
+/* ---- Tooltip (same bubble family as .tip-bubble, but a --border edge: the bubble's gold accent edge is out here) ---- */
+.wn-tip {
+  position: absolute; top: calc(100% + 2px); left: 50%; transform: translateX(-50%); z-index: 30;
+  padding: 6px 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text);
+  font: 500 11px/1.2 var(--sans); letter-spacing: 0; text-transform: none; white-space: nowrap;
+  box-shadow: var(--shadow-subtle); display: none; pointer-events: none;
+}
+.wn-wrap.show-tip .wn-tip { display: block; }
+
+/* ---- Mobile (<= 600px): short trigger label, the row is time · mark ---- */
+.lh-trigger-short { display: none; }
+@media (max-width: 600px) {
+  .lh-trigger-full { display: none; }
+  .lh-trigger-short { display: inline; }
+  .lh-centre-slot {
+    position: static; transform: none; flex: 1 1 auto; min-width: 0;
+    display: flex; flex-direction: row; align-items: center; justify-content: center; gap: 2px;
+  }
+  .lh-centre-slot .lh-centre { flex: 0 1 auto; }
+  .wn-wrap { position: relative; left: auto; top: auto; transform: translateY(var(--wn-snap-y)); margin: 0 -6px 0 0; flex: none; }
+  .wn-tip { left: auto; right: 0; transform: none; }
+}
+/* < 375px the band hides the clock; the mark stays, just before Search. */
+@media (max-width: 374px) {
+  .lh-centre-slot { justify-content: flex-end; }
+  .wn-wrap { margin: 0; }
+}
+
+/* ---- Release-notes panel: popover (desktop) / bottom sheet (<= 600px) ---- */
+.wn-panel {
+  position: fixed; z-index: 90; width: 380px; max-width: calc(100vw - 32px);
+  max-height: min(560px, calc(100vh - 90px)); overflow: auto;
+  background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 14px;
+  box-shadow: var(--shadow-lifted); font: 400 14px/1.5 var(--sans); text-transform: none; letter-spacing: 0;
+}
+.wn-panel[hidden] { display: none; }
+.wn-panel header { display: flex; align-items: center; justify-content: space-between; padding: 14px 8px 10px 18px; border-bottom: 1px solid var(--border); }
+.wn-panel h2 { margin: 0; font: 600 15px/1.2 var(--sans); text-transform: none; letter-spacing: 0; }
+.wn-panel h2:focus { outline: none; }
+.wn-panel h2:focus-visible { outline: 2px solid var(--lh-ring, var(--focus-ring)); outline-offset: 2px; border-radius: 4px; }
+.wn-panel .wn-sub { display: block; margin-top: 3px; font: 500 10px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.wn-close { width: 44px; height: 44px; border: 0; background: transparent; color: var(--muted); border-radius: 8px; font: 400 20px/1 var(--sans); cursor: pointer; }
+.wn-close:hover { color: var(--text); }
+.wn-close:focus-visible { outline: 2px solid var(--lh-ring, var(--focus-ring)); outline-offset: -4px; }
+.wn-list { list-style: none; margin: 0; padding: 4px 0; }
+.wn-item { padding: 14px 18px; border-bottom: 1px solid var(--border); }
+.wn-item:last-child { border-bottom: 0; }
+.wn-meta { display: flex; gap: 8px; align-items: center; font: 500 10px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.wn-new { padding: 3px 6px; border-radius: 999px; border: 1px solid var(--muted); color: var(--text); letter-spacing: .06em; }
+.wn-item h3 { margin: 7px 0 4px; font: 600 14px/1.35 var(--sans); }
+.wn-item p { margin: 0; color: var(--soft, var(--text)); font-size: 13.5px; }
+.wn-item a { color: var(--text); font-size: 13px; text-underline-offset: 3px; }
+.wn-state { padding: 18px; color: var(--muted); font-size: 13.5px; }
+.wn-state p { margin: 0 0 10px; color: var(--text); }
+.wn-retry { min-height: 44px; padding: 0 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--raised); color: var(--text); font: 500 13px/1 var(--sans); cursor: pointer; }
+.wn-retry:focus-visible { outline: 2px solid var(--lh-ring, var(--focus-ring)); outline-offset: 2px; }
+.wn-skel { list-style: none; margin: 0; padding: 4px 0; }
+.wn-skel li { padding: 14px 18px; }
+.wn-skel span { display: block; height: 10px; border-radius: 4px; background: var(--border); }
+.wn-skel span + span { margin-top: 8px; width: 70%; }
+.wn-foot { padding: 12px 18px 16px; border-top: 1px solid var(--border); color: var(--muted); font-size: 12px; }
+.wn-backdrop { position: fixed; inset: 0; z-index: 89; background: rgba(0, 0, 0, .35); }
+.wn-backdrop[hidden] { display: none; }
+@media (max-width: 600px) {
+  .wn-panel {
+    left: 0 !important; right: 0; bottom: 0; top: auto !important; width: auto; max-width: none;
+    max-height: 80vh; border-radius: 14px 14px 0 0; border-bottom: 0;
+  }
+  .wn-panel header, .wn-item, .wn-foot, .wn-state { padding-left: 16px; padding-right: 16px; }
+}

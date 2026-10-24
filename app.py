@@ -44,6 +44,10 @@ PUBLIC_FILES = {
     "/static/composer-icons.css": BASE_DIR / "static" / "composer-icons.css",
     "/static/composer.css": BASE_DIR / "static" / "composer.css",
     "/static/vendor/jszip.min.js": BASE_DIR / "static" / "vendor" / "jszip.min.js",
+    # What's new (spec v0.3 §7): hand-curated release notes, fetched after first paint.
+    "/static/whats-new.json": BASE_DIR / "static" / "whats-new.json",
+    "/static/whats-new.css": BASE_DIR / "static" / "whats-new.css",
+    "/static/whats-new.js": BASE_DIR / "static" / "whats-new.js",
 }
 # Runtime sample lives outside tests/ so it ships in the Cloud Run image even
 # when test files are excluded by .dockerignore.
@@ -54,6 +58,11 @@ SAMPLE_PATHS = (
 
 
 ICON_DIR = BASE_DIR / "static" / "icons"
+# Glyph's clay mark exports (What's new indicator + favicon set): fixed names only, no traversal.
+BRAND_DIR = BASE_DIR / "static" / "brand"
+BRAND_PATH = re.compile(
+    r"^/static/brand/((?:clay-mark-(?:22|44|66|88|180)|clay-new-(?:light|dark)-(?:22|44|66)|favicon-(?:16|32))\.png|favicon\.ico)$"
+)
 ICON_PATH = re.compile(r"^/static/icons/((?:[a-z0-9-]{1,32}/)?[a-z0-9][a-z0-9@-]{0,63}\.(?:svg|png|webp|gif))$")
 
 
@@ -99,6 +108,15 @@ def icon_file(path: str) -> Path | None:
     if not match:
         return None
     candidate = ICON_DIR / match.group(1)
+    return candidate if candidate.is_file() else None
+
+
+def brand_file(path: str) -> Path | None:
+    """/static/brand/<clay-mark-N.png|favicon-N.png|favicon.ico> (fixed allowlist)."""
+    match = BRAND_PATH.match(path)
+    if not match:
+        return None
+    candidate = BRAND_DIR / match.group(1)
     return candidate if candidate.is_file() else None
 
 
@@ -199,6 +217,8 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
         file_path = PUBLIC_FILES.get(path)
         if file_path is None:
             file_path = icon_file(path)
+        if file_path is None:
+            file_path = brand_file(path)
         if file_path is None:
             self.send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
             return
@@ -728,8 +748,12 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
             self.send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
             return
         content_type = mimetypes.guess_type(file_path.name)[0] or "text/plain"
+        if file_path.suffix == ".ico":
+            content_type = "image/x-icon"
+        if not content_type.startswith("image/") or content_type == "image/svg+xml":
+            content_type = f"{content_type}; charset=utf-8"  # text types only; binary images carry no charset
         self.send_response(HTTPStatus.OK)
-        self.send_header("Content-Type", f"{content_type}; charset=utf-8")
+        self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
