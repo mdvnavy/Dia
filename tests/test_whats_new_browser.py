@@ -171,11 +171,12 @@ def wait_panel_rendered(s):
 
 # --- 1-8: behaviour -----------------------------------------------------------------------------------------------
 
-def test_01_first_visit_no_glow_and_key_set(session):
+def test_01_first_visit_glows_and_leaves_the_key_unset(session):
+    # Ikenna 2026-10-23 21:53 ET: the NEW tag must show on a first visit; the seen-state is only written on open.
     s = session()
-    assert s.state == "none"
-    assert s.seen == LATEST
-    assert s.page.get_attribute("#whatsNew", "aria-label") == "What's new"
+    assert s.state == "new"
+    assert s.seen is None
+    assert s.page.get_attribute("#whatsNew", "aria-label").startswith("What's new, ")   # e.g. "What's new, 3 new updates"
 
 
 def test_02_returning_user_glows_with_count_and_tooltip(session):
@@ -354,7 +355,7 @@ def test_11_24_forced_colors_highlight_outline_and_system_tag(session, theme, wi
     # the tag text box clears the 2px outline (offset-y becomes 2px in forced colours)
     gap = s.ev("document.querySelector('#whatsNew .wn-tag').getBoundingClientRect().top - document.querySelector('.wn-mark').getBoundingClientRect().bottom")
     assert abs(gap - 2) < 0.01
-    rest = session(theme=theme, width=width, forced_colors="active")
+    rest = session(seen=LATEST, theme=theme, width=width, forced_colors="active")   # up to date: no glow
     assert rest.state == "none"
     r = rest.ev(FORCED)
     assert r["style"] == "none" and r["tagDisplay"] == "none"
@@ -687,6 +688,7 @@ def test_16_fetch_after_first_paint_and_never_blocks_intake(session):
     assert len(fetched) == 1 and fcp is not None and fetched[0] >= fcp
     h = session(seen=OLDEST, hold_json=True)
     h.page.wait_for_function("document.querySelector('#agentStatus').textContent !== 'checking...'")
+    h.page.click("#helpPopoverBtn")   # Load sample lives in the help popover (composer v3)
     h.page.click("#loadSample")
     h.page.wait_for_function("questionnaire.value.length > 0")
     h.page.click("#runAgent")
@@ -715,7 +717,8 @@ def test_20_mark_box_shadow_matches_silver_tokens(session, theme, width):
     src = s.ev("document.querySelector('.wn-mark').getAttribute('src')")
     s.page.click("#whatsNew")                     # opening clears the glow; the image itself never changes
     assert s.ev(MARK_SHADOW) == s.ev(HAIRLINE)
-    assert s.ev("document.querySelector('.wn-mark').getAttribute('src')") == src == "/static/brand/clay-mark-44.png"
+    # The page versions static URLs (?v=<content hash>, composer v3 cache fix); the image itself is unchanged.
+    assert s.ev("document.querySelector('.wn-mark').getAttribute('src')") == src and src.split("?v=")[0] == "/static/brand/clay-mark-44.png"
 
 
 COLOURS = """() => { const out = []; const els = [...document.querySelectorAll('#whatsNewWrap, #whatsNewWrap *, #whatsNewPanel, #whatsNewPanel *')];
@@ -850,10 +853,10 @@ def test_22_tag_drops_1px_in_contrast_and_forced_modes(session, mode):
         assert s.ev(MARK_SHADOW).startswith(s.ev("(() => { const d = document.createElement('div'); d.style.color = 'var(--text)'; document.body.append(d); const v = getComputedStyle(d).color; d.remove(); return v; })()") + " 0px 0px 0px 2px")
 
 
-@pytest.mark.parametrize("case", ["first-visit", "error", "storage-blocked", "opened"])
+@pytest.mark.parametrize("case", ["up-to-date", "error", "storage-blocked", "opened"])
 def test_22_new_tag_absent_or_cleared_with_glow(session, case):
-    if case == "first-visit":
-        s = session()
+    if case == "up-to-date":   # a first visit now shows the tag (test_01); a visitor who has seen the latest doesn't
+        s = session(seen=LATEST)
     elif case == "error":
         s = session(seen=OLDEST, status=404, raw="{}")
     elif case == "storage-blocked":
