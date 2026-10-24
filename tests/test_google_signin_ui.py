@@ -122,7 +122,7 @@ def live(gate_env):
     srv.close()
 
 
-def open_page(browser, url, width=1280, height=900, theme=None):
+def open_page(browser, url, width=1440, height=900, theme=None):  # 1440: the header counter fits beside the centre slot
     context = browser.new_context(viewport={"width": width, "height": height})
     page = context.new_page()
     page.route(GIS_SRC + "*", lambda route: route.fulfill(status=200, content_type="text/javascript", body=FAKE_GIS))
@@ -292,9 +292,11 @@ def test_mobile_counter_joins_status_line_and_menu(browser, live):
     render(page, 7, 3)
     assert not page.is_visible("#usageMeter")
     assert page.is_visible("#usageInline")
-    # Landing polish (#40) moved #status above the bar; the counter copy sits right after it.
-    line = (page.inner_text("#status") + " " + page.inner_text("#usageInline")).replace("\n", " ")
-    assert re.sub(r"\s+", " ", line).strip() == "Ready · 7/10 generations · 3/5 Ask DIA"
+    # Landing polish (#40) made #status its own line; the counter is the line right under it, with no leading "·".
+    assert page.inner_text("#status").strip() == "Ready"
+    assert re.sub(r"\s+", " ", page.inner_text("#usageInline")).strip() == "7/10 generations · 3/5 Ask DIA"
+    st, inline = page.eval_on_selector("#status", "e => e.getBoundingClientRect().bottom"), page.eval_on_selector("#usageInline", "e => e.getBoundingClientRect().top")
+    assert inline >= st - 1
     assert page.evaluate("!document.querySelector('#menuUsage').hidden")
     page.context.close()
 
@@ -318,14 +320,27 @@ def test_kill_switch_degrades_ask_dia_calmly(browser, live, monkeypatch):
     page.context.close()
 
 
-def test_desktop_counter_layout_at_1280(browser, live):
+def test_header_counter_too_tight_at_1280_uses_the_status_line(browser, live):
+    """Since #47 the What's new mark hangs off the clock; at 1280 the header counter can't clear it by 16px,
+    so it uses the status-line form (fitUsageMeter) instead of overlapping the centre."""
     page = open_page(browser, live.url, width=1280, height=800)
     sign_in(page)
+    assert page.evaluate("document.body.dataset.usageFit") == "inline"
+    assert not page.is_visible("#usageMeter") and page.is_visible("#usageInline")
+    page.set_viewport_size({"width": 1600, "height": 800})
+    page.wait_for_function("document.body.dataset.usageFit === undefined")
+    assert page.is_visible("#usageMeter")
+    page.context.close()
+
+
+def test_desktop_counter_layout_at_1440(browser, live):
+    page = open_page(browser, live.url, width=1440, height=800)
+    sign_in(page)
     box = page.evaluate("""(() => { const r = s => document.querySelector(s).getBoundingClientRect();
-        return {clock: r('#lhClock').right, meter: [r('#usageMeter').left, r('#usageMeter').right, r('#usageMeter').top + r('#usageMeter').height / 2],
+        return {clock: r('.lh-centre-slot').right, meter: [r('#usageMeter').left, r('#usageMeter').right, r('#usageMeter').top + r('#usageMeter').height / 2],
                 div: [r('#usageDivider').left, r('#usageDivider').right, r('#usageDivider').height],
                 search: [r('.lh-search-label').left, r('.lh-search-label').top + r('.lh-search-label').height / 2]}; })()""")
-    assert box["meter"][0] > box["clock"], "counter must not overlap the centred clock"
+    assert box["meter"][0] >= box["clock"] + 16, "counter must clear the centre slot (clock + What's new mark)"
     assert round(box["div"][0] - box["meter"][1]) == 16
     assert round(box["search"][0] - box["div"][1]) == 16
     assert box["div"][2] == 12

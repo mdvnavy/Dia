@@ -122,6 +122,19 @@ function setRunLimited(button, bucketName, usage) {
   }
 }
 
+// The header counter must clear the centre slot (clock + What's new mark) by 16px. When the header can't fit it
+// (e.g. 1280 since #47 hung the mark off the clock), use the status-line form instead, same as below 1280.
+const usageCentre = document.querySelector(".lh-centre-slot");
+function fitUsageMeter() {
+  if (!usageMeter || !usageCentre) return;
+  document.body.removeAttribute("data-usage-fit");
+  if (usageMeter.hidden || !usageMeter.offsetParent) return;
+  if (usageMeter.getBoundingClientRect().left < usageCentre.getBoundingClientRect().right + 16) {
+    document.body.dataset.usageFit = "inline";
+  }
+}
+window.addEventListener("resize", () => { if (lastUsage) fitUsageMeter(); });
+
 function renderUsage(usage) {
   if (!usageMeter) return;
   const signedIn = Boolean(usage && usage.signed_in);
@@ -129,6 +142,7 @@ function renderUsage(usage) {
   usageDivider.hidden = !signedIn;
   if (!signedIn) {
     lastUsage = null;
+    document.body.removeAttribute("data-usage-fit");
     usageInline.hidden = true;
     menuUsage.hidden = true;
     usageReset.textContent = "";
@@ -160,9 +174,11 @@ function renderUsage(usage) {
     usageMeter.title = sentence;
     usageMeter.setAttribute("aria-describedby", "usageReset");
     usageReset.textContent = sentence;
-    // <=600px: the counter joins the status line ("Ready · 7/10 generations · 3/5 Ask DIA").
+    // Below the header form, the counter sits on its own line right under the status ("7/10 generations · 3/5 Ask DIA").
+    // #status is its own line since landing polish, so there's no leading separator.
     usageInline.replaceChildren();
     for (const [name, label] of [["generations", "generations"], ["ask", "Ask DIA"]]) {
+      if (usageInline.childNodes.length) usageInline.append(" · ");
       const bucket = usage[name];
       const num = document.createElement("span");
       num.className = "usage-num";
@@ -171,11 +187,12 @@ function renderUsage(usage) {
       const text = document.createElement("span");
       text.className = "usage-label";
       text.textContent = ` ${label}`;
-      usageInline.append(" · ", num, text);
+      usageInline.append(num, text);
     }
     usageInline.hidden = false;
     menuUsage.hidden = false;
   }
+  fitUsageMeter();
   setRunLimited(runAgent, "generations", usage);
   setRunLimited(runChat, "ask", usage);
   // Silent on the first fill (page load); announce only later changes, which

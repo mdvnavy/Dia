@@ -1375,6 +1375,12 @@ html[data-assistant="expert"] body:not([data-agent="open"]) .agent { display: no
   .lh-menu-usage:not([hidden]) { display: flex; flex-direction: column; margin-top: 6px; }
 }
 
+/* Same status-line form when the header measures too tight beside the centre slot (app.js fitUsageMeter). */
+body[data-usage-fit="inline"] .lh-usage, body[data-usage-fit="inline"] .lh-usage-divider { display: none; }
+body[data-usage-fit="inline"] .usage-inline:not([hidden]) { display: inline; }
+body[data-usage-fit="inline"] #status.is-limit + .usage-inline { display: none; }
+body[data-usage-fit="inline"] .lh-menu-usage:not([hidden]) { display: flex; flex-direction: column; margin-top: 6px; }
+
 /* Signed-out visitors read; they don't run. The composer area becomes a quiet prompt. */
 .signin-gate {
   display: flex;
