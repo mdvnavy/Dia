@@ -624,20 +624,7 @@ h2, label {
 
 .agent > h2 { text-align: center; margin-bottom: 14px; }
 
-.agent-badge {
-  display: inline-block;
-  margin-left: 8px;
-  padding: 2px 8px;
-  border: 1px solid var(--border);
-  border-radius: 9999px;
-  color: var(--muted);
-  font-size: 11px;
-  letter-spacing: .04em;
-  text-transform: none;
-  vertical-align: middle;
-}
-
-.agent-badge.ok { color: var(--good); border-color: var(--good); }
+/* Ask DIA state (#agentStatus) is plain text with a status dot: see composer.css "Prompt bar v2". */
 
 /* Tia's "beacon" response card: card with an accent top rule. */
 .response-area {
