@@ -313,6 +313,7 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
         quota = get_quota()
         try:
             result = quota.consume(bucket, self.identity.sub)
+            self._charges = {**getattr(self, "_charges", {}), bucket: result}
         except QuotaUnavailable:
             self.send_json(
                 {"error": "quota_unavailable", "message": "DIA couldn't check today's allowance. Try again in a moment."},
@@ -338,7 +339,9 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
         from agent_quota import get_quota
 
         if not self.identity.uncapped:
-            get_quota().refund(bucket, self.identity.sub)
+            # Refund the charge this request made (its day and store), not whatever "today" is now.
+            charge = getattr(self, "_charges", {}).pop(bucket, None)
+            get_quota().refund(bucket, self.identity.sub, charge)
 
     def handle_usage(self) -> None:
         self.send_json(self._usage(), extra_headers={"Cache-Control": "no-store"})

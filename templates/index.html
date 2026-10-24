@@ -133,9 +133,9 @@
         <!-- Daily usage (Glyph lockdown v2). Display only: the server's numbers from /api/usage and
              each run's response; the server alone enforces the limits. Shown only when signed in. -->
         <span id="usageMeter" class="lh-usage" role="status" aria-live="off" aria-atomic="true" aria-describedby="usageReset" tabindex="0" hidden>
-          <span class="lh-usage-item" data-bucket="generations" data-level="ok"><span class="lh-usage-dot" aria-hidden="true"></span><span class="lh-usage-label">Generations</span> <span class="lh-usage-num">-/-</span></span>
+          <span class="lh-usage-item" data-bucket="generations" data-level="ok"><span class="lh-usage-dot" aria-hidden="true"></span><span class="lh-usage-num">-</span> <span class="lh-usage-label">generations left</span></span>
           <span class="lh-usage-sep" aria-hidden="true">·</span>
-          <span class="lh-usage-item" data-bucket="ask" data-level="ok"><span class="lh-usage-dot" aria-hidden="true"></span><span class="lh-usage-label">Ask DIA</span> <span class="lh-usage-num">-/-</span></span>
+          <span class="lh-usage-item" data-bucket="ask" data-level="ok"><span class="lh-usage-dot" aria-hidden="true"></span><span class="lh-usage-num">-</span> <span class="lh-usage-label">Ask DIA left</span></span>
           <span class="lh-usage-owner" hidden>Owner · unlimited</span>
         </span>
         <span id="usageReset" class="visually-hidden"></span>
@@ -261,7 +261,7 @@
       <!-- Ask DIA: the live Gemini agent, in the same composer. -->
       <div class="prompt-wrapper agent" id="agentStage">
         <h2>Ask DIA <small id="agentStatus" class="agent-state">checking...</small></h2>
-        <p class="signin-gate-text signin-gate-ask" id="signInGateAsk" hidden>Sign in with Google to ask DIA.</p>
+        <div class="signin-gate-ask" id="signInGateAsk" hidden><p class="signin-gate-text">Sign in with Google to ask DIA.</p><span class="signin-gate-button" id="signInGateAskButton" hidden></span></div>
         <div class="prompt-bar composer has-mic has-cmp" id="agentComposer" data-empty="true">
             <!-- Composer v2 (glyph/composer-icons.md, flows v8.8 2.5-2.8): [+] textarea [mic] [Run], and a floating notch
                  (a small handle bar just above the bar; landing polish). Notch: hover opens the voice fan after 120ms (pointer), tap toggles (touch), Enter/Space/ArrowDown open it on Listen,

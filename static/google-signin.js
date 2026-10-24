@@ -35,8 +35,10 @@
   const band = themeToggle ? themeToggle.closest("header") : null;
   const letterhead = Boolean(band && band.classList.contains("lh"));
   const helpDialog = document.querySelector("#diaHelpDialog");
-  const gateSlot = document.querySelector("#signInGateButton");
-  const statusText = document.querySelector("#status");
+  // Every signed-out gate (landing card, Ask DIA) gets the same Sign in with Google button.
+  const gateSlots = [...document.querySelectorAll("#signInGateButton, #signInGateAskButton")];
+  // The detail span, not #status itself: replacing #status's text would drop its dot/state/detail spans.
+  const statusText = document.querySelector("#statusText") || document.querySelector("#status");
   // Letterhead mobile breakpoint: the band has no room for another control,
   // so on narrow screens the account moves into Help & settings.
   const narrow = window.matchMedia ? window.matchMedia("(max-width: 600px)") : { matches: false };
@@ -85,7 +87,7 @@
   function renderAccount() {
     const signedIn = Boolean(state && state.signed_in);
     usage.setSignedOut(!signedIn, { configured: Boolean(config && config.enabled) });
-    if (gateSlot) gateSlot.hidden = !(config && config.enabled);
+    gateSlots.forEach((slot) => { slot.hidden = !(config && config.enabled); });
     if (!config || !config.enabled) {
       show(account, false);
       if (settingsSection) settingsSection.hidden = true;
@@ -160,7 +162,7 @@
       if (!gis) return;
       gis.initialize({ client_id: clientId, callback: onCredential, auto_select: false });
       gis.renderButton(gisSlot, { type: "standard", theme: "outline", size: "small", text: "signin", shape: "rectangular" });
-      if (gateSlot) {
+      gateSlots.forEach((gateSlot) => {
         // Tia's sign-in card button: outline, large, "Sign in with", pill, fitted width.
         let renderedWidth = 0;
         const fit = () => {
@@ -172,7 +174,7 @@
         };
         fit();
         if (typeof ResizeObserver !== "undefined") new ResizeObserver(fit).observe(gateSlot);
-      }
+      });
     };
     document.head.append(script);
   }

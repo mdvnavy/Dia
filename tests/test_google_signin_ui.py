@@ -176,7 +176,7 @@ def test_sign_in_shows_counter_and_run_updates_it(browser, live):
     sign_in(page)
     assert page.is_visible("#questionnaire") and page.is_editable("#questionnaire")
     meter = page.locator("#usageMeter")
-    assert meter.inner_text().replace("\n", " ").upper().split() == "GENERATIONS 10/10 · ASK DIA 5/5".split()
+    assert meter.inner_text().replace("\n", " ").upper().split() == "10 GENERATIONS LEFT · 5 ASK DIA LEFT".split()
     assert meter.get_attribute("aria-live") == "off"  # silent on first fill
     assert page.get_attribute("#usageMeter", "title") == (
         "10 generations and 5 Ask DIA questions left today. Resets at midnight ET."
@@ -189,7 +189,7 @@ def test_sign_in_shows_counter_and_run_updates_it(browser, live):
     )
     page.fill("#questionnaire", "Company: Example Co\nProblem: intake takes too long")
     page.click("#runAgent")
-    page.wait_for_function("document.querySelector('[data-bucket=generations] .lh-usage-num').textContent === '9/10'")
+    page.wait_for_function("document.querySelector('[data-bucket=generations] .lh-usage-num').textContent === '9'")
     assert meter.get_attribute("aria-live") == "polite"
     assert page.evaluate("document.cookie").find("dia_session") == -1  # HttpOnly
     page.context.close()
@@ -223,7 +223,7 @@ def test_low_and_zero_levels_render(browser, live):
     filled = page.evaluate("getComputedStyle(document.querySelector('[data-bucket=generations] .lh-usage-dot')).backgroundColor")
     text = page.evaluate("getComputedStyle(document.querySelector('[data-bucket=generations] .lh-usage-num')).color")
     assert filled == text  # filled dot in --text
-    assert page.text_content("[data-bucket=generations] .lh-usage-num") == "0/10"
+    assert page.text_content("[data-bucket=generations] .lh-usage-num") == "0"
     assert page.get_attribute("#runAgent", "aria-disabled") == "true"
     assert page.get_attribute("#runAgent", "title") == "You've used today's 10 generations. More at midnight ET."
     page.fill("#questionnaire", "Company: Example")  # Run shows once there is text
@@ -267,7 +267,7 @@ def test_server_429_even_if_client_thinks_it_has_quota(browser, live, monkeypatc
     render(page, 9, 5)  # a stale/forged client view
     page.fill("#questionnaire", "Company: Example\nProblem: slow")
     page.click("#runAgent")
-    page.wait_for_function("document.querySelector('[data-bucket=generations] .lh-usage-num').textContent === '0/1'")
+    page.wait_for_function("document.querySelector('[data-bucket=generations] .lh-usage-num').textContent === '0'")
     page.evaluate("""(() => { const run = document.querySelector('#runAgent');
         run.removeAttribute('aria-disabled'); run.click(); })()""")  # forged client state
     page.wait_for_function("document.querySelector('#status').textContent.includes(\"You've used today's 1 generation.\")")
@@ -294,7 +294,7 @@ def test_mobile_counter_joins_status_line_and_menu(browser, live):
     assert page.is_visible("#usageInline")
     # Landing polish (#40) made #status its own line; the counter is the line right under it, with no leading "·".
     assert page.inner_text("#status").strip() == "Ready"
-    assert re.sub(r"\s+", " ", page.inner_text("#usageInline")).strip() == "7/10 generations · 3/5 Ask DIA"
+    assert re.sub(r"\s+", " ", page.inner_text("#usageInline")).strip() == "7 generations left · 3 Ask DIA left"
     st, inline = page.eval_on_selector("#status", "e => e.getBoundingClientRect().bottom"), page.eval_on_selector("#usageInline", "e => e.getBoundingClientRect().top")
     assert inline >= st - 1
     assert page.evaluate("!document.querySelector('#menuUsage').hidden")
@@ -412,4 +412,112 @@ def test_browser_sign_in_with_real_signed_token(browser, live, monkeypatch):
     page.click("#signInGateButton .gisButton")
     page.wait_for_function("document.querySelector('#signInGateText').textContent.includes('failed') || document.querySelector('#status').textContent.includes('failed')", timeout=5000)
     _assert_locked(page)
+    page.context.close()
+
+
+# --- #48 review (Glyph, d622148) ------------------------------------------------------
+
+
+def test_ask_dia_gate_has_the_landing_sign_in_button(browser, live):
+    page = open_page(browser, live.url)
+    page.evaluate("document.body.dataset.agent = 'open'")
+    assert page.is_visible("#signInGateAsk")
+    assert page.text_content("#signInGateAsk .signin-gate-text") == "Sign in with Google to ask DIA."
+    page.wait_for_selector("#signInGateAskButton .gisButton", state="visible")
+    calls = page.evaluate("window.__gisCalls")
+    assert "renderButton:signInGateButton" in calls and "renderButton:signInGateAskButton" in calls
+    # Same button as the landing card: same size class, and it starts the same Google flow.
+    land = page.eval_on_selector("#signInGateButton .gisButton", "e => e.getBoundingClientRect().height")
+    ask_h = page.eval_on_selector("#signInGateAskButton .gisButton", "e => e.getBoundingClientRect().height")
+    assert land == ask_h
+    page.evaluate("window.__TEST_CRED = 'visitor-cred'")
+    page.click("#signInGateAskButton .gisButton")
+    page.wait_for_function("document.body.dataset.auth === 'signed-in'")
+    assert not page.is_visible("#signInGateAsk") and not page.is_visible("#signInGateAskButton")
+    page.context.close()
+
+
+def _words(text):
+    return re.sub(r"\s+", " ", text).strip().lower()
+
+
+@pytest.mark.parametrize("width", [1440, 1280, 390])
+def test_counter_says_n_left_with_same_wording_in_header_and_status_line(browser, live, width):
+    page = open_page(browser, live.url, width=width, height=844 if width < 600 else 900)
+    sign_in(page)
+    render(page, 7, 3)
+    header = _words(page.text_content("#usageMeter .lh-usage-item[data-bucket=generations]") + " · "
+                    + page.text_content("#usageMeter .lh-usage-item[data-bucket=ask]"))
+    inline = _words(page.text_content("#usageInline"))
+    assert header == inline == "7 generations left · 3 ask dia left"
+    shown = page.inner_text("#usageMeter" if page.is_visible("#usageMeter") else "#usageInline")
+    assert "/" not in shown and "left" in shown.lower()
+    render(page, 1, 1)
+    assert _words(page.text_content("#usageInline")) == "1 generation left · 1 ask dia left"
+    page.context.close()
+
+
+def test_no_api_key_not_set_text_anywhere_the_page_can_render():
+    for rel in ["templates/index.html", *[str(p.relative_to(ROOT)) for p in (ROOT / "static").rglob("*.js")]]:
+        assert "api key not set" not in read(rel).lower(), rel
+
+
+@pytest.mark.parametrize("vertex", ["configured", "missing"])
+def test_ask_dia_status_never_says_api_key(browser, live, monkeypatch, vertex):
+    import agent_runtime
+    from vertex_config import is_vertex_configured
+
+    # The live config is Vertex-only (no GEMINI key in use); "missing" is Ask DIA on with the Vertex env absent.
+    monkeypatch.setattr(agent_runtime, "is_configured", is_vertex_configured)
+    for name in ("GOOGLE_API_KEY", "GEMINI_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+    if vertex == "configured":
+        monkeypatch.setenv("GOOGLE_GENAI_USE_VERTEXAI", "TRUE")
+        monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "dia-test-project")
+        monkeypatch.setenv("GOOGLE_CLOUD_LOCATION", "global")
+    else:
+        for name in ("GOOGLE_GENAI_USE_VERTEXAI", "GOOGLE_CLOUD_PROJECT", "GOOGLE_CLOUD_LOCATION"):
+            monkeypatch.delenv(name, raising=False)
+    for signed_in in (False, True):
+        page = open_page(browser, live.url)
+        if signed_in:
+            sign_in(page)
+        page.wait_for_function("!/checking/.test(document.querySelector('#agentStatus').textContent)")
+        status = page.text_content("#agentStatus")
+        assert status == ("Gemini connected" if vertex == "configured" else "temporarily unavailable")
+        assert "api key" not in page.evaluate("document.body.innerText").lower()
+        page.context.close()
+
+
+def test_follow_up_drafting_updates_the_counter_and_handles_the_limit(browser, live, monkeypatch):
+    monkeypatch.setenv("DIA_ASK_DAILY_LIMIT", "1")
+    page = open_page(browser, live.url)
+    sign_in(page)
+    # A real intake run gives the validation issues the follow-up drafting works from.
+    page.fill("#questionnaire", "Company: Example Co\nProblem: intake takes too long")
+    page.click("#runAgent")
+    page.wait_for_function("document.querySelector('[data-bucket=generations] .lh-usage-num').textContent === '9'")
+    assert page.evaluate("latestPayload.issues.length") > 0
+    page.evaluate("async () => { await draftFollowUpQuestions(); }")
+    assert page.text_content("#agentOutput").strip()  # the fake agent's draft
+    page.wait_for_function("document.querySelector('[data-bucket=ask] .lh-usage-num').textContent === '0'")
+    page.evaluate("async () => { await draftFollowUpQuestions(); }")
+    message = "You've used today's 1 Ask DIA question. More at midnight ET."
+    page.wait_for_function(f"document.querySelector('#statusText').textContent === {message!r}")
+    assert page.text_content("#agentOutput") == message
+    page.context.close()
+
+
+def test_limit_block_lifts_after_the_reset_time(browser, live):
+    page = open_page(browser, live.url)
+    sign_in(page)
+    page.evaluate("""() => window.DIA_USAGE.render({signed_in: true, owner: false, unlimited: false,
+        generations: {limit: 10, used: 10, remaining: 0}, ask: {limit: 5, used: 0, remaining: 5},
+        resets_at: '2000-01-01T00:00:00-05:00', timezone: 'America/Toronto'})""")
+    assert page.get_attribute("#runAgent", "aria-disabled") == "true"
+    page.fill("#questionnaire", "Company: Example Co\nProblem: intake takes too long")
+    page.evaluate("document.querySelector('#runAgent').click()")  # aria-disabled: Playwright won't click it
+    # The reset time has passed, so the click reaches the server, whose reply re-renders the real allowance.
+    page.wait_for_function("document.querySelector('[data-bucket=generations] .lh-usage-num').textContent === '9'")
+    assert page.get_attribute("#runAgent", "aria-disabled") is None
     page.context.close()

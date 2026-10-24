@@ -1381,7 +1381,9 @@ body[data-usage-fit="inline"] .lh-menu-usage:not([hidden]) { display: flex; flex
   text-align: center;
 }
 .signin-gate-text { margin: 0; color: var(--muted); font: 400 14px/1.5 var(--sans); }
-.signin-gate-ask { margin: 8px 0 0; text-align: center; }
+/* Ask DIA gate: the same line plus the same Sign in with Google button as the landing card (Glyph, #48 review). */
+.signin-gate-ask { display: flex; flex-direction: column; align-items: center; gap: 12px; margin: 8px 0 0; text-align: center; }
+.signin-gate-ask[hidden] { display: none; }
 .signin-gate-button { display: flex; justify-content: center; width: 100%; max-width: 400px; min-height: 40px; }
 .signin-gate-button[hidden] { display: none; }
 body[data-auth="signed-out"] .intake-stage .dock-row,

@@ -346,6 +346,10 @@ class QuotaResult:
     bucket: str
     state: BucketState
     reset_at: dt.datetime
+    # Where the charge landed, so a refund undoes exactly that charge: the quota day it was charged to (not the
+    # day at refund time, which may be after midnight ET) and the store that took it ("shared" or "fallback").
+    day: str | None = None
+    backend: str | None = None
 
     def retry_after(self, now: dt.datetime) -> int:
         return max(1, int((self.reset_at - now).total_seconds()) + 1)
@@ -378,32 +382,43 @@ class DailyQuota:
     def now(self) -> dt.datetime:
         return self._clock()
 
-    def _call(self, bucket: str, method: str, *args):
+    def _call_with_backend(self, bucket: str, method: str, *args):
         if self.store is not None:
             try:
-                return getattr(self.store, method)(*args)
+                return getattr(self.store, method)(*args), "shared"
             except Exception as error:  # noqa: BLE001
                 logger.warning(
                     "quota store %s failed (%s)", method, type(error).__name__
                 )
                 if bucket in FAIL_CLOSED and method == "try_consume":
                     raise QuotaUnavailable(str(type(error).__name__)) from None
-        return getattr(self.fallback, method)(*args)
+        return getattr(self.fallback, method)(*args), "fallback"
+
+    def _call(self, bucket: str, method: str, *args):
+        return self._call_with_backend(bucket, method, *args)[0]
 
     def consume(self, bucket: str, sub: str) -> QuotaResult:
         limit = daily_limit(bucket)
         day, reset_at = quota_day(self.now())
         if limit == 0:
             return QuotaResult(False, bucket, BucketState(0, 0), reset_at)
-        charged, used = self._call(
+        (charged, used), backend = self._call_with_backend(
             bucket, "try_consume", bucket, user_key(sub), day, limit, reset_at + dt.timedelta(days=1)
         )
-        return QuotaResult(charged, bucket, BucketState(limit, used), reset_at)
+        return QuotaResult(charged, bucket, BucketState(limit, used), reset_at, day=day, backend=backend)
 
-    def refund(self, bucket: str, sub: str) -> None:
-        day, _ = quota_day(self.now())
+    def refund(self, bucket: str, sub: str, charge: QuotaResult | None = None) -> None:
+        """Undo one charge. Pass the consume() result so the refund hits the charged day and store."""
+        if charge is not None and not charge.allowed:
+            return
+        day = charge.day if charge is not None and charge.day else quota_day(self.now())[0]
         try:
-            self._call(bucket, "refund", bucket, user_key(sub), day)
+            if charge is not None and charge.backend == "fallback":
+                self.fallback.refund(bucket, user_key(sub), day)
+            elif charge is not None and charge.backend == "shared" and self.store is not None:
+                self.store.refund(bucket, user_key(sub), day)  # never onto the fallback: that charge wasn't there
+            else:
+                self._call(bucket, "refund", bucket, user_key(sub), day)
         except Exception as error:  # noqa: BLE001 - a failed refund only costs the user
             logger.warning("quota refund failed (%s)", type(error).__name__)
 

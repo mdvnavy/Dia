@@ -97,6 +97,12 @@ const LIMIT_TEXT = {
   generations: (limit) => `You've used today's ${limit} generation${limit === 1 ? "" : "s"}. More at midnight ET.`,
   ask: (limit) => `You've used today's ${limit} Ask DIA question${limit === 1 ? "" : "s"}. More at midnight ET.`,
 };
+// Counter wording (Glyph, #48 review): "N left", same words and order in the header and the status line:
+// "7 generations left · 3 Ask DIA left". The full sentence (title / usageReset) stays "… left today. Resets …".
+const USAGE_LABEL = {
+  generations: (n) => `generation${n === 1 ? "" : "s"} left`,
+  ask: () => "Ask DIA left",
+};
 let lastUsage = null;
 
 function usageLevel(bucket) {
@@ -168,25 +174,27 @@ function renderUsage(usage) {
       const bucket = usage[item.dataset.bucket];
       item.hidden = false;
       item.dataset.level = usageLevel(bucket);
-      item.querySelector(".lh-usage-num").textContent = `${bucket.remaining}/${bucket.limit}`;
+      item.querySelector(".lh-usage-num").textContent = String(bucket.remaining);
+      item.querySelector(".lh-usage-label").textContent = USAGE_LABEL[item.dataset.bucket](bucket.remaining);
     });
     const sentence = usageSentence(usage);
     usageMeter.title = sentence;
     usageMeter.setAttribute("aria-describedby", "usageReset");
     usageReset.textContent = sentence;
-    // Below the header form, the counter sits on its own line right under the status ("7/10 generations · 3/5 Ask DIA").
-    // #status is its own line since landing polish, so there's no leading separator.
+    // Below the header form, the counter sits on its own line right under the status, with the header's wording
+    // and order ("7 generations left · 3 Ask DIA left"). #status is its own line since landing polish, so there's no
+    // leading separator.
     usageInline.replaceChildren();
-    for (const [name, label] of [["generations", "generations"], ["ask", "Ask DIA"]]) {
+    for (const name of ["generations", "ask"]) {
       if (usageInline.childNodes.length) usageInline.append(" · ");
       const bucket = usage[name];
       const num = document.createElement("span");
       num.className = "usage-num";
       num.dataset.level = usageLevel(bucket);
-      num.textContent = `${bucket.remaining}/${bucket.limit}`;
+      num.textContent = String(bucket.remaining);
       const text = document.createElement("span");
       text.className = "usage-label";
-      text.textContent = ` ${label}`;
+      text.textContent = ` ${USAGE_LABEL[name](bucket.remaining)}`;
       usageInline.append(num, text);
     }
     usageInline.hidden = false;
@@ -250,6 +258,10 @@ function handleGateResponse(response, payload) {
 
 function limitedClick(button) {
   if (button.getAttribute("aria-disabled") !== "true") return false;
+  // Past the reset (page left open over midnight ET): let the request through so the server rechecks the allowance;
+  // its reply re-renders the counter and clears the block.
+  const resetsAt = Date.parse(lastUsage?.resets_at || "");
+  if (Number.isFinite(resetsAt) && Date.now() >= resetsAt) return false;
   statusText.textContent = button.title;
   statusLine.classList.add("is-limit");
   return true;
@@ -405,13 +417,14 @@ async function refreshAgentStatus() {
       disableAskDia();
       return;
     }
-    if (payload.configured) {
-      agentStatus.textContent = "Gemini connected";
-      agentStatus.classList.add("ok");
-    } else {
-      agentStatus.textContent = "API key not set";
-      agentStatus.classList.remove("ok");
+    if (!payload.configured) {
+      // On but not configured (Vertex env missing): say it's unavailable, like the kill switch. DIA never uses an
+      // API key, so there is no missing-key state to show (Glyph, #48 review).
+      disableAskDia();
+      return;
     }
+    agentStatus.textContent = "Gemini connected";
+    agentStatus.classList.add("ok");
   } catch (error) {
     agentStatus.textContent = "status unavailable";
   }
@@ -557,7 +570,16 @@ async function draftFollowUpQuestions() {
       signal: agentController.signal,
     });
     const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error || "Agent run failed");
+    // Same Ask DIA allowance as a question: same kill-switch, sign-in, counter and limit handling.
+    if (payload.enabled === false) {
+      disableAskDia(payload.error || payload.reply);
+      return;
+    }
+    if (handleGateResponse(response, payload)) {
+      agentOutput.textContent = payload.message || statusText.textContent;
+      return;
+    }
+    if (!response.ok) throw new Error(payload.message || payload.error || "Agent run failed");
     showAiReply((payload.reply || "").trim() || "(empty response)", { questions: Boolean(payload.reply) });
   } catch (error) {
     agentOutput.textContent = error.name === "AbortError" ? "Drafting cancelled" : error.message;

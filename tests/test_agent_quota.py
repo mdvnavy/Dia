@@ -567,3 +567,47 @@ def test_kill_switch_off_blocks_owner_and_spends_nothing(server, monkeypatch, ga
         assert status == 503 and payload["enabled"] is False
     assert gate_env == []
     assert usage_of(server, visitor)["ask"]["used"] == 0
+
+
+def test_refund_hits_the_day_that_was_charged(gate_env):
+    """Charged 23:59 ET, refunded after midnight: the refund undoes the old day's charge, not a new-day one."""
+    now = [dt.datetime(2026, 10, 24, 3, 59, tzinfo=dt.timezone.utc)]  # 23:59 ET
+    quota = DailyQuota(InMemoryQuotaStore(), clock=lambda: now[0])
+    charge = quota.consume(ASK, "s")
+    now[0] = dt.datetime(2026, 10, 24, 4, 1, tzinfo=dt.timezone.utc)  # 00:01 ET, next quota day
+    other = quota.consume(ASK, "s")  # a concurrent success on the new day
+    quota.refund(ASK, "s", charge)
+    assert quota.peek(ASK, "s").used == 1  # the new day's success keeps its charge
+    assert other.allowed and charge.day != other.day
+
+
+def test_refund_goes_to_the_store_that_took_the_charge(gate_env):
+    class Flaky(InMemoryQuotaStore):
+        down = False
+
+        def try_consume(self, *a):
+            if self.down:
+                raise ConnectionError("down")
+            return super().try_consume(*a)
+
+    shared = Flaky()
+    quota = DailyQuota(shared, store_name="firestore")
+    first = quota.consume(GENERATIONS, "s")
+    shared.down = True
+    fallback_charge = quota.consume(GENERATIONS, "s")  # lands in the per-instance fallback
+    shared.down = False
+    assert (first.backend, fallback_charge.backend) == ("shared", "fallback")
+    quota.refund(GENERATIONS, "s", fallback_charge)
+    day = fallback_charge.day
+    assert shared.get(GENERATIONS, user_key("s"), day) == 1  # the earlier success is untouched
+    assert quota.fallback.get(GENERATIONS, user_key("s"), day) == 0
+
+
+def test_refund_of_a_refused_charge_does_nothing(gate_env):
+    monkey_quota = DailyQuota(InMemoryQuotaStore())
+    for _ in range(5):
+        monkey_quota.consume(ASK, "s")
+    refused = monkey_quota.consume(ASK, "s")
+    assert not refused.allowed
+    monkey_quota.refund(ASK, "s", refused)
+    assert monkey_quota.peek(ASK, "s").used == 5
