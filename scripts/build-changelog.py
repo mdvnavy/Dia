@@ -63,7 +63,7 @@ SUMMARY: dict[int, tuple[str, str] | None] = {
     48: ("Sign in with Google",
          "Sign in with your Google account to use Dia. Each person gets 10 runs a day, a counter shows how many are "
          "left, and the count resets at midnight Eastern time."),
-    51: ("What changed, under the bell",
+    52: ("What changed, under the bell",
          "The bell at the top shows what changed. A dot means something is new. Rest on it or tap it for the latest "
          "changes, or choose See all changes for the full list."),
 }
