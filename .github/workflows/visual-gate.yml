@@ -1,0 +1,86 @@
+# Gate: visual-change label gate (proposal ops/proposals/2026-10-23_ci-branch-protection.md, section 2).
+# Visual PRs (paths matching VISUAL_RE) need, for the CURRENT head SHA:
+#   1. a PR comment whose body starts "Visual review: APPROVED" and contains
+#      "Reviewer: Glyph" or "Reviewer: Proto" and "SHA: <first 7+ chars of head SHA>",
+#      posted after the head commit; then
+#   2. the `visual-approved` label (adding it re-runs this check).
+# Any new push removes `visual-approved`, forcing a re-review.
+# No secrets other than GITHUB_TOKEN. No deploys.
+name: visual-gate
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled, ready_for_review]
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+concurrency:
+  group: visual-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  visual-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          VISUAL_RE: '^(templates|static)/|\.(css|scss|sass|less|html?|jsx|tsx|svg|png|jpe?g|gif|webp|ico|woff2?|ttf|otf)$'
+          VISUAL_EXCLUDE_RE: '^(tests|docs|eval|samples)/'
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const { owner, repo } = context.repo;
+            const num = pr.number;
+            const headSha = pr.head.sha;
+            const re = new RegExp(process.env.VISUAL_RE, 'i');
+            const ex = process.env.VISUAL_EXCLUDE_RE ? new RegExp(process.env.VISUAL_EXCLUDE_RE, 'i') : null;
+            const files = await github.paginate(github.rest.pulls.listFiles, { owner, repo, pull_number: num, per_page: 100 });
+            const visualFiles = files.map(f => f.filename).filter(f => re.test(f) && !(ex && ex.test(f)));
+            const labels = (pr.labels || []).map(l => l.name);
+            const ensureLabel = async (name, color, description) => {
+              try { await github.rest.issues.getLabel({ owner, repo, name }); }
+              catch (e) { try { await github.rest.issues.createLabel({ owner, repo, name, color, description }); } catch (e2) { core.warning(`could not create label ${name}: ${e2.message}`); } }
+            };
+            const summary = core.summary.addHeading('visual-gate', 3);
+            if (visualFiles.length === 0) {
+              if (labels.includes('visual')) {
+                try { await github.rest.issues.removeLabel({ owner, repo, issue_number: num, name: 'visual' }); } catch (e) {}
+              }
+              await summary.addRaw('No visual paths changed. Pass.').write();
+              return;
+            }
+            await ensureLabel('visual', 'd4c5f9', 'Touches visual paths; needs Glyph/Proto review');
+            await ensureLabel('visual-approved', '0e8a16', 'Design review done by Glyph or Proto for the current head SHA');
+            if (!labels.includes('visual')) {
+              try { await github.rest.issues.addLabels({ owner, repo, issue_number: num, labels: ['visual'] }); } catch (e) { core.warning(`could not add visual label: ${e.message}`); }
+            }
+            summary.addRaw(`Visual files (${visualFiles.length}):`).addList(visualFiles.slice(0, 50));
+            if (context.payload.action === 'synchronize' && labels.includes('visual-approved')) {
+              try { await github.rest.issues.removeLabel({ owner, repo, issue_number: num, name: 'visual-approved' }); } catch (e) {}
+              await summary.addRaw('New push after approval: removed `visual-approved`. Re-review needed.').write();
+              core.setFailed('New commits after visual approval: Glyph/Proto must re-review this head SHA.');
+              return;
+            }
+            const { data: commit } = await github.rest.repos.getCommit({ owner, repo, ref: headSha });
+            const headTime = new Date(commit.commit.committer.date);
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number: num, per_page: 100 });
+            const review = comments.reverse().find(c => {
+              const b = (c.body || '').trim();
+              const m = b.match(/SHA:\s*([0-9a-f]{7,40})/i);
+              return /^Visual review:\s*APPROVED/i.test(b)
+                && /Reviewer:\s*(Glyph|Proto)\b/i.test(b)
+                && m && headSha.toLowerCase().startsWith(m[1].toLowerCase())
+                && new Date(c.created_at) >= headTime;
+            });
+            const hasLabel = labels.includes('visual-approved');
+            if (review && hasLabel) {
+              const who = review.body.match(/Reviewer:\s*(Glyph|Proto)/i)[1];
+              await summary.addRaw(`APPROVED by ${who} for ${headSha.slice(0,7)}: ${review.html_url}`).write();
+              core.info(`visual review: ${who} ${review.html_url}`);
+              return;
+            }
+            const missing = [];
+            if (!review) missing.push(`a PR comment starting "Visual review: APPROVED" with "Reviewer: Glyph|Proto" and "SHA: ${headSha.slice(0,7)}", posted after the head commit`);
+            if (!hasLabel) missing.push('the `visual-approved` label (add it after the comment)');
+            await summary.addRaw('Missing: ').addList(missing).write();
+            core.setFailed('Visual change needs design review: ' + missing.join('; '));
