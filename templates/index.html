@@ -202,16 +202,18 @@
             </button>
             <div class="plus-menu" role="menu" id="intakePlusMenu" aria-label="Actions"></div>
             <textarea id="questionnaire" class="prompt-input" rows="1" aria-label="Questionnaire Markdown" aria-describedby="intakeNote dropHint" spellcheck="false" placeholder="Paste a questionnaire, or drop a file here…" data-placeholder-short="Paste a questionnaire…"></textarea>
-            <button id="intakeMic" class="action-btn cmp-circle cmp-mic dictate-btn px-btn" type="button" aria-pressed="false" aria-label="Start voice input" data-label-off="Start voice input" data-label-on="Stop voice input" aria-keyshortcuts="Control+Shift+Space Meta+Shift+Space">
-              <span class="icon" data-icon="mic" data-icon-off="mic" data-icon-on="mic-listening" data-icon-disabled="mic-disabled" aria-hidden="true"></span>
-            </button>
-            <span class="cmp-tip cmp-tip-mic" role="tooltip" id="intakeMicTip">Start voice input <kbd>⌘/Ctrl</kbd><kbd>Shift</kbd><kbd>Space</kbd></span>
-            <span class="visually-hidden" id="intakeMicNote" hidden>Voice input isn't supported in this browser. Try Chrome, Edge or Safari.</span>
+            <!-- Run sits before the mic in the DOM so Tab goes textarea -> Run -> mic (WCAG 2.4.3, Glyph review #4);
+                 the slot is absolutely positioned, so Run still draws just left of the corner mic. -->
             <span class="cmp-run-slot">
               <button id="runAgent" class="action-btn cmp-circle cmp-enter px-btn" type="button" aria-label="Run" aria-keyshortcuts="Control+Enter Meta+Enter" hidden>
                 <span class="icon" data-icon="enter" aria-hidden="true"></span>
               </button>
             </span>
+            <button id="intakeMic" class="action-btn cmp-circle cmp-mic dictate-btn px-btn" type="button" aria-pressed="false" aria-label="Start voice input" data-label-off="Start voice input" data-label-on="Stop voice input" aria-keyshortcuts="Control+Shift+Space Meta+Shift+Space">
+              <span class="icon" data-icon="mic" data-icon-off="mic" data-icon-on="mic-listening" data-icon-disabled="mic-disabled" aria-hidden="true"></span>
+            </button>
+            <span class="cmp-tip cmp-tip-mic" role="tooltip" id="intakeMicTip">Start voice input <kbd>⌘/Ctrl</kbd><kbd>Shift</kbd><kbd>Space</kbd></span>
+            <span class="visually-hidden" id="intakeMicNote" hidden>Voice input isn't supported in this browser. Try Chrome, Edge or Safari.</span>
           </div>
         </div>
         <div id="intakeError" class="intake-error" role="alert" hidden></div>
@@ -268,16 +270,18 @@
             </button>
             <div class="plus-menu" role="menu" id="agentPlusMenu" aria-label="Actions"></div>
             <textarea id="agentMessage" class="prompt-input" rows="1" spellcheck="false" aria-label="Message for the Gemini agent" placeholder="Ask DIA, e.g. 'Score this intake and list missing fields.'" data-placeholder-short="Ask DIA a question…"></textarea>
-            <button id="micButton" class="action-btn cmp-circle cmp-mic px-btn" type="button" aria-pressed="false" aria-label="Start voice input" data-label-off="Start voice input" data-label-on="Stop voice input" aria-keyshortcuts="Control+Shift+Space Meta+Shift+Space">
-              <span class="icon" data-icon="mic" data-icon-off="mic" data-icon-on="mic-listening" data-icon-disabled="mic-disabled" aria-hidden="true"></span>
-            </button>
-            <span class="cmp-tip cmp-tip-mic" role="tooltip" id="agentMicTip">Start voice input <kbd>⌘/Ctrl</kbd><kbd>Shift</kbd><kbd>Space</kbd></span>
-            <span class="visually-hidden" id="agentMicNote" hidden>Voice input isn't supported in this browser. Try Chrome, Edge or Safari.</span>
+            <!-- Run sits before the mic in the DOM so Tab goes textarea -> Run -> mic (WCAG 2.4.3, Glyph review #4);
+                 the slot is absolutely positioned, so Run still draws just left of the corner mic. -->
             <span class="cmp-run-slot">
               <button id="runChat" class="action-btn cmp-circle cmp-enter px-btn" type="button" aria-label="Send to Gemini" aria-keyshortcuts="Enter" hidden>
                 <span class="icon" data-icon="enter" aria-hidden="true"></span>
               </button>
             </span>
+            <button id="micButton" class="action-btn cmp-circle cmp-mic px-btn" type="button" aria-pressed="false" aria-label="Start voice input" data-label-off="Start voice input" data-label-on="Stop voice input" aria-keyshortcuts="Control+Shift+Space Meta+Shift+Space">
+              <span class="icon" data-icon="mic" data-icon-off="mic" data-icon-on="mic-listening" data-icon-disabled="mic-disabled" aria-hidden="true"></span>
+            </button>
+            <span class="cmp-tip cmp-tip-mic" role="tooltip" id="agentMicTip">Start voice input <kbd>⌘/Ctrl</kbd><kbd>Shift</kbd><kbd>Space</kbd></span>
+            <span class="visually-hidden" id="agentMicNote" hidden>Voice input isn't supported in this browser. Try Chrome, Edge or Safari.</span>
           </div>
         <div class="actions under-prompt">
           <button id="conversationMode" class="chip-button speech-input-only" type="button" aria-pressed="false">
