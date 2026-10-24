@@ -37,7 +37,8 @@
   --backdrop: rgba(0, 0, 0, 0.55);
   --placeholder: rgba(238, 238, 242, 0.42);
   /* Focus/selection indicator: must stay >= 3:1 against every surface (WCAG 1.4.11). */
-  --focus-ring: var(--accent);
+  /* Dark: neutral silver, never the gold accent (Glyph review #5). Mustard #DFA81C stays the drag-over cue only. */
+  --focus-ring: var(--control-focus);
   color-scheme: dark;
 }
 
@@ -1275,6 +1276,11 @@ html[data-assistant="expert"] body:not([data-agent="open"]) .agent { display: no
 .inputs-prompt-head { display: flex; align-items: flex-start; gap: 8px; }
 .inputs-prompt-head h3 { flex: 1; margin: 0 0 6px; font: 600 15px/1.35 var(--sans); text-transform: none; }
 .inputs-prompt-head .icon-button { width: 28px; height: 28px; font-size: 18px; line-height: 1; }
+/* Glyph review #6: on phones / touch the x keeps its 28px glyph box but answers taps across 44x44 (9px past the 1px border each side). */
+@media (pointer: coarse), (max-width: 600px) {
+  .inputs-prompt-head .icon-button { position: relative; }
+  .inputs-prompt-head .icon-button::before { content: ""; position: absolute; inset: -9px; }
+}
 .inputs-prompt ul { margin: 4px 0 8px; padding-left: 20px; }
 .inputs-prompt li + li { margin-top: 6px; }
 .inputs-prompt-why { color: var(--muted); font-size: 12.5px; }

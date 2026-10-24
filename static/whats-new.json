@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "notes": [
+    {
+      "id": "2026-10-23-intake-summary-not-saved",
+      "date": "2026-10-23",
+      "title": "Dia no longer saves a summary of your intake",
+      "body": "When you run an intake, Dia no longer records your company name, industry, score or goals for Bash Systems & Services. Your files and Ask DIA chats still aren't kept.",
+      "app": "dia",
+      "audience": "all",
+      "live_flag": false,
+      "link": null,
+      "source": ["ops/CHANGELOG.md#2026-10-23-1-14-pm-et"],
+      "approved_by": null,
+      "approved_at": null
+    },
+    {
+      "id": "2026-10-23-find-any-action",
+      "date": "2026-10-23",
+      "title": "Find any action with ⌘K",
+      "body": "Press ⌘K (Ctrl+K on Windows), or use Search actions at the top, to jump to any command. The page also has a cleaner layout, with the time and date at the top.",
+      "app": "dia",
+      "audience": "all",
+      "live_flag": false,
+      "link": null,
+      "source": ["origin/main 491fea4 (#32); change-log back-fill pending"],
+      "approved_by": null,
+      "approved_at": null
+    }
+  ]
+}

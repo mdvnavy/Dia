@@ -4,7 +4,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>DIA - Discovery Intake Agent</title>
-  <link rel="icon" href="data:,">
+  <!-- Clay [>_] mark favicon set (Glyph exports, static/brand/; spec v0.3 §2a). -->
+  <link rel="icon" href="/static/brand/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="/static/brand/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/static/brand/favicon-16.png">
+  <link rel="apple-touch-icon" href="/static/brand/clay-mark-180.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
@@ -12,6 +16,7 @@
   <link rel="stylesheet" href="/static/pixel-hover.css">
   <link rel="stylesheet" href="/static/fanout-pixel.css">
   <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/whats-new.css">
   <link rel="stylesheet" href="/static/composer-icons.css">
   <link rel="stylesheet" href="/static/composer.css">
   <script>
@@ -64,7 +69,7 @@
       <div class="lh-corner lh-corner--left">
         <div class="nav-menu-container">
           <button id="navBrandMenu" class="lh-control lh-trigger" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="navDropdown" aria-describedby="breadcrumbStage">
-            Discovery Intake Agent
+            <span class="lh-trigger-full">Discovery Intake Agent</span><span class="lh-trigger-short" aria-hidden="true">DIA</span>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
           </button>
           <div id="navDropdown" class="nav-dropdown" role="menu" aria-label="DIA menu">
@@ -76,6 +81,7 @@
             <button class="dropdown-item" role="menuitem" type="button" data-command="load-sample">Load sample</button>
             <button class="dropdown-item" role="menuitem" type="button" data-command="ask">Ask DIA</button>
             <button class="dropdown-item" role="menuitem" type="button" data-command="help">Learn how to use DIA</button>
+            <button class="dropdown-item" role="menuitem" type="button" data-command="whats-new">What's new</button>
             <!-- Donate: href comes from DIA_DONATE_URL via /api/config; hidden while unset. -->
             <a class="dropdown-item donate-link" id="navDonate" role="menuitem" aria-label="Donate (opens in a new tab)" href="#" target="_blank" rel="noopener noreferrer" hidden><span>Donate</span><span class="icon donate-icon" data-icon="menu-donate" aria-hidden="true"></span></a>
             <button class="dropdown-item donate-link" role="menuitem" type="button" data-command="donate-interac"><span>Donate by Interac e-Transfer</span><span class="icon donate-icon" data-icon="menu-donate" aria-hidden="true"></span></button>
@@ -91,9 +97,35 @@
       </div>
       <!-- Centre: live local time (12-hour, no seconds) above today's date. role=timer is aria-live off,
            so screen readers read it on demand and are never interrupted by the minute tick. -->
-      <div class="lh-centre" id="lhClock" role="timer" aria-live="off" aria-atomic="true">
-        <time class="lh-time" id="lhTime" datetime="">--:--</time>
-        <time class="lh-date" id="lhDate" datetime=""></time>
+      <!-- Centre slot: the clock stays exactly centred; the What's new mark hangs off its right edge (layout A,
+           spec v0.3 §2). The button is the clock's sibling, not its child (the clock is role=timer, pointer-events:none). -->
+      <div class="lh-centre-slot">
+        <div class="lh-centre" id="lhClock" role="timer" aria-live="off" aria-atomic="true">
+          <time class="lh-time" id="lhTime" datetime="">--:--</time>
+          <time class="lh-date" id="lhDate" datetime=""></time>
+        </div>
+        <span class="wn-wrap" id="whatsNewWrap">
+          <button id="whatsNew" class="wn-btn" type="button" data-state="none"
+                  aria-haspopup="dialog" aria-expanded="false" aria-controls="whatsNewPanel"
+                  aria-label="What's new">
+            <img class="wn-mark" src="/static/brand/clay-mark-44.png"
+                 srcset="/static/brand/clay-mark-22.png 1x, /static/brand/clay-mark-44.png 2x, /static/brand/clay-mark-66.png 3x, /static/brand/clay-mark-88.png 4x"
+                 alt="" width="22" height="22">
+            <!-- NEW tag (spec v0.5 §4): Glyph's clay NEW image, one per theme (CSS picks), just under the mark; shown only with
+                 the glow (data-state="new"). The text shows in forced colours only. -->
+            <span class="wn-tag" id="whatsNewTag" aria-hidden="true">
+              <img class="wn-tag-img wn-tag-img--light" src="/static/brand/clay-new-light-22.png"
+                   srcset="/static/brand/clay-new-light-22.png 1x, /static/brand/clay-new-light-44.png 2x, /static/brand/clay-new-light-66.png 3x"
+                   alt="" width="22" height="8">
+              <img class="wn-tag-img wn-tag-img--dark" src="/static/brand/clay-new-dark-22.png"
+                   srcset="/static/brand/clay-new-dark-22.png 1x, /static/brand/clay-new-dark-44.png 2x, /static/brand/clay-new-dark-66.png 3x"
+                   alt="" width="22" height="8">
+              <span class="wn-tag-text">New</span>
+            </span>
+            <span class="visually-hidden" id="whatsNewCount"></span>
+          </button>
+          <span class="wn-tip" role="tooltip" id="whatsNewTip">What's new</span>
+        </span>
       </div>
       <div class="lh-corner lh-corner--right">
         <button id="paletteTrigger" class="lh-control lh-search" type="button" aria-haspopup="dialog" aria-controls="commandPalette">
@@ -170,16 +202,18 @@
             </button>
             <div class="plus-menu" role="menu" id="intakePlusMenu" aria-label="Actions"></div>
             <textarea id="questionnaire" class="prompt-input" rows="1" aria-label="Questionnaire Markdown" aria-describedby="intakeNote dropHint" spellcheck="false" placeholder="Paste a questionnaire, or drop a file here…" data-placeholder-short="Paste a questionnaire…"></textarea>
-            <button id="intakeMic" class="action-btn cmp-circle cmp-mic dictate-btn px-btn" type="button" data-hint="" data-hint-touch-only aria-pressed="false" aria-label="Start voice input" data-label-off="Start voice input" data-label-on="Stop voice input" aria-keyshortcuts="Control+Shift+Space Meta+Shift+Space">
-              <span class="icon" data-icon="mic" data-icon-off="mic" data-icon-on="mic-listening" data-icon-disabled="mic-disabled" aria-hidden="true"></span>
-            </button>
-            <span class="cmp-tip cmp-tip-mic" role="tooltip" id="intakeMicTip">Start voice input <kbd>⌘/Ctrl</kbd><kbd>Shift</kbd><kbd>Space</kbd></span>
-            <span class="visually-hidden" id="intakeMicNote" hidden>Voice input isn't supported in this browser. Try Chrome, Edge or Safari.</span>
+            <!-- Run sits before the mic in the DOM so Tab goes textarea -> Run -> mic (WCAG 2.4.3, Glyph review #4);
+                 the slot is absolutely positioned, so Run still draws just left of the corner mic. -->
             <span class="cmp-run-slot">
               <button id="runAgent" class="action-btn cmp-circle cmp-enter px-btn" type="button" aria-label="Run" data-hint="Run (Ctrl/⌘ Enter)" aria-keyshortcuts="Control+Enter Meta+Enter" hidden>
                 <span class="icon" data-icon="enter" aria-hidden="true"></span>
               </button>
             </span>
+            <button id="intakeMic" class="action-btn cmp-circle cmp-mic dictate-btn px-btn" type="button" data-hint="" data-hint-touch-only aria-pressed="false" aria-label="Start voice input" data-label-off="Start voice input" data-label-on="Stop voice input" aria-keyshortcuts="Control+Shift+Space Meta+Shift+Space">
+              <span class="icon" data-icon="mic" data-icon-off="mic" data-icon-on="mic-listening" data-icon-disabled="mic-disabled" aria-hidden="true"></span>
+            </button>
+            <span class="cmp-tip cmp-tip-mic" role="tooltip" id="intakeMicTip">Start voice input <kbd>⌘/Ctrl</kbd><kbd>Shift</kbd><kbd>Space</kbd></span>
+            <span class="visually-hidden" id="intakeMicNote" hidden>Voice input isn't supported in this browser. Try Chrome, Edge or Safari.</span>
           </div>
         </div>
         <div id="intakeError" class="intake-error" role="alert" hidden></div>
@@ -236,16 +270,18 @@
             </button>
             <div class="plus-menu" role="menu" id="agentPlusMenu" aria-label="Actions"></div>
             <textarea id="agentMessage" class="prompt-input" rows="1" spellcheck="false" aria-label="Message for the Gemini agent" placeholder="Ask DIA, e.g. 'Score this intake and list missing fields.'" data-placeholder-short="Ask DIA a question…"></textarea>
-            <button id="micButton" class="action-btn cmp-circle cmp-mic px-btn" type="button" data-hint="" data-hint-touch-only aria-pressed="false" aria-label="Start voice input" data-label-off="Start voice input" data-label-on="Stop voice input" aria-keyshortcuts="Control+Shift+Space Meta+Shift+Space">
-              <span class="icon" data-icon="mic" data-icon-off="mic" data-icon-on="mic-listening" data-icon-disabled="mic-disabled" aria-hidden="true"></span>
-            </button>
-            <span class="cmp-tip cmp-tip-mic" role="tooltip" id="agentMicTip">Start voice input <kbd>⌘/Ctrl</kbd><kbd>Shift</kbd><kbd>Space</kbd></span>
-            <span class="visually-hidden" id="agentMicNote" hidden>Voice input isn't supported in this browser. Try Chrome, Edge or Safari.</span>
+            <!-- Run sits before the mic in the DOM so Tab goes textarea -> Run -> mic (WCAG 2.4.3, Glyph review #4);
+                 the slot is absolutely positioned, so Run still draws just left of the corner mic. -->
             <span class="cmp-run-slot">
               <button id="runChat" class="action-btn cmp-circle cmp-enter px-btn" type="button" aria-label="Send to Gemini" data-hint="Send to Gemini (Enter)" aria-keyshortcuts="Enter" hidden>
                 <span class="icon" data-icon="enter" aria-hidden="true"></span>
               </button>
             </span>
+            <button id="micButton" class="action-btn cmp-circle cmp-mic px-btn" type="button" data-hint="" data-hint-touch-only aria-pressed="false" aria-label="Start voice input" data-label-off="Start voice input" data-label-on="Stop voice input" aria-keyshortcuts="Control+Shift+Space Meta+Shift+Space">
+              <span class="icon" data-icon="mic" data-icon-off="mic" data-icon-on="mic-listening" data-icon-disabled="mic-disabled" aria-hidden="true"></span>
+            </button>
+            <span class="cmp-tip cmp-tip-mic" role="tooltip" id="agentMicTip">Start voice input <kbd>⌘/Ctrl</kbd><kbd>Shift</kbd><kbd>Space</kbd></span>
+            <span class="visually-hidden" id="agentMicNote" hidden>Voice input isn't supported in this browser. Try Chrome, Edge or Safari.</span>
           </div>
         <!-- Prompt bar v2 (Ikenna, no pills): Conversation, Listen and Auto-speak live in the voice options drawer (the
              notch fan above the bar). These three stay in the DOM, hidden, as the state holders the fan items proxy. -->
@@ -465,7 +501,19 @@
     <form method="dialog"><button class="help-close" autofocus>Close</button></form>
   </dialog>
 
+  <!-- What's new release notes (spec v0.3 §6): non-modal popover on desktop, modal bottom sheet at <=600px. -->
+  <div class="wn-backdrop" id="whatsNewBackdrop" hidden></div>
+  <section class="wn-panel" id="whatsNewPanel" role="dialog" aria-labelledby="whatsNewTitle" hidden>
+    <header>
+      <div><h2 id="whatsNewTitle" tabindex="-1">What's new</h2><span class="wn-sub">Dia release notes</span></div>
+      <button class="wn-close" id="whatsNewClose" type="button" aria-label="Close What's new">×</button>
+    </header>
+    <div class="wn-body" id="whatsNewBody"></div>
+    <div class="wn-foot">We only list changes you can use today.</div>
+  </section>
+
   <script src="/static/vendor/jszip.min.js" defer></script>
   <script src="/static/app.js"></script>
+  <script src="/static/whats-new.js"></script>
 </body>
 </html>
