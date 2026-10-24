@@ -564,6 +564,12 @@ body[data-stage="results"] .subtitle { font-size: 15px; margin-bottom: 1.75rem; 
 
 .text-link:hover { border-bottom-color: var(--accent); color: var(--accent-ink); }
 .dot-sep { color: var(--muted); }
+/* When the link row wraps, a "·" that would end a line (or start one) becomes a zero-height line break instead:
+   flex-basis 100% puts the next link on its own line. The break would add a second row gap, so the row drops its
+   row gap and the break carries one gap of its own. app.js (fitDotSeparators) sets .is-break after measuring the
+   row with every separator shown. */
+.dot-sep.is-break { flex-basis: 100%; height: 0; margin-top: 8px; overflow: hidden; visibility: hidden; font-size: 0; line-height: 0; }
+.actions.under-prompt:has(> .dot-sep.is-break) { row-gap: 0; }
 
 #status {
   flex-basis: 100%;
