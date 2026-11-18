@@ -1,0 +1,54 @@
+{
+  "about": "What changed in Dia, newest first. Built from the project's history by scripts/build-changelog.py; do not edit by hand.",
+  "entries": [
+    {
+      "key": "pr-52",
+      "pr": 52,
+      "date": "2026-10-23",
+      "title": "What changed, under the bell",
+      "text": "The bell at the top shows what changed. A dot means something is new. Rest on it or tap it for the latest changes, or choose See all changes for the full list."
+    },
+    {
+      "key": "pr-50",
+      "pr": 50,
+      "date": "2026-10-23",
+      "title": "A clearer sign-in button in dark mode",
+      "text": "In dark mode, the Google sign-in button no longer sits in a white box."
+    },
+    {
+      "key": "pr-48",
+      "pr": 48,
+      "date": "2026-10-23",
+      "title": "Sign in with Google",
+      "text": "Sign in with your Google account to use Dia. Each person gets 10 runs a day, a counter shows how many are left, and the count resets at midnight Eastern time."
+    },
+    {
+      "key": "pr-49",
+      "pr": 49,
+      "date": "2026-10-23",
+      "title": "Tidier links on phones",
+      "text": "On phones, the links under the prompt bar no longer end with a stray dot when they wrap onto two lines."
+    },
+    {
+      "key": "pr-45",
+      "pr": 45,
+      "date": "2026-10-23",
+      "title": "A slimmer prompt bar",
+      "text": "The prompt bar is slimmer and its text is centred. Conversation, Listen and Auto-speak are plain icons in the audio options, and hovering one tells you what it does."
+    },
+    {
+      "key": "pr-47",
+      "pr": 47,
+      "date": "2026-10-23",
+      "title": "A list of what changed",
+      "text": "Dia now keeps a list of recent changes, so you can see what is new in one place."
+    },
+    {
+      "key": "pr-46",
+      "pr": 46,
+      "date": "2026-10-23",
+      "title": "Easier to use on phones and with a keyboard",
+      "text": "The status line fits on phones, and the voice panel no longer covers Collapse intake. The voice buttons and the close button on the inputs card are bigger, so they are easier to tap. Tab now reaches Run before the mic, and the focus outline in dark mode is grey instead of gold."
+    }
+  ]
+}
