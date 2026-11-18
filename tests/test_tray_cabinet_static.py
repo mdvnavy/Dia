@@ -107,8 +107,8 @@ def test_letterhead_band_keeps_ids_order_and_adds_centred_clock():
     html = (ROOT / "templates" / "index.html").read_text(encoding="utf-8")
     header = html[html.index("<header"):html.index("</header>")]
     assert 'class="top-nav lh"' in header
-    order = [m for m in re.findall(r'id="(navBrandMenu|appInfo|lhClock|paletteTrigger|themeToggle)"', header)]
-    assert order == ["navBrandMenu", "appInfo", "lhClock", "paletteTrigger", "themeToggle"]
+    order = [m for m in re.findall(r'id="(navBrandMenu|helpPopoverBtn|lhClock|paletteTrigger|themeToggle)"', header)]
+    assert order == ["navBrandMenu", "helpPopoverBtn", "lhClock", "paletteTrigger", "themeToggle"]
     assert 'aria-haspopup="menu" aria-expanded="false" aria-controls="navDropdown"' in header
     assert "Discovery Intake Agent" in header and 'id="navDropdown" class="nav-dropdown" role="menu"' in header
     clock = re.search(r'<div class="lh-centre"[^>]*>', header).group(0)

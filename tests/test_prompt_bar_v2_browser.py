@@ -114,18 +114,20 @@ def hint(p):
 
 # ---------- slimmer bar, centred message ----------
 
-@pytest.mark.parametrize("width,max_height", [(1280, 58), (390, 52), (360, 52)])
+@pytest.mark.parametrize("width,max_height", [(1280, 48), (390, 44), (360, 44)])
 def test_bar_is_slimmer_and_icons_keep_44px_targets(open_page, width, max_height):
+    # Composer v3 (Glyph 2026-10-23): 48px bar (44 on phones), 36px buttons; phones keep a 44px hit area via ::before.
     p = open_page(width=width, height=844)
     bar = box(p, "#intakeComposer")
     assert bar["h"] <= max_height, bar   # was 70px desktop, 54px phones
-    for selector in ["#trayButton", "#cabinetButton", "#intakePlusButton", "#intakeMic"]:
-        b = box(p, selector)
-        assert b["w"] >= 44 and b["h"] >= 44, (selector, b)
     p.fill("#questionnaire", "x")
-    p.wait_for_timeout(300)   # Run's 180ms scale-in
-    run = box(p, "#runAgent")
-    assert run["w"] >= 44 and run["h"] >= 44
+    p.wait_for_timeout(300)   # Run's fade-in
+    for selector in ["#trayButton", "#cabinetButton", "#intakePlusButton", "#intakeMic", "#runAgent"]:
+        b = box(p, selector)
+        assert b["w"] >= 36 and b["h"] >= 36, (selector, b)
+        if width < 768:
+            hit = p.eval_on_selector(selector, "e => { const s = getComputedStyle(e, '::before'); return s.content !== 'none' ? e.getBoundingClientRect().width - 2 * parseFloat(s.left) : 0 }")
+            assert hit >= 44, (selector, hit)
 
 
 def test_message_in_an_empty_bar_is_centred(open_page):
@@ -161,7 +163,8 @@ def test_no_pill_styling_in_the_prompt_area(open_page, theme, width, ask_dia):
     assert p.evaluate(PILLS_JS, ".prompt-wrapper") == []
     fan = box(p, "#intakeVoiceFan")
     radius = p.eval_on_selector("#intakeVoiceFan", "e => parseFloat(getComputedStyle(e).borderTopLeftRadius)")
-    assert radius < fan["h"] / 2 - 4, (radius, fan)
+    # Composer v3 (Glyph): the drawer is a small icon-only floating pill, 44 tall, radius 22; no text pills inside.
+    assert round(fan["h"]) == 44 and radius == 22, (radius, fan)
 
 
 def test_ask_dia_off_state_is_plain_text(open_page):
@@ -232,7 +235,7 @@ def test_drawer_items_are_icons_with_names_and_hints(open_page, prefix):
         assert name and name.strip(), selector
         assert p.locator(f"{selector} .voice-label").is_hidden()   # icon only
         b = box(p, selector)
-        assert b["w"] >= 44 and b["h"] >= 44, (selector, b)
+        assert b["w"] >= 36 and b["h"] >= 36, (selector, b)   # v3: 36px icons in the 44px drawer
     assert hint(p) == "Listen: read the latest reply aloud"
     p.keyboard.press("ArrowRight")
     assert hint(p) in ("Auto-speak replies · off", "Auto-speak replies (not supported) · off")
@@ -316,7 +319,9 @@ def test_no_overlap_on_phones(open_page, width, theme):
     for i in range(len(items)):
         for j in range(i + 1, len(items)):
             assert not overlaps(items[i], items[j])
-    p.tap("#intakeVoiceNotch")
+    # Composer v3: the open drawer pill sits over the (hidden) notch, so it closes with Esc or an outside tap.
+    p.keyboard.press("Escape")
+    p.wait_for_function("document.querySelector('#intakeVoiceNotch').getAttribute('aria-expanded') !== 'true'")
     # Ask DIA stage: heading, state text and bar clear of each other and inside the viewport.
     p.evaluate("openAgent()")
     p.wait_for_timeout(350)

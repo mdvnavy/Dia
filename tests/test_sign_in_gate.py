@@ -23,7 +23,8 @@ ROOT = Path(__file__).resolve().parents[1]
 # The only routes allowed to work signed out. Adding to this list is a
 # product decision ("read and peruse"), not a refactor.
 # /api/consulting (main, #39 follow-up) is read-only display config, like /api/config.
-PUBLIC_GET = {"/healthz", "/health", "/api/config", "/api/consulting", "/api/auth/config", "/api/agent/status"}
+# /api/version (composer v3 cache fix) is the build id only, for the stale-tab reload guard.
+PUBLIC_GET = {"/healthz", "/health", "/api/config", "/api/consulting", "/api/auth/config", "/api/agent/status", "/api/version"}
 PUBLIC_POST = {"/api/auth/session", "/api/auth/logout"}
 
 GATED = sorted(
