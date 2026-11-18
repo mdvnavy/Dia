@@ -200,6 +200,7 @@ POST_ROUTES: dict[str, tuple[str, bool]] = {
     "/api/auth/session": ("handle_auth_session", False),
     "/api/auth/logout": ("handle_auth_logout", False),
     "/api/process": ("handle_process", True),
+    "/api/research": ("handle_research", True),
     "/api/agent": ("handle_agent", True),
     "/api/extract": ("handle_extract", True),
     "/api/pdf": ("handle_pdf", True),
@@ -397,6 +398,44 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
         if response.get("issues") and _obs_capture_enabled():
             self._trigger_obs_capture()
 
+    def handle_research(self) -> None:
+        """Website research mode: a company URL in; a brief, discovery questions and a draft intake out."""
+        from agent_auth import generation_burst
+        from agent_quota import GENERATIONS
+        from client_discovery.research import ResearchError, build_research_response
+
+        if not self._burst_ok(generation_burst):
+            return
+        try:
+            payload = self.read_json()
+        except json.JSONDecodeError:
+            self.send_json({"error": "invalid json"}, HTTPStatus.BAD_REQUEST)
+            return
+        except ValueError as error:
+            self.send_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
+            return
+        url = str(payload.get("url", ""))
+        if not url.strip():
+            self.send_json({"error": "url is required"}, HTTPStatus.BAD_REQUEST)
+            return
+        if not self._charge(GENERATIONS):
+            return
+        try:
+            response = build_research_response(url, str(payload.get("company_name", "")))
+        except ResearchError as error:
+            self._refund(GENERATIONS)
+            self.send_json({"error": str(error)}, HTTPStatus(error.status))
+            return
+        except Exception:
+            self._refund(GENERATIONS)
+            raise
+        response["usage"] = self._usage()
+
+        self.send_json(response)
+
+        # Same after-the-response client memory recording as /api/process.
+        self._record_research(response)
+
     def handle_extract(self) -> None:
         """Raw file body in, questionnaire text out. Filename via X-Filename or ?name=."""
         from agent_auth import utility_burst
@@ -520,6 +559,22 @@ class ClientDiscoveryHandler(BaseHTTPRequestHandler):
                 documents=sorted(response.get("documents", {})),
             )
         except Exception as error:  # noqa: BLE001 - memory must never break intake
+            logger.warning("client memory recording skipped: %s", error)
+
+    def _record_research(self, response: dict[str, object]) -> None:
+        try:
+            from client_discovery import memory
+            from client_discovery.models import ClientIntake
+
+            if not memory.is_enabled():
+                return
+            memory.record_engagement(
+                ClientIntake(**response["intake"]),
+                score_opportunity(ClientIntake(**response["intake"])),  # internal: the full score
+                source="/api/research",
+                documents=sorted(response.get("documents", {})),
+            )
+        except Exception as error:  # noqa: BLE001 - memory must never break research
             logger.warning("client memory recording skipped: %s", error)
 
     def _trigger_obs_capture(self) -> None:
