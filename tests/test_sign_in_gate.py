@@ -39,6 +39,8 @@ BODIES = {
     "/api/extract": None,
     # main's rescore of a saved result (deterministic, never charged): a real saved run from the sample.
     "/api/rescore": {"result": app.build_intake_response(app.read_sample_questionnaire())},
+    # Website research: the signed-in test swaps in a fixture fetcher, so this URL is never fetched live.
+    "/api/research": {"url": "https://gate-test.example"},
 }
 
 
@@ -52,6 +54,7 @@ def test_audited_route_list_is_exactly_this():
         ("POST", "/api/pdf"),
         ("POST", "/api/process"),
         ("POST", "/api/rescore"),
+        ("POST", "/api/research"),
     ]
     assert {p for p, (_, g) in app.GET_ROUTES.items() if not g} == PUBLIC_GET
     assert {p for p, (_, g) in app.POST_ROUTES.items() if not g} == PUBLIC_POST
@@ -130,8 +133,33 @@ def test_signed_out_gets_401_before_any_work(server, gate_env, monkeypatch, meth
 
 
 @pytest.mark.parametrize("method,path", GATED)
-def test_signed_in_passes_the_gate(server, method, path):
+def test_signed_in_passes_the_gate(server, monkeypatch, method, path):
     cookie, _ = server.sign_in()
+    if path == "/api/research":
+        # Research mode fetches live pages; swap in a fixture site so the gate test never touches the network.
+        import client_discovery.research as research
+
+        home = (
+            '<!doctype html><html><head><title>Acme Plumbing | Toronto Plumbers</title>'
+            '<meta name="description" content="Acme Plumbing provides emergency plumbing across the GTA."></head>'
+            '<body><nav><a href="/services">Services</a><a href="/contact">Contact</a></nav>'
+            "<h1>Acme Plumbing</h1>"
+            "<p>Over 25 years of experience, 4.9 star rated by 1,200 customers.</p>"
+            "<p>We offer 24/7 emergency plumbing. Serving Toronto and the GTA.</p>"
+            '<a href="tel:+14165550123">(416) 555-0123</a>'
+            "<h2>Drain Cleaning</h2><h2>Water Heater Installation</h2></body></html>"
+        )
+        services = (
+            "<!doctype html><html><head><title>Services | Acme Plumbing</title></head><body>"
+            "<h1>Our Services</h1><h2>Drain Cleaning</h2><p>Stubborn drains cleared the same day.</p>"
+            "<h2>Water Heater Installation</h2><p>Tank and tankless installs.</p></body></html>"
+        )
+
+        def fake_fetch(url):
+            html = services if url.rstrip("/").endswith("/services") else home
+            return research.FetchResult(url=url, status=200, content_type="text/html", body=html.encode())
+
+        monkeypatch.setattr(research, "fetch_url", fake_fetch)
     if path == "/api/extract":
         status, _, _ = server.request(
             method, path, raw=b"Company: Example", headers={"X-Filename": "a.txt"}, cookie=cookie
